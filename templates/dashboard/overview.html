@@ -1,0 +1,68 @@
+{% extends "admin/base.html" %}
+
+{% block content %}
+<div style="padding: 20px; max-width: 1400px; margin: 0 auto;">
+    <h1 style="margin-bottom: 30px;">Pregled vseh prostorov</h1>
+
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); gap: 25px;">
+        
+        {% for item in room_data %}
+        <div style="border: 1px solid #ddd; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.08); background: white;">
+            
+            <!-- Naslov prostora -->
+            <div style="background: #007bff; color: white; padding: 15px 20px; font-size: 1.3em;">
+                <strong>{{ item.room.name }}</strong>
+                {% if item.room.description %}
+                    <small style="opacity: 0.9;"> — {{ item.room.description }}</small>
+                {% endif %}
+            </div>
+
+            <!-- Mini graf -->
+            <div style="padding: 10px 15px; background: #f8f9fa;">
+                {% if item.mini_fig %}
+                    {{ item.mini_fig|safe }}
+                {% else %}
+                    <p style="text-align: center; color: #999; padding: 30px 0;">Ni podatkov v zadnjih 24 urah</p>
+                {% endif %}
+            </div>
+
+            <!-- Zadnje vrednosti -->
+            <div style="padding: 15px 20px;">
+                <h4 style="margin-top: 0;">Zadnje meritve</h4>
+                <table style="width: 100%; border-collapse: collapse;">
+                    {% for m in item.latest %}
+                    <tr>
+                        <td style="padding: 8px 0;">
+                            <strong>{{ m.parameter.name }}</strong> 
+                            <small>({{ m.parameter.unit }})</small>
+                        </td>
+                        <td style="text-align: right; font-size: 1.25em; font-weight: bold; padding: 8px 0;">
+                            {{ m.value }}
+                        </td>
+                        <td style="text-align: right; color: #666; font-size: 0.95em; padding: 8px 0;">
+                            {{ m.timestamp|date:"H:i" }}
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr><td colspan="3" style="text-align: center; color: #999; padding: 20px 0;">Ni meritev</td></tr>
+                    {% endfor %}
+                </table>
+            </div>
+
+            <!-- Gumb za podrobnosti -->
+            <div style="padding: 15px 20px; border-top: 1px solid #eee; text-align: center;">
+                <a href="{% url 'room_detail' item.room.id %}" 
+                   style="display: inline-block; padding: 10px 25px; background: #007bff; color: white; text-decoration: none; border-radius: 8px;">
+                    Podrobnosti prostora →
+                </a>
+            </div>
+        </div>
+        {% endfor %}
+        
+    </div>
+
+    {% if not room_data %}
+        <p style="text-align: center; padding: 50px; color: #999;">Ni prostorov v sistemu.</p>
+    {% endif %}
+</div>
+{% endblock %}

@@ -1,0 +1,5 @@
+Django>=5.1
+psycopg2-binary
+pandas
+openpyxl
+plotly

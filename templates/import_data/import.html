@@ -1,0 +1,45 @@
+{% extends "admin/base.html" %}
+{% block content %}
+<div style="max-width: 900px; margin: 40px auto; padding: 20px; background: white; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
+
+    <h2>Uvoz meritev iz CSV ali Excel datoteke</h2>
+    
+    <div style="background: #f8f9fa; padding: 15px; border-radius: 6px; margin-bottom: 25px;">
+        <h4>Zahteve za datoteko:</h4>
+        <ul>
+            <li>Prva vrstica = imena parametrov (npr. Temperatura, CO2, PM2.5, VOC...)</li>
+            <li>Obvezen stolpec: <strong>timestamp</strong> ali <strong>time</strong></li>
+            <li>Imena parametrov se morajo **točno** ujemati z imeni v šifrantu (velike/male črke niso pomembne)</li>
+        </ul>
+    </div>
+
+    <form method="post" enctype="multipart/form-data">
+        {% csrf_token %}
+
+        <div style="margin-bottom: 25px;">
+            <label><strong>Izberite senzor (lahko meri več parametrov):</strong></label><br>
+            <select name="sensor_id" required style="width: 100%; padding: 12px; margin-top: 8px; font-size: 16px;">
+                <option value="">-- Izberite senzor --</option>
+                {% for sensor in sensors %}
+                <option value="{{ sensor.id }}">
+                    {{ sensor.room.name }} — {{ sensor.name|default:"Brez imena" }} 
+                    ({{ sensor.get_location_display }})
+                </option>
+                {% endfor %}
+            </select>
+            <small style="color: #666;">Izbran senzor lahko meri več različnih parametrov hkrati.</small>
+        </div>
+
+        <div>
+            <label><strong>Izberite datoteko (CSV ali Excel):</strong></label><br>
+            <input type="file" name="file" accept=".csv,.xlsx,.xls" required style="margin-top: 8px;">
+        </div>
+
+        <br>
+        <button type="submit" class="btn btn-success" style="padding: 12px 30px; font-size: 16px;">
+            Uvozi meritve
+        </button>
+    </form>
+
+</div>
+{% endblock %}

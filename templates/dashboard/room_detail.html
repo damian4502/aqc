@@ -1,0 +1,158 @@
+{% extends "admin/base.html" %}
+
+{% block content %}
+<div style="padding: 20px; max-width: 1300px; margin: 0 auto;">
+
+    <h1>Prostor: {{ room.name }}</h1>
+    {% if room.description %}<p>{{ room.description }}</p>{% endif %}
+
+    <!-- Zadnje meritve -->
+    <h2>Zadnje izmerjene vrednosti</h2>
+    <table border="1" cellpadding="10" style="border-collapse: collapse; width: 100%; margin-bottom: 40px;">
+        <tr style="background: #f0f0f0;">
+            <th>Parameter</th>
+            <th>Vrednost</th>
+            <th>Čas</th>
+            <th>Senzor</th>
+        </tr>
+        {% for m in latest_measurements %}
+        <tr>
+            <td><strong>{{ m.parameter.name }} ({{ m.parameter.unit }})</strong></td>
+            <td style="font-size: 1.3em;">{{ m.value }}</td>
+            <td>{{ m.timestamp|date:"d.m.Y H:i" }}</td>
+            <td>{{ m.sensor.get_location_display }}{% if m.sensor.name %} — {{ m.sensor.name }}{% endif %}</td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="4">Ni meritev za ta prostor.</td></tr>
+        {% endfor %}
+    </table>
+
+    <!-- Preklopni gumbi -->
+    <div style="margin-bottom: 20px;">
+        <strong>Izberi prikaz:</strong><br><br>
+        <a href="?view=trend{% if start_date %}&start_date={{ start_date }}{% endif %}{% if end_date %}&end_date={{ end_date }}{% endif %}" 
+           class="tab-btn {% if view_type == 'trend' %}active{% endif %}">Časovni trend</a>
+        
+        <a href="?view=correlation{% if start_date %}&start_date={{ start_date }}{% endif %}{% if end_date %}&end_date={{ end_date }}{% endif %}" 
+           class="tab-btn {% if view_type == 'correlation' %}active{% endif %}">Korelacija parametrov</a>
+        
+        <a href="?view=hourly{% if start_date %}&start_date={{ start_date }}{% endif %}{% if end_date %}&end_date={{ end_date }}{% endif %}" 
+           class="tab-btn {% if view_type == 'hourly' %}active{% endif %}">Dnevni vzorec</a>
+        
+        <a href="?view=weekly{% if start_date %}&start_date={{ start_date }}{% endif %}{% if end_date %}&end_date={{ end_date }}{% endif %}" 
+           class="tab-btn {% if view_type == 'weekly' %}active{% endif %}">Tedenski vzorec</a>
+    </div>
+    <!-- Hitri gumbi + Datumski izbirnik -->
+    <div style="background: #f8f9fa; padding: 20px; border-radius: 8px; margin-bottom: 25px;">
+        
+        <!-- Hitri gumbi -->
+        <div style="margin-bottom: 18px;">
+            <strong>Hitri izbor obdobja:</strong><br><br>
+            <a href="?view={{ view_type }}&days=1" 
+               class="quick-btn {% if request.GET.days == '1' %}active{% endif %}">24 ure</a>
+            
+            <a href="?view={{ view_type }}&days=7" 
+               class="quick-btn {% if request.GET.days == '7' %}active{% endif %}">1 teden</a>
+            
+            <a href="?view={{ view_type }}&days=30" 
+               class="quick-btn {% if request.GET.days == '30' %}active{% endif %}">1 mesec</a>
+            
+            <!-- Nov gumb: Vsi podatki -->
+            <a href="?view={{ view_type }}&all=true" 
+               class="quick-btn {% if request.GET.all %}active{% endif %}">Vsi podatki</a>
+        </div>
+
+        <!-- Datumski izbirnik (od - do) -->
+        <form method="get" style="display: flex; gap: 15px; align-items: end; flex-wrap: wrap;">
+            <input type="hidden" name="view" value="{{ view_type }}">
+            
+            <div>
+                <label><strong>Od datuma:</strong></label><br>
+                <input type="date" name="start_date" value="{{ start_date }}" style="padding: 8px; width: 160px;">
+            </div>
+            <div>
+                <label><strong>Do datuma:</strong></label><br>
+                <input type="date" name="end_date" value="{{ end_date }}" style="padding: 8px; width: 160px;">
+            </div>
+            <div>
+                <button type="submit" style="padding: 10px 24px; background: #007bff; color: white; border: none; border-radius: 6px;">
+                    Osveži
+                </button>
+            </div>
+        </form>
+    </div>
+    <!-- Glavni graf -->
+    {% if view_type == 'weekly' %}
+        
+        <!-- Line graf za tedenski vzorec -->
+        {% if fig_weekly %}
+            <div style="margin-bottom: 40px;">
+                <h3>Tedenski vzorec - Line graf</h3>
+                {{ fig_weekly|safe }}
+            </div>
+        {% endif %}
+
+        <!-- Heatmap za tedenski vzorec -->
+        {% if fig_heatmap %}
+            <div style="margin-bottom: 40px;">
+                <h3>Tedenski Heatmap vzorec</h3>
+                {{ fig_heatmap|safe }}
+            </div>
+        {% endif %}
+
+    {% elif fig %}
+        <!-- Za vse ostale poglede (trend, correlation, hourly) -->
+        <div style="margin-bottom: 40px;">
+            {{ fig|safe }}
+        </div>
+    {% elif no_data %}
+        <p>Za izbrano obdobje ni podatkov.</p>
+    {% endif %}
+
+    <!-- Izvoz v CSV (ostane enak kot prej) -->
+    {% include "dashboard/partials/export_form.html" %}
+
+</div>
+
+<style>
+.quick-btn {
+    display: inline-block;
+    padding: 10px 18px;
+    margin: 4px 8px 4px 0;
+    background: #e9ecef;
+    color: #333;
+    text-decoration: none;
+    border-radius: 8px;
+    font-size: 15px;
+}
+
+.quick-btn:hover {
+    background: #dee2e6;
+}
+
+.quick-btn.active {
+    background: #007bff;
+    color: white;
+    font-weight: 600;
+}
+</style>
+<style>
+.tab-btn {
+    display: inline-block;
+    padding: 12px 20px;
+    margin: 5px 8px 5px 0;
+    background: #e9ecef;
+    color: #333;
+    text-decoration: none;
+    border-radius: 8px;
+    font-weight: 500;
+}
+.tab-btn:hover {
+    background: #dee2e6;
+}
+.tab-btn.active {
+    background: #007bff;
+    color: white;
+}
+</style>
+{% endblock %}

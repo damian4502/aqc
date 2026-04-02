@@ -1,0 +1,43 @@
+<!-- Izvoz v CSV -->
+<div style="margin: 30px 0; padding: 20px; background: #f8f9fa; border-radius: 8px;">
+    <h3>Izvoz podatkov v CSV</h3>
+    
+    <form method="get" action="{% url 'export_room_csv' room.id %}" style="display: flex; flex-wrap: wrap; gap: 15px; align-items: end;">
+        
+        <!-- Skriti datumi -->
+        <input type="hidden" name="start_date" value="{{ start_date }}">
+        <input type="hidden" name="end_date" value="{{ end_date }}">
+
+        <div>
+            <label><strong>Časovni interval:</strong></label><br>
+            <select name="interval" style="padding: 10px; font-size: 16px;">
+                <option value="1">1 minuta</option>
+                <option value="5">5 minut</option>
+                <option value="15" selected>15 minut</option>
+                <option value="60">1 ura</option>
+                <option value="1440">1 dan</option>
+            </select>
+        </div>
+
+        <div>
+            <label><strong>Ravnanje z manjkajočimi vrednostmi:</strong></label><br>
+            <select name="fill" style="padding: 10px; font-size: 16px;">
+                <option value="ffill" selected>Forward Fill (ponovi zadnjo vrednost)</option>
+                <option value="interpolate">Linearna interpolacija</option>
+                <option value="bfill">Backward Fill</option>
+                <option value="zero">Nadomesti z 0</option>
+                <option value="none">Pusti prazno (NaN)</option>
+            </select>
+        </div>
+
+        <div>
+            <button type="submit" style="padding: 12px 28px; background: #28a745; color: white; border: none; border-radius: 6px; font-size: 16px; cursor: pointer;">
+                Prenesi CSV
+            </button>
+        </div>
+    </form>
+    
+    <small style="color: #555; margin-top: 10px; display: block;">
+        Opomba: Pri daljših intervalih se vrednosti povprečijo. Manjkajoče vrednosti se obravnavajo glede na izbrano metodo.
+    </small>
+</div>

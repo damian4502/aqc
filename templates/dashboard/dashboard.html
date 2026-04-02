@@ -1,0 +1,33 @@
+{% extends "admin/base.html" %}
+
+{% block content %}
+<div style="padding: 20px;">
+    <h1>Air Quality Dashboard</h1>
+    
+    {% if no_data %}
+        <p>Ni še podatkov. Najprej uvozi meritve ali dodaj senzorje.</p>
+    {% else %}
+        <div style="margin-bottom: 30px;">
+            {{ fig_main|safe }}
+        </div>
+
+        <h2>Zadnje meritve</h2>
+        <table border="1" cellpadding="8" style="border-collapse: collapse; width: 100%;">
+            <tr>
+                <th>Prostor</th>
+                <th>Parameter</th>
+                <th>Zadnja vrednost</th>
+                <th>Čas</th>
+            </tr>
+            {% for item in latest_data %}
+            <tr>
+                <td>{{ item.room }}</td>
+                <td>{{ item.parameter }}</td>
+                <td><strong>{{ item.value }}</strong></td>
+                <td>{{ item.timestamp }}</td>
+            </tr>
+            {% endfor %}
+        </table>
+    {% endif %}
+</div>
+{% endblock %}
