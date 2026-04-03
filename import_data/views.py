@@ -71,9 +71,9 @@ class ImportMeasurementsView(View):
             existing_params = {p.name.lower(): p for p in Parameter.objects.all()}
 
             missing_params = [col for col in parameter_columns if col.lower() not in existing_params]
-            if missing_params:
-                messages.error(request, f"Naslednji parametri ne obstajajo: {', '.join(missing_params)}")
-                return redirect('import_measurements')
+            #if missing_params:
+            #    messages.error(request, f"Naslednji parametri ne obstajajo: {', '.join(missing_params)}")
+            #    return redirect('import_measurements')
 
             # Uvoz
             imported_count = 0
