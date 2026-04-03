@@ -1,0 +1,130 @@
+{% extends "base.html" %}
+{% block title %}{{ parameter.name }} - Air Quality Control{% endblock %}
+
+{% block content %}
+<div class="max-w-7xl mx-auto space-y-10">
+
+    <div class="flex justify-between items-end">
+        <div>
+            <h1 class="text-5xl font-bold text-white tracking-tighter">{{ parameter.name }}</h1>
+            <p class="text-slate-400 mt-1">{{ parameter.unit }} • Primerjava po prostorih</p>
+        </div>
+        
+        <a href="{% url 'dashboard' %}" 
+           class="flex items-center gap-2 px-6 py-3 bg-slate-800 hover:bg-slate-700 rounded-2xl text-slate-300 transition-all">
+            <i class="fas fa-arrow-left"></i>
+            <span>Nazaj na pregled</span>
+        </a>
+    </div>
+
+    <!-- Zadnje meritve po prostorih -->
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        {% for m in latest_measurements %}
+        <div class="glass rounded-3xl p-6">
+            <div class="flex justify-between">
+                <div>
+                    <p class="text-slate-400">{{ m.sensor.room.name }}</p>
+                    <p class="text-3xl font-semibold text-white mt-2">{{ m.value }} <span class="text-lg">{{ parameter.unit }}</span></p>
+                </div>
+                <div class="text-right text-sm">
+                    <p class="text-emerald-400">{{ m.timestamp|date:"H:i" }}</p>
+                    <p class="text-slate-500">{{ m.timestamp|date:"d.m" }}</p>
+                </div>
+            </div>
+            <div class="mt-4 text-xs text-slate-500">
+                Senzor: {{ m.sensor.get_location_display }}
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+
+    <!-- Preklopni gumbi -->
+    <div class="flex flex-wrap gap-3">
+        <a href="?view=trend" class="tab-btn {% if view_type == 'trend' %}active{% endif %}">Časovni trend</a>
+        <a href="?view=correlation" class="tab-btn {% if view_type == 'correlation' %}active{% endif %}">Korelacija prostorov</a>
+        <a href="?view=hourly" class="tab-btn {% if view_type == 'hourly' %}active{% endif %}">Dnevni vzorec</a>
+        <a href="?view=weekly" class="tab-btn {% if view_type == 'weekly' %}active{% endif %}">Tedenski vzorec</a>
+    </div>
+
+    <!-- Hitri gumbi + Datumski izbirnik -->
+    <div class="glass rounded-3xl p-6">
+        <div class="flex flex-wrap items-center gap-4 mb-6">
+            <span class="text-slate-400 font-medium">Hitri izbor:</span>
+            <a href="?view={{ view_type }}&days=1" class="quick-btn {% if request.GET.days == '1' %}active{% endif %}">24 ure</a>
+            <a href="?view={{ view_type }}&days=7" class="quick-btn {% if request.GET.days == '7' %}active{% endif %}">1 teden</a>
+            <a href="?view={{ view_type }}&days=30" class="quick-btn {% if request.GET.days == '30' %}active{% endif %}">1 mesec</a>
+            <a href="?view={{ view_type }}&all=true" class="quick-btn {% if all_data %}active{% endif %}">Vsi podatki</a>
+        </div>
+
+        <form method="get" class="flex gap-4 items-end">
+            <input type="hidden" name="view" value="{{ view_type }}">
+            <div>
+                <label class="block text-xs text-slate-400 mb-1">Od</label>
+                <input type="date" name="start_date" value="{{ start_date }}" class="bg-slate-900 border border-slate-700 rounded-2xl px-5 py-3">
+            </div>
+            <div>
+                <label class="block text-xs text-slate-400 mb-1">Do</label>
+                <input type="date" name="end_date" value="{{ end_date }}" class="bg-slate-900 border border-slate-700 rounded-2xl px-5 py-3">
+            </div>
+            <button type="submit" class="bg-blue-600 hover:bg-blue-500 px-8 py-3 rounded-2xl">Osveži</button>
+        </form>
+    </div>
+
+    <!-- Glavni graf -->
+    {% if fig %}
+        <div class="glass rounded-3xl p-8">
+            {{ fig|safe }}
+        </div>
+    {% elif no_data %}
+        <div class="glass rounded-3xl p-16 text-center">
+            <p class="text-slate-400 text-xl">Ni podatkov za ta parameter.</p>
+        </div>
+    {% endif %}
+
+</div>
+
+<style>
+.tab-btn, .quick-btn {
+    @apply px-6 py-3.5 rounded-2xl font-medium transition-all;
+}
+.tab-btn { @apply bg-slate-800 hover:bg-slate-700 text-slate-300; }
+.tab-btn.active { @apply bg-blue-600 text-white; }
+.quick-btn { @apply bg-slate-800 hover:bg-slate-700 text-sm; }
+.quick-btn.active { @apply bg-emerald-600 text-white; }
+</style>
+
+<style>
+    .graph-container {
+        opacity: 0;
+        transform: translateY(20px);
+        animation: fadeInUp 0.8s ease forwards;
+    }
+
+    @keyframes fadeInUp {
+        to {
+            opacity: 1;
+            transform: translateY(0);
+        }
+    }
+
+    /* Neon pulse efekt za graf */
+    .plotly-graph-div {
+        transition: all 0.4s ease;
+    }
+    
+    .plotly-graph-div:hover {
+        filter: brightness(1.08) drop-shadow(0 0 25px rgba(59, 130, 246, 0.6));
+    }
+</style>
+
+<script>
+    // Dodaj animacijo po nalaganju strani
+    document.addEventListener('DOMContentLoaded', function() {
+        const graphs = document.querySelectorAll('.plotly-graph-div');
+        graphs.forEach((graph, index) => {
+            graph.style.animationDelay = (index * 100) + 'ms';
+            graph.classList.add('graph-container');
+        });
+    });
+</script>
+{% endblock %}

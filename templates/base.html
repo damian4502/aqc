@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="sl">
+<head>
+    <meta charset="UTF-8">
+	<script src="https://unpkg.com/htmx.org@1.9.12/dist/htmx.min.js"></script>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Air Quality Control{% endblock %}</title>
+    
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+    
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+        
+        body {
+            font-family: 'Inter', system-ui, sans-serif;
+            background: linear-gradient(135deg, #0f172a 0%, #1e2937 100%);
+            color: #e2e8f0;
+        }
+        
+        .glass {
+            background: rgba(15, 23, 42, 0.85);
+            backdrop-filter: blur(16px);
+            border: 1px solid rgba(148, 163, 184, 0.15);
+        }
+        
+        .neon-blue {
+            box-shadow: 0 0 20px rgba(59, 130, 246, 0.4);
+        }
+    </style>
+</head>
+<body class="min-h-screen">
+    <div class="flex h-screen">
+        <!-- Sidebar -->
+        <div class="w-72 glass border-r border-slate-700 p-6 flex flex-col">
+            <div class="flex items-center gap-3 mb-12">
+                <div class="w-10 h-10 bg-gradient-to-br from-blue-500 to-cyan-400 rounded-2xl flex items-center justify-center text-white font-bold text-xl">AQC</div>
+                <div>
+                    <h1 class="text-2xl font-semibold tracking-tighter">Air Quality</h1>
+                    <p class="text-xs text-slate-400 -mt-1">Control</p>
+                </div>
+            </div>
+            
+            <nav class="space-y-1 flex-1">
+                <a href="{% url 'dashboard' %}" class="flex items-center gap-3 px-5 py-4 rounded-2xl hover:bg-slate-800 transition-all {% if request.resolver_match.url_name == 'dashboard' %}bg-slate-800{% endif %}">
+                    <i class="fas fa-tachometer-alt w-5"></i>
+                    <span class="font-medium">Pregled prostorov</span>
+                </a>
+                <a href="{% url 'import_measurements' %}" class="flex items-center gap-3 px-5 py-4 rounded-2xl hover:bg-slate-800 transition-all">
+                    <i class="fas fa-upload w-5"></i>
+                    <span class="font-medium">Uvoz meritev</span>
+                </a>
+            </nav>
+        </div>
+
+        <!-- Glavna vsebina -->
+        <div class="flex-1 overflow-auto p-8">
+            {% block content %}{% endblock %}
+        </div>
+    </div>
+
+    {% block scripts %}{% endblock %}
+</body>
+</html>

@@ -1,158 +1,192 @@
-{% extends "admin/base.html" %}
+{% extends "base.html" %}
+{% block title %}{{ room.name }} - Air Quality Control{% endblock %}
 
 {% block content %}
-<div style="padding: 20px; max-width: 1300px; margin: 0 auto;">
+<div class="max-w-7xl mx-auto space-y-10">
 
-    <h1>Prostor: {{ room.name }}</h1>
-    {% if room.description %}<p>{{ room.description }}</p>{% endif %}
-
-    <!-- Zadnje meritve -->
-    <h2>Zadnje izmerjene vrednosti</h2>
-    <table border="1" cellpadding="10" style="border-collapse: collapse; width: 100%; margin-bottom: 40px;">
-        <tr style="background: #f0f0f0;">
-            <th>Parameter</th>
-            <th>Vrednost</th>
-            <th>Čas</th>
-            <th>Senzor</th>
-        </tr>
-        {% for m in latest_measurements %}
-        <tr>
-            <td><strong>{{ m.parameter.name }} ({{ m.parameter.unit }})</strong></td>
-            <td style="font-size: 1.3em;">{{ m.value }}</td>
-            <td>{{ m.timestamp|date:"d.m.Y H:i" }}</td>
-            <td>{{ m.sensor.get_location_display }}{% if m.sensor.name %} — {{ m.sensor.name }}{% endif %}</td>
-        </tr>
-        {% empty %}
-        <tr><td colspan="4">Ni meritev za ta prostor.</td></tr>
-        {% endfor %}
-    </table>
-
-    <!-- Preklopni gumbi -->
-    <div style="margin-bottom: 20px;">
-        <strong>Izberi prikaz:</strong><br><br>
-        <a href="?view=trend{% if start_date %}&start_date={{ start_date }}{% endif %}{% if end_date %}&end_date={{ end_date }}{% endif %}" 
-           class="tab-btn {% if view_type == 'trend' %}active{% endif %}">Časovni trend</a>
+    <!-- Header -->
+    <div class="flex justify-between items-end">
+        <div>
+            <h1 class="text-5xl font-bold text-white tracking-tighter">{{ room.name }}</h1>
+            {% if room.description %}
+                <p class="text-slate-400 mt-2 text-lg">{{ room.description }}</p>
+            {% endif %}
+        </div>
         
-        <a href="?view=correlation{% if start_date %}&start_date={{ start_date }}{% endif %}{% if end_date %}&end_date={{ end_date }}{% endif %}" 
-           class="tab-btn {% if view_type == 'correlation' %}active{% endif %}">Korelacija parametrov</a>
-        
-        <a href="?view=hourly{% if start_date %}&start_date={{ start_date }}{% endif %}{% if end_date %}&end_date={{ end_date }}{% endif %}" 
-           class="tab-btn {% if view_type == 'hourly' %}active{% endif %}">Dnevni vzorec</a>
-        
-        <a href="?view=weekly{% if start_date %}&start_date={{ start_date }}{% endif %}{% if end_date %}&end_date={{ end_date }}{% endif %}" 
-           class="tab-btn {% if view_type == 'weekly' %}active{% endif %}">Tedenski vzorec</a>
+        <a href="{% url 'dashboard' %}" 
+           class="flex items-center gap-2 px-6 py-3 bg-slate-800 hover:bg-slate-700 rounded-2xl text-slate-300 transition-all">
+            <i class="fas fa-arrow-left"></i>
+            <span>Nazaj na pregled</span>
+        </a>
     </div>
-    <!-- Hitri gumbi + Datumski izbirnik -->
-    <div style="background: #f8f9fa; padding: 20px; border-radius: 8px; margin-bottom: 25px;">
+
+    <!-- Zadnje meritve - Glass kartice -->
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+        {% for m in latest_measurements %}
+        <div class="glass rounded-3xl p-6 neon-blue transition-all hover:scale-105">
+            <div class="flex justify-between">
+                <div class="space-y-1">
+                    <p class="text-slate-400 text-sm font-medium">{{ m.parameter.name }}</p>
+                    <p class="text-4xl font-semibold text-white">{{ m.value }}</p>
+                    <p class="text-slate-400 text-sm">{{ m.parameter.unit }}</p>
+                </div>
+                <div class="text-right">
+                    <div class="text-emerald-400 text-sm font-medium">{{ m.timestamp|date:"H:i" }}</div>
+                    <div class="text-xs text-slate-500 mt-1">{{ m.timestamp|date:"d.m.Y" }}</div>
+                </div>
+            </div>
+            <div class="mt-6 text-xs text-slate-500">
+                {{ m.sensor.get_location_display }}
+                {% if m.sensor.name %} • {{ m.sensor.name }}{% endif %}
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+
+    <!-- Preklopni gumbi + HTMX -->
+    <div class="flex flex-wrap gap-3 mb-6">
+        <button hx-get="{% url 'room_graph_fragment' room.id %}?view=trend" 
+                hx-target="#main-graph"
+                hx-swap="innerHTML"
+                class="tab-btn {% if view_type == 'trend' %}active{% endif %}">
+            <i class="fas fa-chart-line"></i> Časovni trend
+        </button>
         
-        <!-- Hitri gumbi -->
-        <div style="margin-bottom: 18px;">
-            <strong>Hitri izbor obdobja:</strong><br><br>
-            <a href="?view={{ view_type }}&days=1" 
-               class="quick-btn {% if request.GET.days == '1' %}active{% endif %}">24 ure</a>
+        <button hx-get="{% url 'room_graph_fragment' room.id %}?view=correlation" 
+                hx-target="#main-graph"
+                hx-swap="innerHTML"
+                class="tab-btn {% if view_type == 'correlation' %}active{% endif %}">
+            <i class="fas fa-project-diagram"></i> Korelacija
+        </button>
+        
+        <button hx-get="{% url 'room_graph_fragment' room.id %}?view=hourly" 
+                hx-target="#main-graph"
+                hx-swap="innerHTML"
+                class="tab-btn {% if view_type == 'hourly' %}active{% endif %}">
+            <i class="fas fa-clock"></i> Dnevni vzorec
+        </button>
+        
+        <button hx-get="{% url 'room_graph_fragment' room.id %}?view=weekly" 
+                hx-target="#main-graph"
+                hx-swap="innerHTML"
+                class="tab-btn {% if view_type == 'weekly' %}active{% endif %}">
+            <i class="fas fa-calendar-week"></i> Tedenski vzorec
+        </button>
+    </div>
+
+    <!-- Hitri gumbi + Datumski izbirnik z HTMX -->
+    <div class="glass rounded-3xl p-6 mb-8">
+        <div class="flex flex-wrap items-center gap-4 mb-6">
+            <span class="text-slate-400 font-medium">Hitri izbor:</span>
+            <button hx-get="{% url 'room_graph_fragment' room.id %}?view={{ view_type }}&days=1" 
+                    hx-target="#main-graph" hx-swap="innerHTML"
+                    class="quick-btn {% if request.GET.days == '1' %}active{% endif %}">24 ure</button>
             
-            <a href="?view={{ view_type }}&days=7" 
-               class="quick-btn {% if request.GET.days == '7' %}active{% endif %}">1 teden</a>
+            <button hx-get="{% url 'room_graph_fragment' room.id %}?view={{ view_type }}&days=7" 
+                    hx-target="#main-graph" hx-swap="innerHTML"
+                    class="quick-btn {% if request.GET.days == '7' %}active{% endif %}">1 teden</button>
             
-            <a href="?view={{ view_type }}&days=30" 
-               class="quick-btn {% if request.GET.days == '30' %}active{% endif %}">1 mesec</a>
+            <button hx-get="{% url 'room_graph_fragment' room.id %}?view={{ view_type }}&days=30" 
+                    hx-target="#main-graph" hx-swap="innerHTML"
+                    class="quick-btn {% if request.GET.days == '30' %}active{% endif %}">1 mesec</button>
             
-            <!-- Nov gumb: Vsi podatki -->
-            <a href="?view={{ view_type }}&all=true" 
-               class="quick-btn {% if request.GET.all %}active{% endif %}">Vsi podatki</a>
+            <button hx-get="{% url 'room_graph_fragment' room.id %}?view={{ view_type }}&all=true" 
+                    hx-target="#main-graph" hx-swap="innerHTML"
+                    class="quick-btn {% if all_data %}active{% endif %}">Vsi podatki</button>
         </div>
 
-        <!-- Datumski izbirnik (od - do) -->
-        <form method="get" style="display: flex; gap: 15px; align-items: end; flex-wrap: wrap;">
+        <form hx-get="{% url 'room_graph_fragment' room.id %}" 
+              hx-target="#main-graph" 
+              hx-swap="innerHTML"
+              class="flex flex-wrap gap-4 items-end">
             <input type="hidden" name="view" value="{{ view_type }}">
-            
             <div>
-                <label><strong>Od datuma:</strong></label><br>
-                <input type="date" name="start_date" value="{{ start_date }}" style="padding: 8px; width: 160px;">
+                <label class="block text-xs text-slate-400 mb-1">Od</label>
+                <input type="date" name="start_date" value="{{ start_date }}" 
+                       class="bg-slate-900 border border-slate-700 rounded-2xl px-5 py-3">
             </div>
             <div>
-                <label><strong>Do datuma:</strong></label><br>
-                <input type="date" name="end_date" value="{{ end_date }}" style="padding: 8px; width: 160px;">
+                <label class="block text-xs text-slate-400 mb-1">Do</label>
+                <input type="date" name="end_date" value="{{ end_date }}" 
+                       class="bg-slate-900 border border-slate-700 rounded-2xl px-5 py-3">
             </div>
-            <div>
-                <button type="submit" style="padding: 10px 24px; background: #007bff; color: white; border: none; border-radius: 6px;">
-                    Osveži
-                </button>
-            </div>
+            <button type="submit" 
+                    class="bg-blue-600 hover:bg-blue-500 px-8 py-3 rounded-2xl font-medium transition-colors">
+                Osveži
+            </button>
         </form>
     </div>
-    <!-- Glavni graf -->
-    {% if view_type == 'weekly' %}
-        
-        <!-- Line graf za tedenski vzorec -->
-        {% if fig_weekly %}
-            <div style="margin-bottom: 40px;">
-                <h3>Tedenski vzorec - Line graf</h3>
-                {{ fig_weekly|safe }}
-            </div>
-        {% endif %}
 
-        <!-- Heatmap za tedenski vzorec -->
-        {% if fig_heatmap %}
-            <div style="margin-bottom: 40px;">
-                <h3>Tedenski Heatmap vzorec</h3>
-                {{ fig_heatmap|safe }}
-            </div>
-        {% endif %}
-
-    {% elif fig %}
-        <!-- Za vse ostale poglede (trend, correlation, hourly) -->
-        <div style="margin-bottom: 40px;">
+    <!-- Glavni graf container za HTMX -->
+    <div id="main-graph" class="glass rounded-3xl p-8 min-h-[700px]">
+        {% if fig %}
             {{ fig|safe }}
-        </div>
-    {% elif no_data %}
-        <p>Za izbrano obdobje ni podatkov.</p>
-    {% endif %}
-
-    <!-- Izvoz v CSV (ostane enak kot prej) -->
+        {% elif fig_weekly or fig_heatmap %}
+            <!-- Weekly posebno -->
+            {% if fig_weekly %}
+                <div class="mb-10">
+                    <h3 class="text-2xl font-semibold mb-4 text-slate-200">Tedenski vzorec</h3>
+                    {{ fig_weekly|safe }}
+                </div>
+            {% endif %}
+            {% if fig_heatmap %}
+                <div>
+                    <h3 class="text-2xl font-semibold mb-4 text-slate-200">Tedenski Heatmap</h3>
+                    {{ fig_heatmap|safe }}
+                </div>
+            {% endif %}
+        {% elif no_data %}
+            <div class="text-center py-20">
+                <p class="text-slate-400 text-xl">Za izbrano obdobje ni podatkov.</p>
+            </div>
+        {% endif %}
+    </div>
+    <!-- Izvoz -->
     {% include "dashboard/partials/export_form.html" %}
 
 </div>
 
 <style>
-.quick-btn {
-    display: inline-block;
-    padding: 10px 18px;
-    margin: 4px 8px 4px 0;
-    background: #e9ecef;
-    color: #333;
-    text-decoration: none;
-    border-radius: 8px;
-    font-size: 15px;
+.tab-btn, .quick-btn {
+    @apply px-6 py-3.5 rounded-2xl font-medium transition-all flex items-center gap-2;
 }
-
-.quick-btn:hover {
-    background: #dee2e6;
-}
-
-.quick-btn.active {
-    background: #007bff;
-    color: white;
-    font-weight: 600;
-}
+.tab-btn { @apply bg-slate-800 hover:bg-slate-700 text-slate-300; }
+.tab-btn.active { @apply bg-blue-600 text-white shadow-lg shadow-blue-500/40; }
+.quick-btn { @apply bg-slate-800 hover:bg-slate-700 text-sm; }
+.quick-btn.active { @apply bg-emerald-600 text-white; }
 </style>
 <style>
-.tab-btn {
-    display: inline-block;
-    padding: 12px 20px;
-    margin: 5px 8px 5px 0;
-    background: #e9ecef;
-    color: #333;
-    text-decoration: none;
-    border-radius: 8px;
-    font-weight: 500;
-}
-.tab-btn:hover {
-    background: #dee2e6;
-}
-.tab-btn.active {
-    background: #007bff;
-    color: white;
-}
+    .graph-container {
+        opacity: 0;
+        transform: translateY(20px);
+        animation: fadeInUp 0.8s ease forwards;
+    }
+
+    @keyframes fadeInUp {
+        to {
+            opacity: 1;
+            transform: translateY(0);
+        }
+    }
+
+    /* Neon pulse efekt za graf */
+    .plotly-graph-div {
+        transition: all 0.4s ease;
+    }
+    
+    .plotly-graph-div:hover {
+        filter: brightness(1.08) drop-shadow(0 0 25px rgba(59, 130, 246, 0.6));
+    }
 </style>
+
+<script>
+    // Dodaj animacijo po nalaganju strani
+    document.addEventListener('DOMContentLoaded', function() {
+        const graphs = document.querySelectorAll('.plotly-graph-div');
+        graphs.forEach((graph, index) => {
+            graph.style.animationDelay = (index * 100) + 'ms';
+            graph.classList.add('graph-container');
+        });
+    });
+</script>
 {% endblock %}
