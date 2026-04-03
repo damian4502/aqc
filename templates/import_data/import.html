@@ -101,6 +101,22 @@
                 </div>
             </div>
 
+            <!-- Izbira časovne cone -->
+            <div>
+                <label class="block text-sm font-medium text-slate-300 mb-3">
+                    <i class="fas fa-globe mr-2"></i> Časovna cona meritev
+                </label>
+                <select name="timezone" class="w-full bg-slate-900 border border-slate-700 rounded-2xl px-6 py-4 text-white focus:outline-none focus:border-blue-500">
+                    <option value="Europe/Ljubljana" selected>Europe/Ljubljana (Slovenija)</option>
+                    <option value="UTC">UTC (univerzalni čas)</option>
+                    <option value="Europe/Berlin">Europe/Berlin</option>
+                    <option value="Europe/Vienna">Europe/Vienna</option>
+                    <option value="Europe/Zagreb">Europe/Zagreb</option>
+                    <option value="Europe/Budapest">Europe/Budapest</option>
+                    <option value="Europe/Prague">Europe/Prague</option>
+                </select>
+            </div>
+			
             <button type="submit" id="import-button"
                     class="w-full bg-gradient-to-r from-blue-600 to-cyan-500 hover:from-blue-500 hover:to-cyan-400 py-5 rounded-3xl font-semibold text-lg transition-all">
                 Začni uvoz meritev

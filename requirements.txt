@@ -6,3 +6,4 @@ plotly
 django-tailwind
 networkx
 paho-mqtt
+pytz

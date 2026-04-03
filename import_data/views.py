@@ -26,6 +26,7 @@ class ImportMeasurementsView(View):
 
         file = request.FILES['file']
         sensor_id = request.POST.get('sensor_id')
+        timezone_str = request.POST.get('timezone', 'Europe/Ljubljana')   # privzeto Ljubljana
 
         if not sensor_id:
             messages.error(request, "Prosimo, izberite senzor!")
@@ -38,6 +39,9 @@ class ImportMeasurementsView(View):
             return redirect('import_measurements')
 
         try:
+            import pytz
+            tz = pytz.timezone(timezone_str)
+
             # Preberi datoteko
             if file.name.endswith(('.xlsx', '.xls')):
                 df = pd.read_excel(file)
@@ -51,11 +55,16 @@ class ImportMeasurementsView(View):
                 return redirect('import_measurements')
 
             df = df.rename(columns={time_col: 'timestamp'})
+            
+            # Pomembno: pretvorba v aware datetime z izbrano časovno cono
             df['timestamp'] = pd.to_datetime(df['timestamp'], errors='coerce')
-
+            
             if df['timestamp'].isna().any():
                 messages.error(request, "Nekateri časovni podatki niso veljavni!")
                 return redirect('import_measurements')
+
+            # Pretvorba v UTC (najboljša praksa za shranjevanje)
+            df['timestamp'] = df['timestamp'].apply(lambda x: tz.localize(x).astimezone(pytz.UTC) if x.tzinfo is None else x)
 
             # Preveri parametre
             parameter_columns = [col for col in df.columns if col != 'timestamp']
@@ -66,43 +75,41 @@ class ImportMeasurementsView(View):
                 messages.error(request, f"Naslednji parametri ne obstajajo: {', '.join(missing_params)}")
                 return redirect('import_measurements')
 
-            # Uvoz z progresom (simulacija za zdaj)
+            # Uvoz
             imported_count = 0
             duplicate_count = 0
             skipped = 0
-            total_rows = len(df)
 
-            #with transaction.atomic():
-            for i, row in df.iterrows():
-                timestamp = row['timestamp']
+            with transaction.atomic():
+                for _, row in df.iterrows():
+                    timestamp = row['timestamp']
 
-                for col in parameter_columns:
-                    value = row[col]
-                    if pd.isna(value) or str(value).strip() == '':
-                        skipped += 1
-                        continue
+                    for col in parameter_columns:
+                        value = row[col]
+                        if pd.isna(value) or str(value).strip() == '':
+                            skipped += 1
+                            continue
 
-                    try:
-                        value = float(value)
-                    except (ValueError, TypeError):
-                        skipped += 1
-                        continue
+                        try:
+                            value = float(value)
+                        except (ValueError, TypeError):
+                            skipped += 1
+                            continue
 
-                    param = existing_params.get(col.lower())
-                    if not param:
-                        continue
+                        param = existing_params.get(col.lower())
+                        if not param:
+                            continue
 
-                    exists = Measurement.objects.filter(
-                        sensor=sensor,
-                        parameter=param,
-                        timestamp=timestamp
-                    ).exists()
+                        exists = Measurement.objects.filter(
+                            sensor=sensor,
+                            parameter=param,
+                            timestamp=timestamp
+                        ).exists()
 
-                    if exists:
-                        duplicate_count += 1
-                        continue
+                        if exists:
+                            duplicate_count += 1
+                            continue
 
-                    try:
                         Measurement.objects.create(
                             sensor=sensor,
                             parameter=param,
@@ -110,15 +117,11 @@ class ImportMeasurementsView(View):
                             value=value
                         )
                         imported_count += 1
-                    except IntegrityError:
-                        duplicate_count += 1
-
-                    #if i > 1000:
-                    #    break
 
             messages.success(request, 
                 f"Uspešno uvoženih **{imported_count}** meritev za senzor **{sensor}**.\n"
-                f"Preskočenih **{duplicate_count}** podvojenih in **{skipped}** praznih vrednosti.")
+                f"Preskočenih **{duplicate_count}** podvojenih in **{skipped}** praznih vrednosti.\n"
+                f"Časovna cona: {timezone_str}")
             
             return redirect('import_measurements')
 
