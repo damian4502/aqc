@@ -7,3 +7,6 @@ django-tailwind
 networkx
 paho-mqtt
 pytz
+channels
+channels-redis
+daphne

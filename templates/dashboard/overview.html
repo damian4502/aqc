@@ -3,6 +3,12 @@
 {% load time_filters %}
 {% block content %}
 <div class="max-w-7xl mx-auto">
+
+<div id="live-ticker" class="glass rounded-3xl px-6 py-3 mb-8 overflow-hidden bg-slate-900/80">
+    <div id="ticker-content" class="inline-flex items-center gap-8 text-sm font-medium text-emerald-400 whitespace-nowrap">
+        <!-- JavaScript bo polnil -->
+    </div>
+</div>
     
 	{% comment %}
     <div class="flex justify-between items-center mb-10">
@@ -82,4 +88,93 @@
         {% endfor %}
     </div>
 </div>
+
+<script>
+    let socket;
+
+    function connectWebSocket() {
+        const wsUrl = 'ws://' + window.location.host + '/ws/live/';
+        socket = new WebSocket(wsUrl);
+
+        socket.onopen = function() {
+            console.log('%cWebSocket povezan uspešno', 'color: #10b981; font-weight: bold');
+        };
+
+        socket.onmessage = function(e) {
+            try {
+                const response = JSON.parse(e.data);
+                
+                if (response.type === 'live_update') {
+                    console.log('%cPrejet live update', 'color: #60a5fa', response.data);
+
+                    if (response.data.ticker) {
+                        // Ob nalaganju strani (seznam)
+                        updateTicker(response.data.ticker);
+                    } else if (response.data.room) {
+                        // Posamezna nova meritev iz MQTT
+                        addSingleMeasurement(response.data);
+                    }
+                }
+            } catch (err) {
+                console.error('Napaka pri parsanju sporočila:', err);
+            }
+        };
+
+        socket.onclose = function() {
+            console.log('%cWebSocket zaprt. Ponovni poskus čez 3s...', 'color: #f59e0b');
+            setTimeout(connectWebSocket, 3000);
+        };
+
+        socket.onerror = function(err) {
+            console.error('WebSocket napaka:', err);
+        };
+    }
+
+    function updateTicker(ticker) {
+        if (!ticker || ticker.length === 0) return;
+        const tickerEl = document.getElementById('ticker-content');
+        if (!tickerEl) return;
+
+        let html = '';
+        ticker.forEach(item => {
+            html += `
+                <span class="inline-flex items-center gap-3 px-5 py-2 bg-slate-800/90 rounded-2xl border border-slate-700 mx-1">
+                    <strong class="text-blue-400">${item.room}</strong>
+                    <span class="font-semibold text-white">${item.value}</span>
+                    <span class="text-xs text-slate-400">${item.unit}</span>
+                </span>
+            `;
+        });
+        tickerEl.innerHTML = html;
+        console.log('%cTicker posodobljen z ' + ticker.length + ' elementi', 'color: #34d399');
+    }
+
+    function addSingleMeasurement(item) {
+        const tickerEl = document.getElementById('ticker-content');
+        if (!tickerEl) return;
+
+        const newItem = `
+            <span class="inline-flex items-center gap-3 px-5 py-2 bg-slate-800/90 rounded-2xl border border-slate-700 mx-1 animate-pulse">
+                <strong class="text-blue-400">${item.room}</strong>
+                <span class="font-semibold text-white">${item.value}</span>
+                <span class="text-xs text-slate-400">${item.unit}</span>
+            </span>
+        `;
+
+        // Dodaj na začetek
+        tickerEl.innerHTML = newItem + tickerEl.innerHTML;
+
+        // Omeji na max 15 elementov
+        if (tickerEl.children.length > 15) {
+            tickerEl.removeChild(tickerEl.lastChild);
+        }
+
+        console.log('%cDodana nova meritev v ticker', 'color: #34d399');
+    }
+
+    // Zaženi
+    document.addEventListener('DOMContentLoaded', function() {
+        connectWebSocket();
+    });
+</script>
 {% endblock %}

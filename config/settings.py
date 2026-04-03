@@ -46,6 +46,7 @@ INSTALLED_APPS = [
     'import_data',
     'dashboard',
     'django.contrib.humanize',
+    'channels'
 ]
 
 MIDDLEWARE = [
@@ -126,3 +127,19 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/6.0/howto/static-files/
 
 STATIC_URL = 'static/'
+
+ASGI_APPLICATION = 'config.asgi.application'
+
+CHANNEL_LAYERS = {
+    'default': {
+        'BACKEND': 'channels_redis.core.RedisChannelLayer',
+        'CONFIG': {
+            "hosts": [('redis', 6379)],
+        },
+    },
+}
+
+ALLOWED_HOSTS = ['*']
+
+# Za WebSockets v razvoju
+CSRF_TRUSTED_ORIGINS = ['http://192.168.1.95', 'http://localhost', 'http://127.0.0.1']

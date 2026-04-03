@@ -33,7 +33,25 @@ from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from datetime import datetime, timedelta
 import pandas as pd
+from django.http import JsonResponse
 
+def latest_measurements_api(request):
+    from measurements.models import Measurement
+    latest = Measurement.objects.select_related('sensor__room', 'parameter')\
+        .order_by('-timestamp')[:20]
+
+    ticker = []
+    for m in latest:
+        ticker.append({
+            'room': m.sensor.room.name,
+            'parameter': m.parameter.name,
+            'value': float(m.value),
+            'unit': m.parameter.unit or '',
+            'time': m.timestamp.strftime("%H:%M:%S")
+        })
+
+    return JsonResponse({'ticker': ticker})
+    
 def apply_dark_theme(fig, animate=True):
     """Temna tema + neon efekti z varnostjo za različne tipe grafov"""
     
