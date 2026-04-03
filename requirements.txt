@@ -4,3 +4,5 @@ pandas
 openpyxl
 plotly
 django-tailwind
+networkx
+paho-mqtt

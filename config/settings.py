@@ -43,7 +43,9 @@ INSTALLED_APPS = [
     'parameters',
     'sensors',
     'measurements',
-    'import_data'
+    'import_data',
+    'dashboard',
+    'django.contrib.humanize',
 ]
 
 MIDDLEWARE = [

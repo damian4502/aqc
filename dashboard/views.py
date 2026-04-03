@@ -232,6 +232,16 @@ def room_detail(request, room_id):
      .order_by('parameter_id', '-timestamp')\
      .distinct('parameter_id')
 
+# AQI Gauge za vrh strani
+    latest_aqi = Measurement.objects.filter(
+        sensor__room=room,
+        parameter__name__iexact="AQI"
+    ).order_by('-timestamp').first()
+
+    aqi_gauge = None
+    if latest_aqi:
+        aqi_gauge = create_aqi_gauge(latest_aqi.value)
+
     context = {
         'room': room,
         'latest_measurements': latest_measurements,
@@ -239,6 +249,7 @@ def room_detail(request, room_id):
         'end_date': context_end,
         'view_type': view_type,
         'all_data': all_data,
+        'aqi_gauge': aqi_gauge,          # ← DODANO
     }
 
     # Meritve za grafe
@@ -369,11 +380,74 @@ def room_graph_fragment(request, room_id):
     elif view_type == 'correlation':
         pivot = df.pivot_table(index='timestamp', columns='parameter', values='value')
         corr_matrix = pivot.corr().round(2)
+
+        # Opcija 1: Izboljšan Heatmap
         fig = px.imshow(corr_matrix, 
                        text_auto=True, 
                        aspect="auto", 
                        color_continuous_scale='RdBu_r',
                        title='Korelacija med parametri')
+        fig.update_traces(hovertemplate='%{y} in %{x}<br>Korelacija: %{z:.2f}<extra></extra>')
+
+    elif view_type == 'correlation_network':
+        # Network Graph alternativa
+        corr_matrix = df.pivot_table(index='timestamp', columns='parameter', values='value').corr()
+        
+        import networkx as nx
+        G = nx.Graph()
+        
+        params = corr_matrix.columns
+        for i in range(len(params)):
+            for j in range(i+1, len(params)):
+                corr = abs(corr_matrix.iloc[i,j])
+                if corr > 0.3:  # prikaži samo pomembne korelacije
+                    G.add_edge(params[i], params[j], weight=corr)
+
+        pos = nx.spring_layout(G, seed=42)
+        
+        edge_x = []
+        edge_y = []
+        for edge in G.edges():
+            x0, y0 = pos[edge[0]]
+            x1, y1 = pos[edge[1]]
+            edge_x.extend([x0, x1, None])
+            edge_y.extend([y0, y1, None])
+
+        edge_trace = go.Scatter(
+            x=edge_x, y=edge_y,
+            line=dict(width=2, color='#60a5fa'),
+            hoverinfo='none',
+            mode='lines')
+
+        node_x = []
+        node_y = []
+        node_text = []
+        for node in G.nodes():
+            x, y = pos[node]
+            node_x.append(x)
+            node_y.append(y)
+            node_text.append(node)
+
+        node_trace = go.Scatter(
+            x=node_x, y=node_y,
+            mode='markers+text',
+            text=node_text,
+            textposition="top center",
+            marker=dict(
+                size=25,
+                color='#3b82f6',
+                line=dict(width=2, color='#1e40af')
+            ),
+            hoverinfo='text'
+        )
+
+        fig = go.Figure(data=[edge_trace, node_trace])
+        fig.update_layout(
+            title='Omrežje korelacij med parametri',
+            height=700,
+            showlegend=False,
+            plot_bgcolor='rgba(15,23,42,0.7)'
+        )
 
     elif view_type == 'hourly':
         df['hour'] = df['timestamp'].dt.hour
@@ -394,54 +468,127 @@ def room_graph_fragment(request, room_id):
         return HttpResponse(fig.to_html(full_html=False, include_plotlyjs='cdn'))
 
     return HttpResponse('<div class="text-center py-20 text-slate-400">Ni grafičnih podatkov.</div>')
+
+def create_aqi_gauge(aqi_value):
+    """Manjši AQI Gauge z barvnim kodiranjem"""
+    if not aqi_value:
+        aqi_value = 0
+    
+    # Barvno kodiranje
+    if aqi_value <= 50:
+        color = "#10b981"      # Zelena
+        status = "Dobro"
+    elif aqi_value <= 100:
+        color = "#eab308"      # Rumena
+        status = "Zmerno"
+    elif aqi_value <= 150:
+        color = "#f97316"      # Oranžna
+        status = "Slabo"
+    elif aqi_value <= 200:
+        color = "#ef4444"      # Rdeča
+        status = "Zelo slabo"
+    else:
+        color = "#7c3aed"      # Vijolična
+        status = "Nevarno"
+
+    fig = go.Figure(go.Indicator(
+        mode="gauge+number",
+        value=aqi_value,
+        domain={'x': [0, 1], 'y': [0, 1]},
+        #title={'text': "AQI", 'font': {'size': 16}},
+        gauge={
+            'axis': {'range': [0, 500], 'tickwidth': 1, 'tickcolor': "#64748b"},
+            'bar': {'color': color},
+            'bgcolor': "rgba(15,23,42,0.6)",
+            'borderwidth': 1,
+            'bordercolor': "#475569",
+            'steps': [
+                {'range': [0, 50], 'color': 'rgba(16,185,129,0.25)'},
+                {'range': [50, 100], 'color': 'rgba(234,179,8,0.25)'},
+                {'range': [100, 150], 'color': 'rgba(249,115,22,0.25)'},
+                {'range': [150, 200], 'color': 'rgba(239,68,68,0.25)'},
+                {'range': [200, 300], 'color': 'rgba(124,58,237,0.25)'},
+            ],
+            'threshold': {
+                'line': {'color': "white", 'width': 3},
+                'thickness': 0.8,
+                'value': aqi_value
+            }
+        }
+    ))
+
+    fig.update_layout(
+        height=80,                    # manjša višina
+        margin=dict(l=10, r=10, t=10, b=10),
+        paper_bgcolor='rgba(0,0,0,0)',
+        font=dict(color='#e2e8f0', size=10)
+    )
+
+    return fig.to_html(full_html=False, include_plotlyjs='cdn')
     
 def dashboard_overview(request):
-    rooms = Room.objects.prefetch_related('sensors__parameter').all().order_by('name')
+    rooms = Room.objects.all().order_by('name')
     
     room_data = []
     
     for room in rooms:
-        # Zadnje meritve za prostor
+        # Zadnje meritve (vse parametre še vedno prikažemo v tabeli)
         latest = Measurement.objects.filter(sensor__room=room)\
             .select_related('parameter', 'sensor')\
             .order_by('parameter_id', '-timestamp')\
-            .distinct('parameter_id')[:8]  # omejimo na 8 za preglednost
+            .distinct('parameter_id')[:8]
         
-        # Mini graf zadnjih 24 ur
-        last_24h = Measurement.objects.filter(
-            sensor__room=room,
-            timestamp__gte=timezone.now() - timedelta(hours=24)
-        ).select_related('parameter').order_by('timestamp')
-        
+        # Mini graf - samo AQI za zadnjih 24 ur
         mini_fig = None
-        if last_24h.exists():
-            df = pd.DataFrame(list(last_24h.values('timestamp', 'value', 'parameter__name')))
+        aqi_measurements = Measurement.objects.filter(
+            sensor__room=room,
+            parameter__name__iexact="AQI",   # iščemo parameter z imenom AQI (ne glede na velike/male črke)
+            timestamp__gte=timezone.now() - timedelta(hours=24)
+        ).order_by('timestamp')
+        
+        if aqi_measurements.exists():
+            df = pd.DataFrame(list(aqi_measurements.values('timestamp', 'value')))
             df['timestamp'] = pd.to_datetime(df['timestamp'])
-            df = df.rename(columns={'parameter__name': 'parameter'})
             
-            fig = px.line(df, x='timestamp', y='value', color='parameter', 
-                         height=160, title='')
+            fig = px.line(df, x='timestamp', y='value', 
+                         title='', 
+                         height=140,
+                         line_shape='linear')
+            
             fig.update_layout(
                 margin=dict(l=0, r=0, t=10, b=0),
                 showlegend=False,
                 xaxis=dict(showgrid=False, showticklabels=False, zeroline=False),
-                yaxis=dict(showgrid=True, gridcolor='rgba(148,163,184,0.2)'),
+                yaxis=dict(showgrid=True, gridcolor='rgba(148,163,184,0.2)', title=None),
                 plot_bgcolor='rgba(0,0,0,0)',
-                paper_bgcolor='rgba(0,0,0,0)'
+                paper_bgcolor='rgba(0,0,0,0)',
+                font=dict(size=10, color='#94a3b8')
             )
-            fig = apply_dark_theme(fig)
-            mini_fig = fig.to_html(full_html=False, include_plotlyjs=False)
+            
+            # Dodaj rahlo zeleno/barvno kodiranje za AQI
+            fig.update_traces(line=dict(color='#10b981', width=2.5))
+            
+            mini_fig = fig.to_html(full_html=False, include_plotlyjs='cdn')
+
+        # AQI Gauge za kartico
+        aqi_gauge = None
+        latest_aqi = Measurement.objects.filter(
+            sensor__room=room,
+            parameter__name__iexact="AQI"
+        ).order_by('-timestamp').first()
         
+        if latest_aqi:
+            aqi_gauge = create_aqi_gauge(latest_aqi.value)
+            
         room_data.append({
             'room': room,
             'latest': latest,
-            'mini_fig': mini_fig
+            'mini_fig': mini_fig,
+            'aqi_gauge': aqi_gauge,
+            'has_aqi': aqi_measurements.exists()
         })
     
-    context = {
-        'room_data': room_data,
-    }
-    
+    context = {'room_data': room_data}
     return render(request, 'dashboard/overview.html', context)
     
 def dashboard(request):

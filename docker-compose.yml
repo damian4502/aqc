@@ -11,11 +11,16 @@ services:
     ports:
       - "5432:5432"
 
+  mqtt:
+    image: eclipse-mosquitto:2
+    restart: always
+    ports:
+      - "1883:1883"
+    volumes:
+      - ./mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+
   web:
     build: .
-    user: "${UID}:${GID}"
-    env_file:
-      - .env
     command: python manage.py runserver 0.0.0.0:8000
     volumes:
       - .:/app
@@ -23,6 +28,16 @@ services:
       - "8000:8000"
     depends_on:
       - db
+    environment:
+      DJANGO_SETTINGS_MODULE: config.settings
+
+  mqtt-listener:
+    build: .
+    command: python mqtt_listener.py
+    depends_on:
+      - db
+      - mqtt
+    restart: always
     environment:
       DJANGO_SETTINGS_MODULE: config.settings
 

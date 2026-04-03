@@ -1,9 +1,10 @@
 {% extends "base.html" %}
 {% block title %}Air Quality Control - Pregled{% endblock %}
-
+{% load time_filters %}
 {% block content %}
 <div class="max-w-7xl mx-auto">
     
+	{% comment %}
     <div class="flex justify-between items-center mb-10">
         <div>
             <h1 class="text-5xl font-bold text-white tracking-tighter">Pregled prostorov</h1>
@@ -16,8 +17,10 @@
             <span>Uvozi meritve</span>
         </a>
     </div>
+	{% endcomment %}
 
-    <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-8">
+        <!-- 4 prostori v vrsto -->
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-4 gap-6">
         {% for item in room_data %}
         <div class="glass rounded-3xl overflow-hidden hover:scale-[1.02] transition-all duration-300 neon-blue group">
             
@@ -31,17 +34,18 @@
                 {% endif %}
             </div>
 
-            <!-- Mini graf -->
-            <div class="p-6 bg-slate-950/50 border-b border-slate-700">
-                {% if item.mini_fig %}
-                    {{ item.mini_fig|safe }}
+            <!-- AQI Gauge -->
+            <div class="p-5 bg-slate-950/50 min-h-[120px] flex items-center justify-center border-b border-slate-700">
+                {% if item.aqi_gauge %}
+                    {{ item.aqi_gauge|safe }}
                 {% else %}
-                    <div class="h-40 flex items-center justify-center text-slate-500 text-sm">
-                        Ni podatkov v zadnjih 24 urah
+                    <div class="text-center text-slate-500 text-xs">
+                        <i class="fas fa-tachometer-alt text-3xl mb-2 block opacity-40"></i>
+                        AQI ni na voljo
                     </div>
                 {% endif %}
             </div>
-
+			
             <!-- Zadnje vrednosti z linki na parameter_detail -->
             <div class="p-8">
                 <div class="grid grid-cols-2 gap-x-8 gap-y-6">
@@ -51,16 +55,17 @@
                            class="hover:text-blue-400 transition-colors block">
                             <p class="text-xs text-slate-400 group-hover/item:text-slate-300">{{ m.parameter.name }}</p>
                             <p class="text-2xl font-semibold text-white mt-1 group-hover/item:text-blue-300">
-                                {{ m.value }} 
-                                <span class="text-sm font-normal text-slate-400">{{ m.parameter.unit }}</span>
+                                {{ m.value|floatformat:1 }} 
+                                <span class="text-xs font-normal text-slate-400">{{ m.parameter.unit }}</span>
                             </p>
                         </a>
-                        <p class="text-xs text-emerald-400">{{ m.timestamp|date:"H:i" }}</p>
+                        <p class="text-xs text-emerald-400">{{ m.timestamp|time_ago }}</p>
                     </div>
                     {% endfor %}
                 </div>
             </div>
 
+			{% comment %}
             <!-- Gumb za podrobni pogled prostora -->
             <div class="border-t border-slate-700 px-8 py-6">
                 <a href="{% url 'room_detail' item.room.id %}" 
@@ -68,6 +73,7 @@
                     Podrobni pogled prostora →
                 </a>
             </div>
+			{% endcomment %}
         </div>
         {% empty %}
         <div class="col-span-full text-center py-20 text-slate-400">

@@ -2,8 +2,10 @@ import pandas as pd
 from django.shortcuts import render, redirect
 from django.contrib import messages
 from django.views.generic import View
+from django.http import JsonResponse
 from django.db import transaction
 from django.db.utils import IntegrityError
+import time
 
 from parameters.models import Parameter
 from sensors.models import Sensor
@@ -13,13 +15,13 @@ class ImportMeasurementsView(View):
     template_name = 'import_data/import.html'
 
     def get(self, request):
-        sensors = Sensor.objects.select_related('room').order_by('room__name', 'name')
+        sensors = Sensor.objects.select_related('room', 'parameter').order_by('room__name', 'name')
         context = {'sensors': sensors}
         return render(request, self.template_name, context)
 
     def post(self, request):
         if not request.FILES.get('file'):
-            messages.error(request, "Prosimo, izberite CSV ali Excel datoteko!")
+            messages.error(request, "Prosimo, izberite datoteko!")
             return redirect('import_measurements')
 
         file = request.FILES['file']
@@ -64,63 +66,60 @@ class ImportMeasurementsView(View):
                 messages.error(request, f"Naslednji parametri ne obstajajo: {', '.join(missing_params)}")
                 return redirect('import_measurements')
 
-            # Uvoz z preverjanjem podvajanja
+            # Uvoz z progresom (simulacija za zdaj)
             imported_count = 0
             duplicate_count = 0
             skipped = 0
+            total_rows = len(df)
 
-            with transaction.atomic():
-                for _, row in df.iterrows():
-                    timestamp = row['timestamp']
+            #with transaction.atomic():
+            for i, row in df.iterrows():
+                timestamp = row['timestamp']
 
-                    for col in parameter_columns:
-                        value = row[col]
-                        if pd.isna(value) or str(value).strip() == '':
-                            skipped += 1
-                            continue
+                for col in parameter_columns:
+                    value = row[col]
+                    if pd.isna(value) or str(value).strip() == '':
+                        skipped += 1
+                        continue
 
-                        try:
-                            value = float(value)
-                        except (ValueError, TypeError):
-                            skipped += 1
-                            continue
+                    try:
+                        value = float(value)
+                    except (ValueError, TypeError):
+                        skipped += 1
+                        continue
 
-                        param = existing_params.get(col.lower())
-                        if not param:
-                            continue
+                    param = existing_params.get(col.lower())
+                    if not param:
+                        continue
 
-                        # Preveri, ali že obstaja enaka meritev
-                        exists = Measurement.objects.filter(
+                    exists = Measurement.objects.filter(
+                        sensor=sensor,
+                        parameter=param,
+                        timestamp=timestamp
+                    ).exists()
+
+                    if exists:
+                        duplicate_count += 1
+                        continue
+
+                    try:
+                        Measurement.objects.create(
                             sensor=sensor,
                             parameter=param,
-                            timestamp=timestamp
-                        ).exists()
+                            timestamp=timestamp,
+                            value=value
+                        )
+                        imported_count += 1
+                    except IntegrityError:
+                        duplicate_count += 1
 
-                        if exists:
-                            duplicate_count += 1
-                            continue
+                    #if i > 1000:
+                    #    break
 
-                        # Ustvari novo meritev
-                        try:
-                            Measurement.objects.create(
-                                sensor=sensor,
-                                parameter=param,
-                                timestamp=timestamp,
-                                value=value
-                            )
-                            imported_count += 1
-                        except IntegrityError:
-                            # Če UniqueConstraint vseeno "ujame" (race condition)
-                            duplicate_count += 1
-
-            # Obvestilo uporabniku
-            msg = f"Uspešno uvoženih **{imported_count}** novih meritev za senzor **{sensor}**."
-            if duplicate_count > 0:
-                msg += f"\nPreskočenih **{duplicate_count}** meritev zaradi podvajanja (že obstajajo za isti čas in parameter)."
-            if skipped > 0:
-                msg += f"\nPreskočenih {skipped} praznih ali neveljavnih vrednosti."
-
-            messages.success(request, msg)
+            messages.success(request, 
+                f"Uspešno uvoženih **{imported_count}** meritev za senzor **{sensor}**.\n"
+                f"Preskočenih **{duplicate_count}** podvojenih in **{skipped}** praznih vrednosti.")
+            
             return redirect('import_measurements')
 
         except Exception as e:

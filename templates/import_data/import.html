@@ -1,45 +1,153 @@
-{% extends "admin/base.html" %}
-{% block content %}
-<div style="max-width: 900px; margin: 40px auto; padding: 20px; background: white; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
+{% extends "base.html" %}
+{% block title %}Uvoz meritev - Air Quality Control{% endblock %}
 
-    <h2>Uvoz meritev iz CSV ali Excel datoteke</h2>
+{% block content %}
+<div class="max-w-4xl mx-auto">
     
-    <div style="background: #f8f9fa; padding: 15px; border-radius: 6px; margin-bottom: 25px;">
-        <h4>Zahteve za datoteko:</h4>
-        <ul>
-            <li>Prva vrstica = imena parametrov (npr. Temperatura, CO2, PM2.5, VOC...)</li>
-            <li>Obvezen stolpec: <strong>timestamp</strong> ali <strong>time</strong></li>
-            <li>Imena parametrov se morajo **točno** ujemati z imeni v šifrantu (velike/male črke niso pomembne)</li>
-        </ul>
+    <div class="flex justify-between items-center mb-10">
+        <div>
+            <h1 class="text-4xl font-bold text-white tracking-tighter">Uvoz meritev</h1>
+            <p class="text-slate-400 mt-2">Naloži CSV ali Excel datoteko z meritvami</p>
+        </div>
+        <a href="{% url 'dashboard' %}" 
+           class="flex items-center gap-2 px-6 py-3 bg-slate-800 hover:bg-slate-700 rounded-2xl text-slate-300 transition-all">
+            <i class="fas fa-arrow-left"></i>
+            <span>Nazaj na pregled</span>
+        </a>
     </div>
 
-    <form method="post" enctype="multipart/form-data">
-        {% csrf_token %}
-
-        <div style="margin-bottom: 25px;">
-            <label><strong>Izberite senzor (lahko meri več parametrov):</strong></label><br>
-            <select name="sensor_id" required style="width: 100%; padding: 12px; margin-top: 8px; font-size: 16px;">
-                <option value="">-- Izberite senzor --</option>
-                {% for sensor in sensors %}
-                <option value="{{ sensor.id }}">
-                    {{ sensor.room.name }} — {{ sensor.name|default:"Brez imena" }} 
-                    ({{ sensor.get_location_display }})
-                </option>
-                {% endfor %}
-            </select>
-            <small style="color: #666;">Izbran senzor lahko meri več različnih parametrov hkrati.</small>
+    <div class="glass rounded-3xl p-10">
+        
+        <div class="mb-10">
+            <h2 class="text-2xl font-semibold mb-4">Navodila za uvoz</h2>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6 text-sm">
+                <div class="bg-slate-900/70 p-6 rounded-2xl border border-slate-700">
+                    <h3 class="font-medium text-emerald-400 mb-3">Zahteve za datoteko:</h3>
+                    <ul class="space-y-2 text-slate-300">
+                        <li class="flex items-start gap-2">
+                            <span class="text-emerald-400 mt-1">•</span>
+                            Prva vrstica mora vsebovati imena parametrov (npr. CO2, Temperatura, PM2.5...)
+                        </li>
+                        <li class="flex items-start gap-2">
+                            <span class="text-emerald-400 mt-1">•</span>
+                            Obvezen stolpec: <code class="bg-slate-800 px-2 py-0.5 rounded">timestamp</code> ali <code class="bg-slate-800 px-2 py-0.5 rounded">time</code>
+                        </li>
+                        <li class="flex items-start gap-2">
+                            <span class="text-emerald-400 mt-1">•</span>
+                            Imena parametrov se morajo **točno** ujemati s šifrantom
+                        </li>
+                    </ul>
+                </div>
+                <div class="bg-slate-900/70 p-6 rounded-2xl border border-slate-700">
+                    <h3 class="font-medium text-emerald-400 mb-3">Podprte funkcije:</h3>
+                    <ul class="space-y-2 text-slate-300">
+                        <li>• Preverjanje podvojenih meritev</li>
+                        <li>• Avtomatska validacija parametrov</li>
+                        <li>• Podpora za več parametrov v eni datoteki</li>
+                        <li>• Obvestila o uspešnem/preskočenem uvozu</li>
+                    </ul>
+                </div>
+            </div>
         </div>
+        <!-- Glavni obrazec za uvoz z progres barom -->
+        <form id="import-form" method="post" enctype="multipart/form-data" class="space-y-8">
+            {% csrf_token %}
 
-        <div>
-            <label><strong>Izberite datoteko (CSV ali Excel):</strong></label><br>
-            <input type="file" name="file" accept=".csv,.xlsx,.xls" required style="margin-top: 8px;">
+            <!-- Izbira senzorja -->
+            <div>
+                <label class="block text-sm font-medium text-slate-300 mb-3">
+                    <i class="fas fa-sensor-on mr-2"></i> Izberite senzor
+                </label>
+                <select name="sensor_id" required 
+                        class="w-full bg-slate-900 border border-slate-700 rounded-2xl px-6 py-4 text-white focus:outline-none focus:border-blue-500">
+                    <option value="">-- Izberite senzor --</option>
+                    {% for sensor in sensors %}
+                    <option value="{{ sensor.id }}">
+                        {{ sensor.room.name }} → {{ sensor.parameter.name }} 
+                        ({{ sensor.get_location_display }})
+                        {% if sensor.name %} — {{ sensor.name }}{% endif %}
+                    </option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <!-- Izbira datoteke -->
+            <div>
+                <label class="block text-sm font-medium text-slate-300 mb-3">
+                    <i class="fas fa-file-upload mr-2"></i> Izberite datoteko
+                </label>
+                <div id="drop-zone" 
+                     class="border-2 border-dashed border-slate-600 rounded-3xl p-12 text-center hover:border-blue-500 transition-colors cursor-pointer">
+                    <input type="file" name="file" accept=".csv,.xlsx,.xls" required 
+                           class="hidden" id="file-input">
+                    <label for="file-input" class="cursor-pointer block">
+                        <i class="fas fa-cloud-upload-alt text-5xl text-slate-500 mb-4"></i>
+                        <p class="text-slate-300 font-medium">Klikni ali povleci datoteko sem</p>
+                        <p class="text-xs text-slate-500 mt-2">.csv, .xlsx, .xls</p>
+                    </label>
+                </div>
+            </div>
+
+            <!-- Progres Bar (skrit dokler se ne začne uvoz) -->
+            <div id="progress-container" class="hidden">
+                <div class="flex justify-between text-xs text-slate-400 mb-2">
+                    <span>Uvoz v teku...</span>
+                    <span id="progress-text">0%</span>
+                </div>
+                <div class="h-3 bg-slate-800 rounded-full overflow-hidden">
+                    <div id="progress-bar" 
+                         class="h-full bg-gradient-to-r from-blue-500 to-cyan-400 w-0 transition-all duration-300">
+                    </div>
+                </div>
+            </div>
+
+            <button type="submit" id="import-button"
+                    class="w-full bg-gradient-to-r from-blue-600 to-cyan-500 hover:from-blue-500 hover:to-cyan-400 py-5 rounded-3xl font-semibold text-lg transition-all">
+                Začni uvoz meritev
+            </button>
+        </form>
+    <!-- Obvestila -->
+    {% if messages %}
+        <div class="mt-8 space-y-4">
+            {% for message in messages %}
+            <div class="glass rounded-2xl p-5 flex items-start gap-4 
+                        {% if message.tags == 'success' %}border-l-4 border-emerald-500{% endif %}
+                        {% if message.tags == 'error' %}border-l-4 border-red-500{% endif %}">
+                {% if message.tags == 'success' %}
+                    <i class="fas fa-check-circle text-2xl text-emerald-400 mt-0.5"></i>
+                {% elif message.tags == 'error' %}
+                    <i class="fas fa-exclamation-triangle text-2xl text-red-400 mt-0.5"></i>
+                {% endif %}
+                <div class="text-sm">{{ message|safe }}</div>
+            </div>
+            {% endfor %}
         </div>
-
-        <br>
-        <button type="submit" class="btn btn-success" style="padding: 12px 30px; font-size: 16px;">
-            Uvozi meritve
-        </button>
-    </form>
+    {% endif %}
 
 </div>
+
+<script>
+document.getElementById('import-form').addEventListener('submit', function(e) {
+    const progressContainer = document.getElementById('progress-container');
+    const progressBar = document.getElementById('progress-bar');
+    const progressText = document.getElementById('progress-text');
+    const importButton = document.getElementById('import-button');
+
+    progressContainer.classList.remove('hidden');
+    importButton.disabled = true;
+    importButton.innerHTML = 'Uvoz v teku...';
+
+    // Simulacija progres bara (za demonstracijo)
+    let progress = 0;
+    const interval = setInterval(() => {
+        progress += Math.random() * 12;
+        if (progress > 95) progress = 95;
+        
+        progressBar.style.width = progress + '%';
+        progressText.textContent = Math.floor(progress) + '%';
+        
+        if (progress >= 95) clearInterval(interval);
+    }, 180);
+});
+</script>
 {% endblock %}
