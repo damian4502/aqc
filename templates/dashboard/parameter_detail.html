@@ -46,87 +46,73 @@
         <a href="?view=weekly" class="tab-btn {% if view_type == 'weekly' %}active{% endif %}">Tedenski vzorec</a>
     </div>
 
-<!-- Izbor intervala in polnjenja za graf -->
-<div class="glass rounded-2xl p-5 mb-6">
-    <form method="get" class="flex flex-wrap gap-4 items-end">
-        {% if start_date and end_date %}
-            <input type="hidden" name="start_date" value="{{ start_date }}">
-            <input type="hidden" name="end_date" value="{{ end_date }}">
-        {% endif %}
-        {% if all_data %}
-            <input type="hidden" name="all" value="true">
-        {% endif %}
-
-        <div>
-            <label class="block text-xs text-slate-400 mb-1">Interval resamplinga</label>
-            <select name="interval" class="bg-slate-900 border border-slate-700 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-blue-500">
-                <option value="1"   {% if interval == 1 %}selected{% endif %}>1 minuta</option>
-                <option value="5"   {% if interval == 5 or not interval %}selected{% endif %}>5 minut</option>
-                <option value="15"  {% if interval == 15 %}selected{% endif %}>15 minut</option>
-                <option value="60"  {% if interval == 60 %}selected{% endif %}>1 ura</option>
-                <option value="1440"{% if interval == 1440 %}selected{% endif %}>1 dan</option>
-            </select>
-        </div>
-
-        <div>
-            <label class="block text-xs text-slate-400 mb-1">Polnjenje manjkajočih vrednosti</label>
-            <select name="fill_method" class="bg-slate-900 border border-slate-700 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-blue-500">
-                <option value="ffill"      {% if fill_method == 'ffill' %}selected{% endif %}>Forward Fill (prejšnja vrednost)</option>
-                <option value="interpolate"{% if fill_method == 'interpolate' %}selected{% endif %}>Linearna interpolacija</option>
-                <option value="bfill"      {% if fill_method == 'bfill' %}selected{% endif %}>Backward Fill</option>
-                <option value="zero"       {% if fill_method == 'zero' %}selected{% endif %}>0 (nič)</option>
-            </select>
-        </div>
-
-        <button type="submit" 
-                class="bg-blue-600 hover:bg-blue-500 px-6 py-2.5 rounded-xl text-sm font-medium transition-colors">
-            Osveži graf
-        </button>
-    </form>
-</div>
-
-<!-- Hitri gumbi + datumski filter -->
-<div class="glass rounded-2xl p-5 mb-6">
-    <div class="flex flex-wrap gap-2 mb-4">
-        <a href="?{% if view_type %}view={{ view_type }}&{% endif %}quick=1" 
-           class="quick-btn px-5 py-2.5 text-sm rounded-xl transition-all {% if request.GET.quick == '1' %}bg-blue-600 text-white{% else %}bg-slate-800 hover:bg-slate-700{% endif %}">
-            24 ure
-        </a>
-        <a href="?{% if view_type %}view={{ view_type }}&{% endif %}quick=7" 
-           class="quick-btn px-5 py-2.5 text-sm rounded-xl transition-all {% if request.GET.quick == '7' %}bg-blue-600 text-white{% else %}bg-slate-800 hover:bg-slate-700{% endif %}">
-            1 teden
-        </a>
-        <a href="?{% if view_type %}view={{ view_type }}&{% endif %}quick=30" 
-           class="quick-btn px-5 py-2.5 text-sm rounded-xl transition-all {% if request.GET.quick == '30' %}bg-blue-600 text-white{% else %}bg-slate-800 hover:bg-slate-700{% endif %}">
-            1 mesec
-        </a>
-        <a href="?{% if view_type %}view={{ view_type }}&{% endif %}all=true" 
-           class="quick-btn px-5 py-2.5 text-sm rounded-xl transition-all {% if all_data %}bg-blue-600 text-white{% else %}bg-slate-800 hover:bg-slate-700{% endif %}">
-            Vsi podatki
-        </a>
-    </div>
-
-    <!-- Datumski filter -->
-    <form method="get" class="flex flex-wrap gap-3 items-end">
+<!-- Poenoten filter blok - izboljšan izgled -->
+<div class="glass rounded-3xl p-6 mb-8">
+    <form method="get" class="flex flex-wrap items-end gap-6">
         {% if view_type %}
             <input type="hidden" name="view" value="{{ view_type }}">
         {% endif %}
 
-        <div>
-            <label class="block text-xs text-slate-400 mb-1">Od</label>
-            <input type="date" name="start_date" value="{{ start_date }}" 
-                   class="bg-slate-900 border border-slate-700 rounded-xl px-4 py-2 text-sm">
-        </div>
-        <div>
-            <label class="block text-xs text-slate-400 mb-1">Do</label>
-            <input type="date" name="end_date" value="{{ end_date }}" 
-                   class="bg-slate-900 border border-slate-700 rounded-xl px-4 py-2 text-sm">
+        <!-- Datumski picker -->
+        <div class="flex-1 min-w-[390px]">
+            <label class="block text-xs text-slate-400 mb-1.5">Obdobje</label>
+            <div class="flex gap-3">
+                <div class="flex-1">
+                    <input type="date" name="start_date" value="{{ start_date }}" 
+                           class="w-full bg-slate-900 border border-slate-700 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:border-blue-500">
+                </div>
+                <div class="flex-1">
+                    <input type="date" name="end_date" value="{{ end_date }}" 
+                           class="w-full bg-slate-900 border border-slate-700 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:border-blue-500">
+                </div>
+            </div>
         </div>
 
-        <button type="submit" 
-                class="bg-blue-600 hover:bg-blue-500 px-6 py-2.5 rounded-xl text-sm font-medium transition-colors">
-            Osveži
-        </button>
+        <!-- Resampling nastavitve -->
+        <div class="flex-1 min-w-[260px]">
+            <label class="block text-xs text-slate-400 mb-1.5">Resampling</label>
+            <div class="flex gap-3">
+                <select name="interval" class="flex-1 bg-slate-900 border border-slate-700 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:border-blue-500">
+                    <option value="1"   {% if interval == 1 %}selected{% endif %}>1 min</option>
+                    <option value="5"   {% if interval == 5 or not interval %}selected{% endif %}>5 min</option>
+                    <option value="15"  {% if interval == 15 %}selected{% endif %}>15 min</option>
+                    <option value="60"  {% if interval == 60 %}selected{% endif %}>1 ura</option>
+                    <option value="1440"{% if interval == 1440 %}selected{% endif %}>1 dan</option>
+                </select>
+
+                <select name="fill_method" class="flex-1 bg-slate-900 border border-slate-700 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:border-blue-500">
+                    <option value="ffill"      {% if fill_method == 'ffill' %}selected{% endif %}>Forward Fill</option>
+                    <option value="interpolate"{% if fill_method == 'interpolate' %}selected{% endif %}>Interpolacija</option>
+                    <option value="bfill"      {% if fill_method == 'bfill' %}selected{% endif %}>Backward Fill</option>
+                    <option value="zero"       {% if fill_method == 'zero' %}selected{% endif %}>0</option>
+                </select>
+            </div>
+        </div>
+
+        <!-- Hitri gumbi + Osveži -->
+        <div class="flex gap-2">
+            <a href="?{% if view_type %}view={{ view_type }}&{% endif %}quick=1" 
+               class="quick-btn px-5 py-3 text-sm rounded-2xl transition-all {% if request.GET.quick == '1' %}bg-blue-600 text-white shadow-lg{% else %}bg-slate-800 hover:bg-slate-700{% endif %}">
+                24h
+            </a>
+            <a href="?{% if view_type %}view={{ view_type }}&{% endif %}quick=7" 
+               class="quick-btn px-5 py-3 text-sm rounded-2xl transition-all {% if request.GET.quick == '7' %}bg-blue-600 text-white shadow-lg{% else %}bg-slate-800 hover:bg-slate-700{% endif %}">
+                7d
+            </a>
+            <a href="?{% if view_type %}view={{ view_type }}&{% endif %}quick=30" 
+               class="quick-btn px-5 py-3 text-sm rounded-2xl transition-all {% if request.GET.quick == '30' %}bg-blue-600 text-white shadow-lg{% else %}bg-slate-800 hover:bg-slate-700{% endif %}">
+                30d
+            </a>
+            <a href="?{% if view_type %}view={{ view_type }}&{% endif %}all=true" 
+               class="quick-btn px-5 py-3 text-sm rounded-2xl transition-all {% if all_data %}bg-blue-600 text-white shadow-lg{% else %}bg-slate-800 hover:bg-slate-700{% endif %}">
+                Vsi
+            </a>
+
+            <button type="submit" 
+                    class="bg-blue-600 hover:bg-blue-500 px-6 py-3 rounded-2xl text-sm font-medium transition-all shadow-lg">
+                Osveži
+            </button>
+        </div>
     </form>
 </div>
     <!-- Glavni graf -->

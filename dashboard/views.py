@@ -314,9 +314,18 @@ def room_detail(request, room_id):
     df['timestamp'] = pd.to_datetime(df['timestamp'])
     df = df.rename(columns={'parameter__name': 'parameter'})
 
-    # Skupni parametri za resampling
-    interval_minutes = int(request.GET.get('interval', 60))
-    fill_method = request.GET.get('fill_method', 'ffill')
+    # === Shranjevanje / branje resampling nastavitev iz session ===
+    if request.method == 'GET':
+        # Če uporabnik pošlje nove vrednosti → shrani v session
+        if 'interval' in request.GET:
+            request.session['resample_interval'] = int(request.GET.get('interval'))
+        if 'fill_method' in request.GET:
+            request.session['resample_fill_method'] = request.GET.get('fill_method')
+
+    # Privzete vrednosti, če v sessionu še ni ničesar
+    interval_minutes = request.session.get('resample_interval', 15)
+    fill_method = request.session.get('resample_fill_method', 'ffill')
+
     context['interval'] = interval_minutes
     context['fill_method'] = fill_method
 
@@ -798,9 +807,18 @@ def parameter_detail(request, parameter_id):
         'all_data': all_data,
     }
 
-    # Skupni parametri za resampling
-    interval_minutes = int(request.GET.get('interval', 60))
-    fill_method = request.GET.get('fill_method', 'ffill')
+    # === Shranjevanje / branje resampling nastavitev iz session ===
+    if request.method == 'GET':
+        # Če uporabnik pošlje nove vrednosti → shrani v session
+        if 'interval' in request.GET:
+            request.session['resample_interval'] = int(request.GET.get('interval'))
+        if 'fill_method' in request.GET:
+            request.session['resample_fill_method'] = request.GET.get('fill_method')
+
+    # Privzete vrednosti, če v sessionu še ni ničesar
+    interval_minutes = request.session.get('resample_interval', 15)
+    fill_method = request.session.get('resample_fill_method', 'ffill')
+
     context['interval'] = interval_minutes
     context['fill_method'] = fill_method
 
