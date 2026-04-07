@@ -1,5 +1,5 @@
 from django.urls import path
-from .views import dashboard_overview, room_detail, export_room_csv, parameter_detail, room_graph_fragment, latest_measurements_api, room_live_data
+from .views import dashboard_overview, room_detail, export_room_csv, parameter_detail, room_graph_fragment, latest_measurements_api, room_live_data, export_parameter_csv
 
 urlpatterns = [
     path('', dashboard_overview, name='dashboard'),
@@ -9,4 +9,5 @@ urlpatterns = [
     path('room/<int:room_id>/graph/', room_graph_fragment, name='room_graph_fragment'),
     path('api/latest-measurements/', latest_measurements_api, name='latest_measurements_api'),
     path('api/room/<int:room_id>/live/', room_live_data, name='room_live_data'),
+    path('parameter/<int:parameter_id>/export/', export_parameter_csv, name='export_parameter_csv'),
 ]

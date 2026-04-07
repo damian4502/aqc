@@ -889,3 +889,61 @@ def parameter_detail(request, parameter_id):
         context['no_data'] = True
 
     return render(request, 'dashboard/parameter_detail.html', context)
+
+def export_parameter_csv(request, parameter_id):
+    parameter = get_object_or_404(Parameter, id=parameter_id)
+
+    # Datumski filter
+    all_data = request.GET.get('all') == 'true'
+    if all_data:
+        start_date = None
+        end_date = timezone.now()
+    else:
+        start_date_str = request.GET.get('start_date')
+        end_date_str = request.GET.get('end_date')
+        if start_date_str and end_date_str:
+            start_date = datetime.strptime(start_date_str, '%Y-%m-%d')
+            end_date = datetime.strptime(end_date_str, '%Y-%m-%d').replace(hour=23, minute=59, second=59)
+        else:
+            start_date = timezone.now() - timedelta(days=30)
+            end_date = timezone.now()
+
+    # Resampling parametri
+    interval_minutes = int(request.GET.get('interval', 15))
+    fill_method = request.GET.get('fill_method', 'ffill')
+
+    # Pridobi meritve
+    qs = Measurement.objects.filter(parameter=parameter).select_related('sensor__room')
+    if not all_data:
+        qs = qs.filter(timestamp__gte=start_date, timestamp__lte=end_date)
+
+    measurements = qs.order_by('timestamp')
+
+    if not measurements.exists():
+        # Prazen CSV
+        response = HttpResponse(content_type='text/csv')
+        response['Content-Disposition'] = f'attachment; filename="{parameter.name}_no_data.csv"'
+        return response
+
+    df = pd.DataFrame(list(measurements.values(
+        'timestamp', 'value', 'sensor__room__name'
+    )))
+    df['timestamp'] = pd.to_datetime(df['timestamp'])
+    df = df.rename(columns={'sensor__room__name': 'room'})
+
+    # Resampling
+    resampled = resample_measurements(df, interval_minutes, fill_method, column_name='room')
+
+    # Priprava za CSV
+    resampled = resampled.reset_index()
+    resampled['timestamp'] = resampled['timestamp'].dt.strftime('%Y-%m-%d %H:%M:%S')
+
+    # Ime datoteke
+    filename = f"{parameter.name.replace(' ', '_')}_{interval_minutes}min.csv"
+
+    response = HttpResponse(content_type='text/csv')
+    response['Content-Disposition'] = f'attachment; filename="{filename}"'
+
+    resampled.to_csv(response, index=False, encoding='utf-8')
+
+    return response

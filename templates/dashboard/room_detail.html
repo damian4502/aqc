@@ -44,15 +44,15 @@
         <a href="?view=weekly" class="tab-btn {% if view_type == 'weekly' %}active{% endif %}">Tedenski vzorec</a>
     </div>
 
-<!-- Poenoten filter blok - izboljšan izgled -->
+<!-- Poenoten filter + Export blok -->
 <div class="glass rounded-3xl p-6 mb-8">
-    <form method="get" class="flex flex-wrap items-end gap-6">
+    <form method="get" id="filter-form" class="flex flex-wrap items-end gap-6">
         {% if view_type %}
             <input type="hidden" name="view" value="{{ view_type }}">
         {% endif %}
 
         <!-- Datumski picker -->
-        <div class="flex-1 min-w-[390px]">
+        <div class="flex-1 min-w-[240px]">
             <label class="block text-xs text-slate-400 mb-1.5">Obdobje</label>
             <div class="flex gap-3">
                 <div class="flex-1">
@@ -67,12 +67,12 @@
         </div>
 
         <!-- Resampling nastavitve -->
-        <div class="flex-1 min-w-[260px]">
+        <div class="flex-1 min-w-[280px]">
             <label class="block text-xs text-slate-400 mb-1.5">Resampling</label>
             <div class="flex gap-3">
                 <select name="interval" class="flex-1 bg-slate-900 border border-slate-700 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:border-blue-500">
                     <option value="1"   {% if interval == 1 %}selected{% endif %}>1 min</option>
-                    <option value="5"   {% if interval == 5 or not interval %}selected{% endif %}>5 min</option>
+                    <option value="5"   {% if interval == 5 %}selected{% endif %}>5 min</option>
                     <option value="15"  {% if interval == 15 %}selected{% endif %}>15 min</option>
                     <option value="60"  {% if interval == 60 %}selected{% endif %}>1 ura</option>
                     <option value="1440"{% if interval == 1440 %}selected{% endif %}>1 dan</option>
@@ -87,33 +87,40 @@
             </div>
         </div>
 
-        <!-- Hitri gumbi + Osveži -->
-        <div class="flex gap-2">
+        <!-- Akcije -->
+        <div class="flex gap-3">
+            <!-- Hitri gumbi -->
             <a href="?{% if view_type %}view={{ view_type }}&{% endif %}quick=1" 
-               class="quick-btn px-5 py-3 text-sm rounded-2xl transition-all {% if request.GET.quick == '1' %}bg-blue-600 text-white shadow-lg{% else %}bg-slate-800 hover:bg-slate-700{% endif %}">
+               class="quick-btn px-5 py-3 text-sm rounded-2xl transition-all {% if request.GET.quick == '1' %}bg-blue-600 text-white{% else %}bg-slate-800 hover:bg-slate-700{% endif %}">
                 24h
             </a>
             <a href="?{% if view_type %}view={{ view_type }}&{% endif %}quick=7" 
-               class="quick-btn px-5 py-3 text-sm rounded-2xl transition-all {% if request.GET.quick == '7' %}bg-blue-600 text-white shadow-lg{% else %}bg-slate-800 hover:bg-slate-700{% endif %}">
+               class="quick-btn px-5 py-3 text-sm rounded-2xl transition-all {% if request.GET.quick == '7' %}bg-blue-600 text-white{% else %}bg-slate-800 hover:bg-slate-700{% endif %}">
                 7d
             </a>
             <a href="?{% if view_type %}view={{ view_type }}&{% endif %}quick=30" 
-               class="quick-btn px-5 py-3 text-sm rounded-2xl transition-all {% if request.GET.quick == '30' %}bg-blue-600 text-white shadow-lg{% else %}bg-slate-800 hover:bg-slate-700{% endif %}">
+               class="quick-btn px-5 py-3 text-sm rounded-2xl transition-all {% if request.GET.quick == '30' %}bg-blue-600 text-white{% else %}bg-slate-800 hover:bg-slate-700{% endif %}">
                 30d
             </a>
             <a href="?{% if view_type %}view={{ view_type }}&{% endif %}all=true" 
-               class="quick-btn px-5 py-3 text-sm rounded-2xl transition-all {% if all_data %}bg-blue-600 text-white shadow-lg{% else %}bg-slate-800 hover:bg-slate-700{% endif %}">
+               class="quick-btn px-5 py-3 text-sm rounded-2xl transition-all {% if all_data %}bg-blue-600 text-white{% else %}bg-slate-800 hover:bg-slate-700{% endif %}">
                 Vsi
             </a>
 
+            <!-- Osveži + Export -->
             <button type="submit" 
-                    class="bg-blue-600 hover:bg-blue-500 px-6 py-3 rounded-2xl text-sm font-medium transition-all shadow-lg">
-                Osveži
+                    class="bg-blue-600 hover:bg-blue-500 px-6 py-3 rounded-2xl text-sm font-medium transition-all">
+                Osveži graf
+            </button>
+
+            <button type="button" onclick="exportCSV()" 
+                    class="bg-emerald-600 hover:bg-emerald-500 px-6 py-3 rounded-2xl text-sm font-medium transition-all flex items-center gap-2">
+                <i class="fas fa-download"></i>
+                Izvozi CSV
             </button>
         </div>
     </form>
 </div>
-
 <!-- Glavni graf / vsebina -->
 <div id="main-graph" class="glass rounded-3xl p-6 min-h-[600px]">
     {% if no_data %}
@@ -145,4 +152,24 @@
 </div>
 
 </div>
+
+<script>
+    function exportCSV() {
+        const form = document.getElementById('filter-form');
+        const formData = new FormData(form);
+        
+        let baseUrl;
+        {% if room %}
+            baseUrl = '{% url "export_room_csv" room.id %}';
+        {% elif parameter %}
+            baseUrl = '{% url "export_parameter_csv" parameter.id %}';
+        {% endif %}
+        
+        let params = new URLSearchParams();
+        for (let [key, value] of formData.entries()) {
+            if (value) params.append(key, value);
+        }
+        
+        window.location.href = baseUrl + '?' + params.toString();
+    }</script>
 {% endblock %}
