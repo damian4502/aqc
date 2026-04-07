@@ -46,30 +46,89 @@
         <a href="?view=weekly" class="tab-btn {% if view_type == 'weekly' %}active{% endif %}">Tedenski vzorec</a>
     </div>
 
-    <!-- Hitri gumbi + Datumski izbirnik -->
-    <div class="glass rounded-3xl p-6">
-        <div class="flex flex-wrap items-center gap-4 mb-6">
-            <span class="text-slate-400 font-medium">Hitri izbor:</span>
-            <a href="?view={{ view_type }}&days=1" class="quick-btn {% if request.GET.days == '1' %}active{% endif %}">24 ure</a>
-            <a href="?view={{ view_type }}&days=7" class="quick-btn {% if request.GET.days == '7' %}active{% endif %}">1 teden</a>
-            <a href="?view={{ view_type }}&days=30" class="quick-btn {% if request.GET.days == '30' %}active{% endif %}">1 mesec</a>
-            <a href="?view={{ view_type }}&all=true" class="quick-btn {% if all_data %}active{% endif %}">Vsi podatki</a>
+<!-- Izbor intervala in polnjenja za graf -->
+<div class="glass rounded-2xl p-5 mb-6">
+    <form method="get" class="flex flex-wrap gap-4 items-end">
+        {% if start_date and end_date %}
+            <input type="hidden" name="start_date" value="{{ start_date }}">
+            <input type="hidden" name="end_date" value="{{ end_date }}">
+        {% endif %}
+        {% if all_data %}
+            <input type="hidden" name="all" value="true">
+        {% endif %}
+
+        <div>
+            <label class="block text-xs text-slate-400 mb-1">Interval resamplinga</label>
+            <select name="interval" class="bg-slate-900 border border-slate-700 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-blue-500">
+                <option value="1"   {% if interval == 1 %}selected{% endif %}>1 minuta</option>
+                <option value="5"   {% if interval == 5 or not interval %}selected{% endif %}>5 minut</option>
+                <option value="15"  {% if interval == 15 %}selected{% endif %}>15 minut</option>
+                <option value="60"  {% if interval == 60 %}selected{% endif %}>1 ura</option>
+                <option value="1440"{% if interval == 1440 %}selected{% endif %}>1 dan</option>
+            </select>
         </div>
 
-        <form method="get" class="flex gap-4 items-end">
-            <input type="hidden" name="view" value="{{ view_type }}">
-            <div>
-                <label class="block text-xs text-slate-400 mb-1">Od</label>
-                <input type="date" name="start_date" value="{{ start_date }}" class="bg-slate-900 border border-slate-700 rounded-2xl px-5 py-3">
-            </div>
-            <div>
-                <label class="block text-xs text-slate-400 mb-1">Do</label>
-                <input type="date" name="end_date" value="{{ end_date }}" class="bg-slate-900 border border-slate-700 rounded-2xl px-5 py-3">
-            </div>
-            <button type="submit" class="bg-blue-600 hover:bg-blue-500 px-8 py-3 rounded-2xl">Osveži</button>
-        </form>
+        <div>
+            <label class="block text-xs text-slate-400 mb-1">Polnjenje manjkajočih vrednosti</label>
+            <select name="fill_method" class="bg-slate-900 border border-slate-700 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-blue-500">
+                <option value="ffill"      {% if fill_method == 'ffill' %}selected{% endif %}>Forward Fill (prejšnja vrednost)</option>
+                <option value="interpolate"{% if fill_method == 'interpolate' %}selected{% endif %}>Linearna interpolacija</option>
+                <option value="bfill"      {% if fill_method == 'bfill' %}selected{% endif %}>Backward Fill</option>
+                <option value="zero"       {% if fill_method == 'zero' %}selected{% endif %}>0 (nič)</option>
+            </select>
+        </div>
+
+        <button type="submit" 
+                class="bg-blue-600 hover:bg-blue-500 px-6 py-2.5 rounded-xl text-sm font-medium transition-colors">
+            Osveži graf
+        </button>
+    </form>
+</div>
+
+<!-- Hitri gumbi + datumski filter -->
+<div class="glass rounded-2xl p-5 mb-6">
+    <div class="flex flex-wrap gap-2 mb-4">
+        <a href="?{% if view_type %}view={{ view_type }}&{% endif %}quick=1" 
+           class="quick-btn px-5 py-2.5 text-sm rounded-xl transition-all {% if request.GET.quick == '1' %}bg-blue-600 text-white{% else %}bg-slate-800 hover:bg-slate-700{% endif %}">
+            24 ure
+        </a>
+        <a href="?{% if view_type %}view={{ view_type }}&{% endif %}quick=7" 
+           class="quick-btn px-5 py-2.5 text-sm rounded-xl transition-all {% if request.GET.quick == '7' %}bg-blue-600 text-white{% else %}bg-slate-800 hover:bg-slate-700{% endif %}">
+            1 teden
+        </a>
+        <a href="?{% if view_type %}view={{ view_type }}&{% endif %}quick=30" 
+           class="quick-btn px-5 py-2.5 text-sm rounded-xl transition-all {% if request.GET.quick == '30' %}bg-blue-600 text-white{% else %}bg-slate-800 hover:bg-slate-700{% endif %}">
+            1 mesec
+        </a>
+        <a href="?{% if view_type %}view={{ view_type }}&{% endif %}all=true" 
+           class="quick-btn px-5 py-2.5 text-sm rounded-xl transition-all {% if all_data %}bg-blue-600 text-white{% else %}bg-slate-800 hover:bg-slate-700{% endif %}">
+            Vsi podatki
+        </a>
     </div>
 
+    <!-- Datumski filter -->
+    <form method="get" class="flex flex-wrap gap-3 items-end">
+        {% if view_type %}
+            <input type="hidden" name="view" value="{{ view_type }}">
+        {% endif %}
+
+        <div>
+            <label class="block text-xs text-slate-400 mb-1">Od</label>
+            <input type="date" name="start_date" value="{{ start_date }}" 
+                   class="bg-slate-900 border border-slate-700 rounded-xl px-4 py-2 text-sm">
+        </div>
+        <div>
+            <label class="block text-xs text-slate-400 mb-1">Do</label>
+            <input type="date" name="end_date" value="{{ end_date }}" 
+                   class="bg-slate-900 border border-slate-700 rounded-xl px-4 py-2 text-sm">
+        </div>
+
+        <button type="submit" 
+                class="bg-blue-600 hover:bg-blue-500 px-6 py-2.5 rounded-xl text-sm font-medium transition-colors">
+            Osveži
+        </button>
+    </form>
+</div>
     <!-- Glavni graf -->
     {% if fig %}
         <div class="glass rounded-3xl p-8">

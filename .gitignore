@@ -9,6 +9,7 @@ db.sqlite3-journal
 local_settings.py
 media/
 staticfiles/
+static/admin/
 
 # Docker
 postgres_data/

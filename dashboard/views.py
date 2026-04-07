@@ -35,6 +35,35 @@ from datetime import datetime, timedelta
 import pandas as pd
 from django.http import JsonResponse
 
+from django.http import JsonResponse
+from django.shortcuts import get_object_or_404
+from rooms.models import Room
+
+def room_live_data(request, room_id):
+    room = get_object_or_404(Room, id=room_id)
+    
+    # Zadnje meritve za ta prostor
+    from measurements.models import Measurement
+    latest_measurements = Measurement.objects.filter(
+        sensor__room=room
+    ).select_related('parameter', 'sensor').order_by('-timestamp')[:10]
+
+    data = {
+        'room_id': room.id,
+        'room_name': room.name,
+        'measurements': []
+    }
+
+    for m in latest_measurements:
+        data['measurements'].append({
+            'parameter': m.parameter.name,
+            'value': float(m.value),
+            'unit': m.parameter.unit or '',
+            'time': m.timestamp.strftime("%H:%M:%S")
+        })
+
+    return JsonResponse(data)
+    
 def latest_measurements_api(request):
     from measurements.models import Measurement
     latest = Measurement.objects.select_related('sensor__room', 'parameter')\
@@ -203,14 +232,13 @@ from plotly.subplots import make_subplots
 import pandas as pd
 from datetime import datetime, timedelta
 from django.utils import timezone
-
 def room_detail(request, room_id):
     room = get_object_or_404(Room, id=room_id)
-    
+   
     view_type = request.GET.get('view', 'trend')
+    # === Poenoteni datumski filter + hitri gumbi ===
     all_data = request.GET.get('all') == 'true'
-
-    # === Datumski filter + "Vsi podatki" ===
+    
     if all_data:
         start_date = None
         end_date = timezone.now()
@@ -219,12 +247,13 @@ def room_detail(request, room_id):
     else:
         start_date_str = request.GET.get('start_date')
         end_date_str = request.GET.get('end_date')
-        days = request.GET.get('days')
-
-        if days:
+        
+        # Hitri gumbi (24h, 7d, 30d)
+        quick_days = request.GET.get('quick')
+        if quick_days:
             try:
-                days_int = int(days)
-                start_date = timezone.now() - timedelta(days=days_int)
+                days = int(quick_days)
+                start_date = timezone.now() - timedelta(days=days)
                 end_date = timezone.now()
             except:
                 start_date = timezone.now() - timedelta(days=14)
@@ -237,28 +266,27 @@ def room_detail(request, room_id):
                 start_date = timezone.now() - timedelta(days=14)
                 end_date = timezone.now()
         else:
+            # privzeto
             start_date = timezone.now() - timedelta(days=14)
             end_date = timezone.now()
 
         context_start = start_date.strftime('%Y-%m-%d') if start_date else ''
         context_end = end_date.strftime('%Y-%m-%d') if end_date else ''
-
-    # Zadnje meritve
+    
+    # Zadnje meritve za vrh kartice
     latest_measurements = Measurement.objects.filter(
         sensor__room=room
     ).select_related('sensor', 'parameter')\
      .order_by('parameter_id', '-timestamp')\
      .distinct('parameter_id')
 
-# AQI Gauge za vrh strani
+    # AQI Gauge
     latest_aqi = Measurement.objects.filter(
         sensor__room=room,
         parameter__name__iexact="AQI"
     ).order_by('-timestamp').first()
 
-    aqi_gauge = None
-    if latest_aqi:
-        aqi_gauge = create_aqi_gauge(latest_aqi.value)
+    aqi_gauge = create_aqi_gauge(latest_aqi.value) if latest_aqi else None
 
     context = {
         'room': room,
@@ -267,80 +295,137 @@ def room_detail(request, room_id):
         'end_date': context_end,
         'view_type': view_type,
         'all_data': all_data,
-        'aqi_gauge': aqi_gauge,          # ← DODANO
+        'aqi_gauge': aqi_gauge,
     }
 
-    # Meritve za grafe
+    # === Meritve za grafe ===
     qs = Measurement.objects.filter(sensor__room=room)
-    if not all_data:
+    if not all_data and start_date:
         qs = qs.filter(timestamp__gte=start_date, timestamp__lte=end_date)
 
     measurements = qs.select_related('parameter').order_by('timestamp')
 
-    if measurements.exists():
-        df = pd.DataFrame(list(measurements.values('timestamp', 'value', 'parameter__name')))
-        df['timestamp'] = pd.to_datetime(df['timestamp'])
-        df = df.rename(columns={'parameter__name': 'parameter'})
+    if not measurements.exists():
+        context['no_data'] = True
+        return render(request, 'dashboard/room_detail.html', context)
 
-        if view_type == 'trend':
-            fig = px.line(df, x='timestamp', y='value', color='parameter',
+    # Priprava DataFrame
+    df = pd.DataFrame(list(measurements.values('timestamp', 'value', 'parameter__name')))
+    df['timestamp'] = pd.to_datetime(df['timestamp'])
+    df = df.rename(columns={'parameter__name': 'parameter'})
+
+    # Skupni parametri za resampling
+    interval_minutes = int(request.GET.get('interval', 60))
+    fill_method = request.GET.get('fill_method', 'ffill')
+    context['interval'] = interval_minutes
+    context['fill_method'] = fill_method
+
+    # === Glavna logika po view_type ===
+    if view_type == 'trend':
+        resampled = resample_measurements(df, interval_minutes, fill_method)
+        if not resampled.empty:
+            fig = px.line(resampled, x=resampled.index, y=resampled.columns,
                          title=f'Časovni trend - {room.name}',
                          height=700)
             fig = apply_dark_theme(fig)
             context['fig'] = fig.to_html(full_html=False, include_plotlyjs='cdn')
 
-        elif view_type == 'correlation':
-            pivot = df.pivot_table(index='timestamp', columns='parameter', values='value')
-            corr_matrix = pivot.corr().round(2)
-            fig = px.imshow(corr_matrix, text_auto=True, aspect="auto", 
-                           color_continuous_scale='RdBu_r',
-                           title='Korelacija med parametri')
-            fig = apply_dark_theme(fig)
-            context['fig'] = fig.to_html(full_html=False, include_plotlyjs='cdn')
-
-        elif view_type == 'hourly':
-            df['hour'] = df['timestamp'].dt.hour
-            hourly = df.groupby(['hour', 'parameter'])['value'].mean().reset_index()
-            fig = px.line(hourly, x='hour', y='value', color='parameter',
-                         title='Dnevni vzorec (povprečje po uri)', markers=True)
-            fig.update_layout(xaxis=dict(tickmode='linear', dtick=1))
-            fig = apply_dark_theme(fig)
-            context['fig'] = fig.to_html(full_html=False, include_plotlyjs='cdn')
-
-        elif view_type == 'weekly':
-            df['dayofweek'] = df['timestamp'].dt.day_name()
-            df['weekday'] = df['timestamp'].dt.weekday
+    elif view_type == 'correlation':
+        resampled = resample_measurements(df, interval_minutes, fill_method)
+        
+        if resampled.empty or len(resampled.columns) < 2:
+            context['no_data'] = True
+        else:
+            corr_matrix = resampled.corr().round(2)
             
-            # Tedenski vzorec - Line chart
-            weekly = df.groupby(['weekday', 'dayofweek', 'parameter'])['value'].mean().reset_index()
-            fig_weekly = px.line(weekly, x='dayofweek', y='value', color='parameter',
-                                title='Tedenski vzorec (line)',
-                                category_orders={"dayofweek": ["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"]})
-            context['fig_weekly'] = fig_weekly.to_html(full_html=False, include_plotlyjs='cdn')
-
-            # === NOVO: Heatmap tedenskega vzorca ===
-            # Povprečje po dnevu v tednu in parametru
-            heatmap_data = df.groupby(['dayofweek', 'parameter'])['value'].mean().unstack()
-            
-            # Lepši vrstni red dni
-            day_order = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
-            heatmap_data = heatmap_data.reindex(day_order)
-            
-            fig_heatmap = px.imshow(
-                heatmap_data.T, 
-                text_auto=True, 
+            fig = px.imshow(
+                corr_matrix,
+                text_auto=True,
                 aspect="auto",
-                color_continuous_scale='RdYlGn_r',   # rdeče = slabo, zeleno = dobro
-                title='Tedenski heatmap vzorec (povprečne vrednosti)'
+                color_continuous_scale='RdBu_r',
+                title=f'Korelacija parametrov - {room.name} (interval: {interval_minutes} min)'
             )
-            fig_heatmap.update_layout(height=600)
-            context['fig_heatmap'] = fig_heatmap.to_html(full_html=False, include_plotlyjs='cdn')
+            fig.update_layout(height=650)
+            fig = apply_dark_theme(fig)
+            context['fig'] = fig.to_html(full_html=False, include_plotlyjs='cdn')
 
-    else:
-        context['no_data'] = True
+    elif view_type == 'hourly':
+        df['hour'] = df['timestamp'].dt.hour
+        hourly = df.groupby(['hour', 'parameter'])['value'].mean().reset_index()
+        fig = px.line(hourly, x='hour', y='value', color='parameter',
+                     title='Dnevni vzorec (povprečje po uri)', markers=True)
+        fig.update_layout(xaxis=dict(tickmode='linear', dtick=1))
+        fig = apply_dark_theme(fig)
+        context['fig'] = fig.to_html(full_html=False, include_plotlyjs='cdn')
+
+    elif view_type == 'weekly':
+        df['dayofweek'] = df['timestamp'].dt.day_name()
+        df['weekday'] = df['timestamp'].dt.weekday
+       
+        # Tedenski line chart
+        weekly = df.groupby(['weekday', 'dayofweek', 'parameter'])['value'].mean().reset_index()
+        fig_weekly = px.line(weekly, x='dayofweek', y='value', color='parameter',
+                            title='Tedenski vzorec (line)',
+                            category_orders={"dayofweek": ["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"]})
+        context['fig_weekly'] = fig_weekly.to_html(full_html=False, include_plotlyjs='cdn')
+
+        # Tedenski heatmap
+        heatmap_data = df.groupby(['dayofweek', 'parameter'])['value'].mean().unstack()
+        day_order = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+        heatmap_data = heatmap_data.reindex(day_order)
+       
+        fig_heatmap = px.imshow(
+            heatmap_data.T,
+            text_auto=True,
+            aspect="auto",
+            color_continuous_scale='RdYlGn_r',
+            title='Tedenski heatmap vzorec (povprečne vrednosti)'
+        )
+        fig_heatmap.update_layout(height=600)
+        context['fig_heatmap'] = fig_heatmap.to_html(full_html=False, include_plotlyjs='cdn')
 
     return render(request, 'dashboard/room_detail.html', context)
+    
+import pandas as pd
+from django.utils import timezone
+def resample_measurements(df, interval_minutes=15, fill_method='ffill', column_name='parameter'):
+    """
+    Univerzalna resampling funkcija.
+    column_name = 'parameter' za room_detail
+                  'room'      za parameter_detail
+    """
+    if df.empty:
+        return pd.DataFrame()
 
+    df = df.copy()
+    df['timestamp'] = pd.to_datetime(df['timestamp'])
+    df = df.set_index('timestamp')
+
+    # Pivot: stolpci so bodisi parametri ali prostori
+    pivot = df.pivot_table(
+        index=df.index, 
+        columns=column_name, 
+        values='value', 
+        aggfunc='mean'
+    )
+
+    freq_map = {1: '1min', 5: '5min', 15: '15min', 60: 'h', 1440: 'D'}
+    freq = freq_map.get(interval_minutes, '15min')
+
+    resampled = pivot.resample(freq).mean()
+
+    # Ravnanje z manjkajočimi vrednostmi
+    if fill_method == 'ffill':
+        resampled = resampled.ffill()
+    elif fill_method == 'bfill':
+        resampled = resampled.bfill()
+    elif fill_method == 'interpolate':
+        resampled = resampled.interpolate(method='linear')
+    elif fill_method == 'zero':
+        resampled = resampled.fillna(0)
+
+    return resampled
+    
 def room_graph_fragment(request, room_id):
     """Vrača SAMO graf za HTMX (fragment)"""
     room = get_object_or_404(Room, id=room_id)
@@ -654,14 +739,15 @@ def dashboard(request):
     }
 
     return render(request, 'dashboard/dashboard.html', context)
-    
+
+
 def parameter_detail(request, parameter_id):
     parameter = get_object_or_404(Parameter, id=parameter_id)
     
     view_type = request.GET.get('view', 'trend')
+    # === Poenoteni datumski filter + hitri gumbi ===
     all_data = request.GET.get('all') == 'true'
-
-    # Datumski filter + "Vsi podatki"
+    
     if all_data:
         start_date = None
         end_date = timezone.now()
@@ -670,12 +756,13 @@ def parameter_detail(request, parameter_id):
     else:
         start_date_str = request.GET.get('start_date')
         end_date_str = request.GET.get('end_date')
-        days = request.GET.get('days')
-
-        if days:
+        
+        # Hitri gumbi (24h, 7d, 30d)
+        quick_days = request.GET.get('quick')
+        if quick_days:
             try:
-                days_int = int(days)
-                start_date = timezone.now() - timedelta(days=days_int)
+                days = int(quick_days)
+                start_date = timezone.now() - timedelta(days=days)
                 end_date = timezone.now()
             except:
                 start_date = timezone.now() - timedelta(days=14)
@@ -688,6 +775,7 @@ def parameter_detail(request, parameter_id):
                 start_date = timezone.now() - timedelta(days=14)
                 end_date = timezone.now()
         else:
+            # privzeto
             start_date = timezone.now() - timedelta(days=14)
             end_date = timezone.now()
 
@@ -710,6 +798,12 @@ def parameter_detail(request, parameter_id):
         'all_data': all_data,
     }
 
+    # Skupni parametri za resampling
+    interval_minutes = int(request.GET.get('interval', 60))
+    fill_method = request.GET.get('fill_method', 'ffill')
+    context['interval'] = interval_minutes
+    context['fill_method'] = fill_method
+
     # Meritve za grafe
     qs = Measurement.objects.filter(parameter=parameter)
 
@@ -728,20 +822,32 @@ def parameter_detail(request, parameter_id):
         df = df.rename(columns={'sensor__room__name': 'room'})
 
         if view_type == 'trend':
-            fig = px.line(df, x='timestamp', y='value', color='room',
-                         title=f'Trend parameterja "{parameter.name}" po prostorih',
+            resampled = resample_measurements(df, interval_minutes, fill_method, column_name='room')
+
+            fig = px.line(resampled, x=resampled.index, y=resampled.columns,
+                         title=f'Časovni trend - {parameter.name}',
                          height=700)
             fig = apply_dark_theme(fig)
             context['fig'] = fig.to_html(full_html=False, include_plotlyjs='cdn')
 
         elif view_type == 'correlation':
-            pivot = df.pivot_table(index='timestamp', columns='room', values='value')
-            corr_matrix = pivot.corr().round(2)
-            fig = px.imshow(corr_matrix, text_auto=True, aspect="auto", 
-                           color_continuous_scale='RdBu_r',
-                           title=f'Korelacija prostorov za parameter {parameter.name}')
-            fig = apply_dark_theme(fig)
-            context['fig'] = fig.to_html(full_html=False, include_plotlyjs='cdn')
+            resampled = resample_measurements(df, interval_minutes, fill_method, column_name='room')
+            
+            if resampled.empty or len(resampled.columns) < 2:
+                context['no_data'] = True
+            else:
+                corr_matrix = resampled.corr().round(2)
+                
+                fig = px.imshow(
+                    corr_matrix,
+                    text_auto=True,
+                    aspect="auto",
+                    color_continuous_scale='RdBu_r',
+                    title=f'Korelacija parametrov - {parameter.name} (interval: {interval_minutes} min)'
+                )
+                fig.update_layout(height=650)
+                fig = apply_dark_theme(fig)
+                context['fig'] = fig.to_html(full_html=False, include_plotlyjs='cdn')
 
         elif view_type == 'hourly':
             df['hour'] = df['timestamp'].dt.hour

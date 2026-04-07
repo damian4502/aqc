@@ -4,12 +4,13 @@
 {% block content %}
 <div class="max-w-7xl mx-auto">
 
+{% comment %}
 <div id="live-ticker" class="glass rounded-3xl px-6 py-3 mb-8 overflow-hidden bg-slate-900/80">
     <div id="ticker-content" class="inline-flex items-center gap-8 text-sm font-medium text-emerald-400 whitespace-nowrap">
         <!-- JavaScript bo polnil -->
     </div>
 </div>
-    
+{% endcomment %}    
 	{% comment %}
     <div class="flex justify-between items-center mb-10">
         <div>
@@ -113,6 +114,7 @@
                     } else if (response.data.room) {
                         // Posamezna nova meritev iz MQTT
                         addSingleMeasurement(response.data);
+						updateRoomCard(response.data);
                     }
                 }
             } catch (err) {
@@ -173,6 +175,48 @@
     }
 
     // Zaženi
+    document.addEventListener('DOMContentLoaded', function() {
+        connectWebSocket();
+    });
+
+    function updateRoomCard(data) {
+        // Poišči kartico po imenu prostora
+        const cards = document.querySelectorAll('.glass.rounded-3xl');
+        
+        cards.forEach(card => {
+            const title = card.querySelector('h2');
+			console.log(title);
+            if (!title || title.textContent.trim() !== data.room) return;
+
+            // Posodobi vrednost parametra
+			console.log(title);
+            const paramTexts = card.querySelectorAll('p.text-xs.text-slate-400');
+            paramTexts.forEach(p => {
+                if (p.textContent.trim() === data.parameter) {
+                    const valueContainer = p.nextElementSibling;
+                    if (valueContainer) {
+                        valueContainer.innerHTML = `
+                            ${parseFloat(data.value).toFixed(1)}
+                            <span class="text-xs font-normal text-slate-400">${data.unit}</span>
+                        `;
+                        // Kratka animacija
+                        valueContainer.classList.add('!text-emerald-400');
+                        setTimeout(() => valueContainer.classList.remove('!text-emerald-400'), 300);
+                    }
+                }
+            });
+
+            // Posodobi vse "time_ago" tekste na kartici
+            const timeElements = card.querySelectorAll('p.text-xs.text-emerald-400');
+            timeElements.forEach(el => {
+                el.textContent = data.time;
+            });
+
+            console.log(`Kartica posodobljena: ${data.room} → ${data.parameter} = ${data.value}`);
+        });
+    }
+
+    // Zaženi WebSocket
     document.addEventListener('DOMContentLoaded', function() {
         connectWebSocket();
     });

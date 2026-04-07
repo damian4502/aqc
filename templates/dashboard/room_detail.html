@@ -37,33 +37,133 @@
     </div>
 
     <!-- Preklopni gumbi - manjši -->
-    <div class="flex flex-wrap gap-2">
-        <a href="?view=trend..." class="tab-btn text-sm py-2.5 px-5">Časovni trend</a>
-        <a href="?view=correlation..." class="tab-btn text-sm py-2.5 px-5">Korelacija</a>
-        <a href="?view=hourly..." class="tab-btn text-sm py-2.5 px-5">Dnevni vzorec</a>
-        <a href="?view=weekly..." class="tab-btn text-sm py-2.5 px-5">Tedenski vzorec</a>
-    </div>
+<div class="flex flex-wrap gap-2 mb-6">
+    <a href="?view=trend{% if not all_data %}&start_date={{ start_date }}&end_date={{ end_date }}{% endif %}" 
+       class="tab-btn {% if view_type == 'trend' %}active{% endif %}">Časovni trend</a>
+    
+    <a href="?view=correlation{% if not all_data %}&start_date={{ start_date }}&end_date={{ end_date }}{% endif %}" 
+       class="tab-btn {% if view_type == 'correlation' %}active{% endif %}">Korelacija</a>
+    
+    <a href="?view=hourly{% if not all_data %}&start_date={{ start_date }}&end_date={{ end_date }}{% endif %}" 
+       class="tab-btn {% if view_type == 'hourly' %}active{% endif %}">Dnevni vzorec</a>
+    
+    <a href="?view=weekly{% if not all_data %}&start_date={{ start_date }}&end_date={{ end_date }}{% endif %}" 
+       class="tab-btn {% if view_type == 'weekly' %}active{% endif %}">Tedenski vzorec</a>
+</div>
 
-    <!-- Hitri gumbi + datumski filter - kompaktno -->
-    <div class="glass rounded-2xl p-5">
-        <div class="flex flex-wrap gap-2 mb-4">
-            <button hx-get="..." class="quick-btn text-xs">24 ure</button>
-            <button hx-get="..." class="quick-btn text-xs">1 teden</button>
-            <button hx-get="..." class="quick-btn text-xs">1 mesec</button>
-            <button hx-get="..." class="quick-btn text-xs">Vsi podatki</button>
+<!-- Izbor intervala in polnjenja manjkajočih vrednosti -->
+<div class="glass rounded-2xl p-5 mb-6">
+    <form method="get" class="flex flex-wrap gap-4 items-end">
+        {% if start_date and end_date %}
+            <input type="hidden" name="start_date" value="{{ start_date }}">
+            <input type="hidden" name="end_date" value="{{ end_date }}">
+        {% endif %}
+        {% if all_data %}
+            <input type="hidden" name="all" value="true">
+        {% endif %}
+
+        <div>
+            <label class="block text-xs text-slate-400 mb-1">Interval resamplinga</label>
+            <select name="interval" class="bg-slate-900 border border-slate-700 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-blue-500">
+                <option value="1"  {% if interval == 1 %}selected{% endif %}>1 minuta</option>
+                <option value="5"  {% if interval == 5 or not interval %}selected{% endif %}>5 minut</option>
+                <option value="15" {% if interval == 15 %}selected{% endif %}>15 minut</option>
+                <option value="60" {% if interval == 60 %}selected{% endif %}>1 ura</option>
+                <option value="1440" {% if interval == 1440 %}selected{% endif %}>1 dan</option>
+            </select>
         </div>
-        
-        <form hx-get="..." class="flex gap-3 items-end text-sm">
-            <input type="date" name="start_date" value="{{ start_date }}" class="bg-slate-900 border border-slate-700 rounded-xl px-4 py-2 text-sm">
-            <input type="date" name="end_date" value="{{ end_date }}" class="bg-slate-900 border border-slate-700 rounded-xl px-4 py-2 text-sm">
-            <button type="submit" class="bg-blue-600 hover:bg-blue-500 px-6 py-2 rounded-xl text-sm">Osveži</button>
-        </form>
+
+        <div>
+            <label class="block text-xs text-slate-400 mb-1">Polnjenje manjkajočih vrednosti</label>
+            <select name="fill_method" class="bg-slate-900 border border-slate-700 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-blue-500">
+                <option value="ffill"      {% if fill_method == 'ffill' %}selected{% endif %}>Forward Fill (prejšnja vrednost)</option>
+                <option value="interpolate"{% if fill_method == 'interpolate' %}selected{% endif %}>Linearna interpolacija</option>
+                <option value="bfill"      {% if fill_method == 'bfill' %}selected{% endif %}>Backward Fill (naslednja vrednost)</option>
+                <option value="zero"       {% if fill_method == 'zero' %}selected{% endif %}>0 (nič)</option>
+            </select>
+        </div>
+
+        <button type="submit" 
+                class="bg-blue-600 hover:bg-blue-500 px-6 py-2.5 rounded-xl text-sm font-medium transition-colors">
+            Osveži graf
+        </button>
+    </form>
+</div>
+
+
+<!-- Hitri gumbi + datumski filter -->
+<div class="glass rounded-2xl p-5 mb-6">
+    <div class="flex flex-wrap gap-2 mb-4">
+        <a href="?{% if view_type %}view={{ view_type }}&{% endif %}quick=1" 
+           class="quick-btn px-5 py-2.5 text-sm rounded-xl transition-all {% if request.GET.quick == '1' %}bg-blue-600 text-white{% else %}bg-slate-800 hover:bg-slate-700{% endif %}">
+            24 ure
+        </a>
+        <a href="?{% if view_type %}view={{ view_type }}&{% endif %}quick=7" 
+           class="quick-btn px-5 py-2.5 text-sm rounded-xl transition-all {% if request.GET.quick == '7' %}bg-blue-600 text-white{% else %}bg-slate-800 hover:bg-slate-700{% endif %}">
+            1 teden
+        </a>
+        <a href="?{% if view_type %}view={{ view_type }}&{% endif %}quick=30" 
+           class="quick-btn px-5 py-2.5 text-sm rounded-xl transition-all {% if request.GET.quick == '30' %}bg-blue-600 text-white{% else %}bg-slate-800 hover:bg-slate-700{% endif %}">
+            1 mesec
+        </a>
+        <a href="?{% if view_type %}view={{ view_type }}&{% endif %}all=true" 
+           class="quick-btn px-5 py-2.5 text-sm rounded-xl transition-all {% if all_data %}bg-blue-600 text-white{% else %}bg-slate-800 hover:bg-slate-700{% endif %}">
+            Vsi podatki
+        </a>
     </div>
 
-    <!-- Glavni graf -->
-    <div id="main-graph" class="glass rounded-3xl p-6">
-        {% if fig %}{{ fig|safe }}{% endif %}
-    </div>
+    <!-- Datumski filter -->
+    <form method="get" class="flex flex-wrap gap-3 items-end">
+        {% if view_type %}
+            <input type="hidden" name="view" value="{{ view_type }}">
+        {% endif %}
+
+        <div>
+            <label class="block text-xs text-slate-400 mb-1">Od</label>
+            <input type="date" name="start_date" value="{{ start_date }}" 
+                   class="bg-slate-900 border border-slate-700 rounded-xl px-4 py-2 text-sm">
+        </div>
+        <div>
+            <label class="block text-xs text-slate-400 mb-1">Do</label>
+            <input type="date" name="end_date" value="{{ end_date }}" 
+                   class="bg-slate-900 border border-slate-700 rounded-xl px-4 py-2 text-sm">
+        </div>
+
+        <button type="submit" 
+                class="bg-blue-600 hover:bg-blue-500 px-6 py-2.5 rounded-xl text-sm font-medium transition-colors">
+            Osveži
+        </button>
+    </form>
+</div>
+<!-- Glavni graf / vsebina -->
+<div id="main-graph" class="glass rounded-3xl p-6 min-h-[600px]">
+    {% if no_data %}
+        <div class="flex items-center justify-center h-96 text-slate-400">
+            <div class="text-center">
+                <i class="fas fa-chart-bar text-6xl mb-4 opacity-30"></i>
+                <p class="text-xl">Za izbrano obdobje ni dovolj podatkov za korelacijo.</p>
+                <p class="text-sm mt-2">Poskusi z daljšim obdobjem ali manjšim intervalom.</p>
+            </div>
+        </div>
+    {% elif fig %}
+        {{ fig|safe }}
+    {% elif fig_weekly and fig_heatmap %}
+        <div class="space-y-10">
+            <div>
+                <h3 class="text-lg font-semibold mb-4 text-white">Tedenski vzorec</h3>
+                {{ fig_weekly|safe }}
+            </div>
+            <div>
+                <h3 class="text-lg font-semibold mb-4 text-white">Tedenski Heatmap</h3>
+                {{ fig_heatmap|safe }}
+            </div>
+        </div>
+    {% else %}
+        <div class="flex items-center justify-center h-96 text-slate-400">
+            <p>Izberi pogled zgoraj...</p>
+        </div>
+    {% endif %}
+</div>
 
 </div>
 {% endblock %}
