@@ -245,8 +245,8 @@ def room_detail(request, room_id):
         context_start = ''
         context_end = ''
     else:
-        start_date_str = request.GET.get('start_date')
-        end_date_str = request.GET.get('end_date')
+        start_date_str = request.GET.get('start_date', request.session.get('chart_start_date') )
+        end_date_str = request.GET.get('end_date', request.session.get('chart_end_date') )
         
         # Hitri gumbi (24h, 7d, 30d)
         quick_days = request.GET.get('quick')
@@ -259,6 +259,7 @@ def room_detail(request, room_id):
                 start_date = timezone.now() - timedelta(days=14)
                 end_date = timezone.now()
         elif start_date_str and end_date_str:
+
             try:
                 start_date = datetime.strptime(start_date_str, '%Y-%m-%d')
                 end_date = datetime.strptime(end_date_str, '%Y-%m-%d').replace(hour=23, minute=59, second=59)
@@ -272,6 +273,8 @@ def room_detail(request, room_id):
 
         context_start = start_date.strftime('%Y-%m-%d') if start_date else ''
         context_end = end_date.strftime('%Y-%m-%d') if end_date else ''
+        request.session['chart_start_date'] = context_start
+        request.session['chart_end_date'] = context_end
     
     # Zadnje meritve za vrh kartice
     latest_measurements = Measurement.objects.filter(

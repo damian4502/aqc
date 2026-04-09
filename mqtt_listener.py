@@ -67,7 +67,9 @@ class MQTTListener:
                 'parameter': measurement.parameter.name,
                 'value': float(measurement.value),
                 'unit': measurement.parameter.unit or '',
-                'time': measurement.timestamp.strftime("%H:%M:%S")
+                'time': measurement.timestamp.strftime("%H:%M:%S"),
+                'room_id': measurement.sensor.room.id,
+                'parameter_id': measurement.parameter.id
             }
             
             from channels.layers import get_channel_layer

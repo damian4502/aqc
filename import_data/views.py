@@ -57,7 +57,8 @@ class ImportMeasurementsView(View):
             df = df.rename(columns={time_col: 'timestamp'})
             
             # Pomembno: pretvorba v aware datetime z izbrano časovno cono
-            df['timestamp'] = pd.to_datetime(df['timestamp'], errors='coerce')
+            df['timestamp'] = pd.to_datetime(df['timestamp'], dayfirst=False, errors='coerce')
+            #df['timestamp'] = pd.to_datetime(df['timestamp'], dayfirst=True, errors='coerce')
             
             if df['timestamp'].isna().any():
                 messages.error(request, "Nekateri časovni podatki niso veljavni!")

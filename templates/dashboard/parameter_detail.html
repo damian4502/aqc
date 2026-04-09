@@ -201,4 +201,27 @@
         
         window.location.href = baseUrl + '?' + params.toString();
     }</script>
+
+<script>
+    let socket;
+
+    function connectLiveUpdate() {
+        socket = new WebSocket('ws://' + window.location.host + '/ws/live/');
+
+        socket.onmessage = function(e) {
+            const response = JSON.parse(e.data);
+            if (response.type === 'live_update' && response.data.parameter_id == {{ parameter.id }}) {
+                console.log('Nova meritev za ta parameter:', response.data);
+                
+                if (typeof refreshMainGraph === 'function') {
+                    refreshMainGraph();
+                }
+            }
+        };
+
+        socket.onclose = () => setTimeout(connectLiveUpdate, 3000);
+    }
+
+    document.addEventListener('DOMContentLoaded', connectLiveUpdate);
+</script>
 {% endblock %}

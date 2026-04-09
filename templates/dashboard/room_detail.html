@@ -25,9 +25,9 @@
     </div>
     {% endif %}
     <!-- Zadnje meritve - manjše kartice -->
-    <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+    <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4" id="latest_measurements">
         {% for m in latest_measurements %}
-        <div class="glass rounded-2xl p-5 text-sm">
+        <div class="glass rounded-2xl p-5 text-sm" id="parameter_{{m.parameter.id}}">
             <p class="text-slate-400 text-xs">{{ m.parameter.name }} ({{ m.parameter.unit }})</p>
             <p class="text-2xl font-semibold text-white mt-1">{{ m.value }}</p>
             <p class="text-xs text-emerald-400 mt-1">{{ m.timestamp|date:"d.m H:i" }}</p>
@@ -172,4 +172,61 @@
         
         window.location.href = baseUrl + '?' + params.toString();
     }</script>
-{% endblock %}
+
+
+
+<script>
+    let socket;
+
+    function connectLiveUpdate() {
+        socket = new WebSocket('ws://' + window.location.host + '/ws/live/');
+
+        socket.onmessage = function(e) {
+            try {
+                const response = JSON.parse(e.data);
+                if (response.type === 'live_update' && 
+                    response.data.room_id == {{ room.id }}) {
+                    
+                    updateLatestValues(response.data);
+                }
+            } catch (err) {
+                console.error('Live update parse error:', err);
+            }
+        };
+
+        socket.onclose = function() {
+            setTimeout(connectLiveUpdate, 3000);
+        };
+    }
+
+    function updateLatestValues(data) {
+        // Poišči vse vrstice s parametri
+        const paramRows = document.querySelectorAll('#latest_measurements div#parameter_' + data.parameter_id);
+        
+			console.log(paramRows);
+        paramRows.forEach(row => {
+			// Posodobi vrednost
+			const valueEl = row.querySelector('p.text-2xl.font-semibold');
+			if (valueEl) {
+				valueEl.innerHTML = parseFloat(data.value).toFixed(1);
+				
+				// Kratka zelena animacija
+				valueEl.classList.add('!text-emerald-400');
+				setTimeout(() => valueEl.classList.remove('!text-emerald-400'), 300);
+			}
+
+			// Posodobi čas
+			const timeEl = row.querySelector('p.text-xs.text-emerald-400');
+			if (timeEl) {
+				timeEl.textContent = data.time;
+			}
+
+			console.log(`Posodobljena vrednost: ${data.parameter} = ${data.value}`);
+        });
+    }
+
+    // Zaženi ob nalaganju strani
+    document.addEventListener('DOMContentLoaded', function() {
+        connectLiveUpdate();
+    });
+</script>{% endblock %}
