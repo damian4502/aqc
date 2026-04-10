@@ -5,6 +5,13 @@ class Parameter(models.Model):
     unit = models.CharField(max_length=20, blank=True)    # npr. "°C", "ppm", "µg/m³"
     description = models.TextField(blank=True)
 
+    higher_is_worse = models.BooleanField(
+        default=True,
+        verbose_name="Višja vrednost = slabše",
+        help_text="Označi, če višja vrednost parametra pomeni slabšo kakovost zraka "
+                  "(npr. CO2, AQI, PM2.5). Za temperaturo označi False."
+    )
+    
     def __str__(self):
         return f"{self.name} ({self.unit})" if self.unit else self.name
 

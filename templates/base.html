@@ -62,6 +62,12 @@
                         <span>Pregled prostorov</span>
                     </a>
                     
+                    <a href="{% url 'trends' %}" 
+                       class="sidebar-link flex items-center gap-4 px-6 py-4 rounded-2xl text-slate-200 font-medium {% if request.resolver_match.url_name == 'trends' %}active{% endif %}">
+                        <i class="fas fa-tachometer-alt w-5"></i>
+                        <span>Trendi</span>
+                    </a>
+
                     <a href="{% url 'import_measurements' %}" 
                        class="sidebar-link flex items-center gap-4 px-6 py-4 rounded-2xl text-slate-200 font-medium">
                         <i class="fas fa-upload w-5"></i>

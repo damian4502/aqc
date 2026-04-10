@@ -1,0 +1,64 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}Trendi - Air Quality Control{% endblock %}
+
+{% block content %}
+<div class="max-w-7xl mx-auto px-6 py-8">
+    <h1 class="text-4xl font-bold text-white mb-8">Trendi po parametrih</h1>
+
+    {% for item in trends_data %}
+    <div class="glass rounded-3xl p-8 mb-12">
+        <div class="flex items-center gap-4 mb-6">
+            <h2 class="text-2xl font-semibold">{{ item.parameter.name }} ({{ item.parameter.unit }})</h2>
+            <span class="text-xs bg-slate-700 text-slate-300 px-3 py-1 rounded-full">zadnjih 30 dni</span>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+            {% for room_data in item.rooms %}
+            <div class="glass rounded-2xl p-6 hover:scale-[1.02] transition-all duration-300">
+                <div class="flex justify-between items-start mb-4">
+                    <h3 class="font-semibold text-lg">{{ room_data.room.name }}</h3>
+                    
+                    <span class="text-2xl font-bold">
+                        {{ room_data.current_value }}
+                        <span class="text-xs font-normal text-slate-400">{{ item.parameter.unit }}</span>
+                    </span>
+                </div>
+
+                <!-- Trend indikator -->
+                <div class="flex items-center gap-3 text-sm">
+                    <span class="font-medium">Trend:</span>
+                    
+                    {% if room_data.slope > 0 %}
+                        <span class="{{ room_data.trend_color }} font-semibold">↑ {{ room_data.slope|floatformat:3 }}</span>
+                    {% else %}
+                        <span class="{{ room_data.trend_color }} font-semibold">↓ {{ room_data.slope|floatformat:3 }}</span>
+                    {% endif %}
+                    
+                    <span class="text-xs text-slate-500">(R² = {{ room_data.r_squared }})</span>
+                </div>
+
+                <!-- Sprememba zadnjih 7 dni -->
+                <div class="mt-4 text-xs">
+                    Zadnjih 7 dni: 
+                    {% if room_data.change_7d > 0 %}
+                        <span class="text-emerald-400">+{{ room_data.change_7d|floatformat:1 }}%</span>
+                    {% elif room_data.change_7d < 0 %}
+                        <span class="text-red-400">{{ room_data.change_7d|floatformat:1 }}%</span>
+                    {% else %}
+                        <span class="text-slate-400">0%</span>
+                    {% endif %}
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+    {% empty %}
+    <div class="glass rounded-3xl p-12 text-center">
+        <p class="text-slate-400 text-lg">Ni dovolj podatkov za prikaz trendov.</p>
+        <p class="text-sm text-slate-500 mt-2">Potrebujemo vsaj 5 meritev na prostor v zadnjih 30 dneh.</p>
+    </div>
+    {% endfor %}
+</div>
+{% endblock %}

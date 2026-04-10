@@ -18,13 +18,13 @@
     </div>
 
     <!-- Zadnje meritve po prostorih -->
-    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6" id="latest_measurements">
         {% for m in latest_measurements %}
-        <div class="glass rounded-3xl p-6">
+        <div class="glass rounded-3xl p-6" id="room_{{ m.sensor.room.id }}">
             <div class="flex justify-between">
                 <div>
                     <p class="text-slate-400">{{ m.sensor.room.name }}</p>
-                    <p class="text-3xl font-semibold text-white mt-2">{{ m.value }} <span class="text-lg">{{ parameter.unit }}</span></p>
+                    <p class="text-3xl font-semibold text-white mt-2"><span class="last_value" id="parameter_{{ parameter.id }}">{{ m.value }}</span> <span class="text-lg">{{ parameter.unit }}</span></p>
                 </div>
                 <div class="text-right text-sm">
                     <p class="text-emerald-400">{{ m.timestamp|date:"H:i" }}</p>
@@ -209,19 +209,40 @@
         socket = new WebSocket('ws://' + window.location.host + '/ws/live/');
 
         socket.onmessage = function(e) {
-            const response = JSON.parse(e.data);
-            if (response.type === 'live_update' && response.data.parameter_id == {{ parameter.id }}) {
-                console.log('Nova meritev za ta parameter:', response.data);
-                
-                if (typeof refreshMainGraph === 'function') {
-                    refreshMainGraph();
+            try {
+                const response = JSON.parse(e.data);
+                if (response.type === 'live_update' && 
+                    response.data.parameter_id == {{ parameter.id }}) {
+                    
+                    updateLatestValues(response.data);
                 }
+            } catch (err) {
+                console.error('Live update parse error:', err);
             }
         };
 
-        socket.onclose = () => setTimeout(connectLiveUpdate, 3000);
+        socket.onclose = function() {
+            setTimeout(connectLiveUpdate, 3000);
+        };
     }
 
-    document.addEventListener('DOMContentLoaded', connectLiveUpdate);
+    function updateLatestValues(data) {
+		const room_box = document.querySelectorAll('#latest_measurements div#room_' + data.room_id);
+		console.log(room_box);
+        // Poišči vse vrstice s parametri
+        const valueEl = room_box[0].querySelector('span.last_value');
+		console.log(valueEl);
+		valueEl.innerHTML = parseFloat(data.value).toFixed(1);
+        
+		valueEl.classList.add('!text-emerald-400');
+		setTimeout(() => valueEl.classList.remove('!text-emerald-400'), 300);
+
+    }
+
+    // Zaženi ob nalaganju strani
+    document.addEventListener('DOMContentLoaded', function() {
+        connectLiveUpdate();
+    });
 </script>
+
 {% endblock %}

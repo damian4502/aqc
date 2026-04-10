@@ -190,7 +190,7 @@ def export_room_csv(request, room_id):
             1: 'min',
             5: '5min',
             15: '15min',
-            60: 'H',
+            60: 'h',
             1440: 'D'
         }
         freq = freq_map.get(interval_min, f'{interval_min}min')
@@ -766,8 +766,8 @@ def parameter_detail(request, parameter_id):
         context_start = ''
         context_end = ''
     else:
-        start_date_str = request.GET.get('start_date')
-        end_date_str = request.GET.get('end_date')
+        start_date_str = request.GET.get('start_date', request.session.get('chart_start_date') )
+        end_date_str = request.GET.get('end_date', request.session.get('chart_end_date') )
         
         # Hitri gumbi (24h, 7d, 30d)
         quick_days = request.GET.get('quick')
@@ -793,6 +793,8 @@ def parameter_detail(request, parameter_id):
 
         context_start = start_date.strftime('%Y-%m-%d') if start_date else ''
         context_end = end_date.strftime('%Y-%m-%d') if end_date else ''
+        request.session['chart_start_date'] = context_start
+        request.session['chart_end_date'] = context_end
 
     # Zadnje meritve za ta parameter (po prostorih)
     latest_measurements = Measurement.objects.filter(
@@ -950,3 +952,77 @@ def export_parameter_csv(request, parameter_id):
     resampled.to_csv(response, index=False, encoding='utf-8')
 
     return response
+
+from django.db.models import Avg
+import numpy as np
+from scipy.stats import linregress
+
+def trends_view(request):
+    parameters = Parameter.objects.all().order_by('name')
+    trends_data = []
+    
+    for param in parameters:
+        measurements = Measurement.objects.filter(
+            parameter=param,
+            timestamp__gte=timezone.now() - timedelta(days=30)
+        ).select_related('sensor__room')
+        
+        if not measurements.exists():
+            continue
+            
+        rooms_data = []
+        
+        for room in Room.objects.all():
+            room_measurements = measurements.filter(sensor__room=room)
+            if room_measurements.count() < 5:
+                continue
+                
+            df = pd.DataFrame(list(room_measurements.values('timestamp', 'value')))
+            df['timestamp'] = pd.to_datetime(df['timestamp'])
+            df = df.sort_values('timestamp')
+            
+            x = np.arange(len(df))
+            y = df['value'].values
+            slope, _, r_value, _, _ = linregress(x, y)
+            
+            current_avg = room_measurements.filter(
+                timestamp__gte=timezone.now() - timedelta(days=7)
+            ).aggregate(Avg('value'))['value__avg'] or 0
+            
+            prev_avg = room_measurements.filter(
+                timestamp__gte=timezone.now() - timedelta(days=14),
+                timestamp__lt=timezone.now() - timedelta(days=7)
+            ).aggregate(Avg('value'))['value__avg'] or current_avg
+            
+            change_7d = ((current_avg - prev_avg) / prev_avg * 100) if prev_avg != 0 else 0
+
+            # === PAMETNO BARVANJE glede na higher_is_worse ===
+            if param.higher_is_worse:
+                # Višje = slabše → negativen slope je dober
+                trend_color = 'text-emerald-400' if slope <= 0 else 'text-red-400'
+            else:
+                # Višje = bolje (npr. temperatura) → pozitiven slope je lahko dober
+                trend_color = 'text-emerald-400' if slope >= 0 else 'text-amber-400'
+
+            rooms_data.append({
+                'room': room,
+                'current_value': round(current_avg, 2),
+                'slope': round(slope, 4),
+                'change_7d': round(change_7d, 1),
+                'r_squared': round(r_value**2, 3),
+                'trend_color': trend_color,
+            })
+        
+        # Sortiranje: za "slabe" parametre želimo najmanjši slope na vrhu
+        if param.higher_is_worse:
+            rooms_data.sort(key=lambda x: x['slope'])           # manjši (bolj negativen) = boljši
+        else:
+            rooms_data.sort(key=lambda x: x['slope'], reverse=True)
+
+        trends_data.append({
+            'parameter': param,
+            'rooms': rooms_data[:12]
+        })
+    
+    context = {'trends_data': trends_data}
+    return render(request, 'dashboard/trends.html', context)
