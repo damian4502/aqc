@@ -232,6 +232,14 @@ from plotly.subplots import make_subplots
 import pandas as pd
 from datetime import datetime, timedelta
 from django.utils import timezone
+
+def monitor(request):
+    context = {}
+    context['parameters'] = Parameter.objects.all().order_by('name')
+
+    return render(request, 'dashboard/monitor.html', context)
+
+
 def room_detail(request, room_id):
     room = get_object_or_404(Room, id=room_id)
    
@@ -1026,3 +1034,21 @@ def trends_view(request):
     
     context = {'trends_data': trends_data}
     return render(request, 'dashboard/trends.html', context)
+
+
+from django.db import models
+def differential_pressure_view(request):
+    # Najdi parameter "Tlak" (lahko prilagodiš ime)
+    pressure_param = Parameter.objects.filter(
+        models.Q(name__icontains='tlak') | models.Q(name__icontains='pressure')
+    ).first()
+
+    sensors = Sensor.objects.filter(
+        parameter=pressure_param
+    ).select_related('room') if pressure_param else Sensor.objects.none()
+
+    context = {
+        'sensors': sensors,
+        'pressure_parameter': pressure_param,
+    }
+    return render(request, 'dashboard/differential_pressure.html', context)

@@ -1,0 +1,204 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}Diferencialni tlak - Air Quality Control{% endblock %}
+
+{% block content %}
+<div class="max-w-7xl mx-auto px-6 py-8">
+    <div class="flex justify-between items-center mb-8">
+        <h1 class="text-4xl font-bold text-white">Diferencialni tlak</h1>
+        <a href="/dashboard/" class="text-blue-400 hover:text-blue-300 flex items-center gap-2">
+            ← Nazaj na pregled
+        </a>
+    </div>
+
+    <!-- Izbira referenčnega senzorja -->
+    <div class="glass rounded-3xl p-6 mb-8">
+        <label class="block text-sm text-slate-400 mb-2 font-medium">Referenčni senzor (P_ref)</label>
+        <select id="ref-sensor" class="w-full max-w-md bg-slate-900 border border-slate-700 rounded-2xl px-5 py-3 text-lg">
+            <option value="">-- Izberi referenčnega senzorja --</option>
+            {% for s in sensors %}
+            <option value="{{ s.id }}">{{ s.room.name }} — {{ s.get_location_display }} ({{ s.name|default:"Brez imena" }})</option>
+            {% endfor %}
+        </select>
+    </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-12 gap-8">
+        <!-- Tabela ΔP -->
+        <div class="lg:col-span-5 glass rounded-3xl p-6">
+            <h2 class="text-lg font-semibold mb-4">Diferencialni tlak</h2>
+            <table class="w-full">
+                <thead>
+                    <tr class="border-b border-slate-700">
+                        <th class="text-left py-3 px-4">Prostor / Senzor</th>
+                        <th class="text-right py-3 px-4">Trenutni tlak</th>
+                        <th class="text-right py-3 px-4">ΔP</th>
+                        <th class="text-right py-3 px-4 text-xs">Zadnja meritev</th>
+                    </tr>
+                </thead>
+                <tbody id="delta-table" class="divide-y divide-slate-700"></tbody>
+            </table>
+        </div>
+
+<!-- Graf in kontrola -->
+<div class="lg:col-span-7 glass rounded-3xl p-6">
+    <div class="flex justify-between items-center mb-4">
+        <h2 class="text-lg font-semibold">Graf diferencialnega tlaka</h2>
+        <div class="flex gap-2">
+            <button onclick="zeroOffset()" class="px-4 py-2 bg-slate-700 hover:bg-slate-600 rounded-2xl text-sm">Zero Offset</button>
+            <button onclick="resetOffset()" class="px-4 py-2 bg-slate-700 hover:bg-slate-600 rounded-2xl text-sm">Reset Offset</button>
+            <button onclick="exportCSV()" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 rounded-2xl text-sm flex items-center gap-2">
+                <i class="fas fa-download"></i> CSV
+            </button>
+        </div>
+    </div>
+    
+    <!-- Pomembno: fiksna višina + omejitev Y-osi -->
+    <div style="height: 460px;">
+        <canvas id="deltaChart"></canvas>
+    </div>
+</div>
+    </div>
+</div>
+
+
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script>
+    let socket;
+    let chart;
+    let offset = 0;
+    let referenceValue = 0;
+    let referenceSensorId = null;
+    let maxPoints = 10;
+
+    function connectWebSocket() {
+        socket = new WebSocket('ws://' + window.location.host + '/ws/live/');
+        
+        socket.onmessage = function(e) {
+            try {
+                const response = JSON.parse(e.data);
+                if (response.type === 'live_update' && response.data) {
+                    const param = (response.data.parameter || '').toString().toLowerCase();
+                    if (param.includes('tlak') || param.includes('pressure') || param.includes('pa')) {
+                        updateLiveData(response.data);
+                    }
+                }
+            } catch (err) {
+                console.error('Parse error:', err);
+            }
+        };
+    }
+
+    function updateLiveData(data) {
+        updateDeltaTable(data);
+
+        if (referenceSensorId && chart) {
+            const delta = (parseFloat(data.value) - referenceValue - offset).toFixed(2);
+            const time = new Date().toLocaleTimeString('sl-SI', {hour:'2-digit', minute:'2-digit'});
+
+            chart.data.labels.push(time);
+            chart.data.datasets[0].data.push(parseFloat(delta));
+
+            if (chart.data.labels.length > maxPoints) {
+                chart.data.labels.shift();
+                chart.data.datasets[0].data.shift();
+            }
+            chart.update('none');
+        }
+    }
+
+    function updateDeltaTable(data) {
+        const tableBody = document.getElementById('delta-table');
+        
+        // Uporabimo room kot ključ (zanesljivejše kot sensor_id)
+        const rowId = 'delta-row-' + data.room.replace(/\s+/g, '-');
+        let row = document.getElementById(rowId);
+        
+        if (!row) {
+            row = document.createElement('tr');
+            row.id = rowId;
+            tableBody.appendChild(row);
+        }
+
+		if (referenceSensorId == data.sensor_id) {
+			referenceValue = data.value;
+		}
+
+        const currentPressure = parseFloat(data.value).toFixed(2);
+        const delta = referenceSensorId ? 
+            (parseFloat(data.value) - referenceValue - offset).toFixed(2) : '—';
+
+        row.innerHTML = `
+            <td class="py-4 px-4 font-medium">${data.room}</td>
+            <td class="text-right py-4 px-4">${currentPressure} Pa</td>
+            <td class="text-right py-4 px-4 font-bold ${delta >= 0 ? 'text-red-400' : 'text-emerald-400'}">
+                ${delta} Pa
+            </td>
+            <td class="text-right py-4 px-4 text-xs text-slate-400">${data.time}</td>
+        `;
+    }
+
+    // Izbira referenčnega senzorja
+    document.getElementById('ref-sensor').addEventListener('change', function() {
+        referenceSensorId = this.value;
+        referenceValue = 0;
+        if (chart) {
+            chart.data.labels = [];
+            chart.data.datasets[0].data = [];
+            chart.update();
+        }
+    });
+
+    function zeroOffset() {
+        const currentDelta = parseFloat(document.querySelector('.font-bold')?.textContent) || 0;
+        offset = currentDelta;
+        alert(`Offset nastavljen na ${offset.toFixed(2)} Pa`);
+    }
+
+    function resetOffset() {
+        offset = 0;
+        alert('Offset resetiran na 0 Pa');
+    }
+
+    function exportCSV() {
+        if (!chart || chart.data.datasets[0].data.length === 0) {
+            alert("Ni podatkov za izvoz!");
+            return;
+        }
+        let csv = "Čas;ΔP (Pa)\n";
+        chart.data.labels.forEach((time, i) => {
+            csv += time + ";" + chart.data.datasets[0].data[i] + "\n";
+        });
+        const blob = new Blob([csv], { type: 'text/csv' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = "diferencial_tlak.csv";
+        a.click();
+    }
+
+    function initChart() {
+        const ctx = document.getElementById('deltaChart').getContext('2d');
+        chart = new Chart(ctx, {
+            type: 'line',
+            data: { labels: [], datasets: [{ label: 'ΔP (Pa)', data: [], borderColor: '#ef4444', tension: 0.25, borderWidth: 3, pointRadius: 0, fill: false }] },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                animation: { duration: 0 },
+                scales: {
+                    y: { beginAtZero: false, suggestedMin: -100, suggestedMax: 100, grid: { color: 'rgba(148,163,184,0.15)' } },
+                    x: { grid: { color: 'rgba(148,163,184,0.15)' }, ticks: { maxRotation: 0 } }
+                },
+                plugins: { legend: { display: false } }
+            }
+        });
+    }
+
+    window.onload = function() {
+        initChart();
+        connectWebSocket();
+    };
+</script>
+{% endblock %}

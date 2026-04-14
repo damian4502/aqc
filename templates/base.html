@@ -62,6 +62,18 @@
                         <span>Pregled prostorov</span>
                     </a>
                     
+                    <a href="{% url 'monitor' %}" 
+                       class="sidebar-link flex items-center gap-4 px-6 py-4 rounded-2xl text-slate-200 font-medium {% if request.resolver_match.url_name == 'monitor' %}active{% endif %}">
+                        <i class="fas fa-tachometer-alt w-5"></i>
+                        <span>Monitor</span>
+                    </a>
+
+                    <a href="{% url 'differential_pressure' %}" 
+                       class="sidebar-link flex items-center gap-4 px-6 py-4 rounded-2xl text-slate-200 font-medium {% if request.resolver_match.url_name == 'differential_pressure' %}active{% endif %}">
+                        <i class="fas fa-tachometer-alt w-5"></i>
+                        <span>Diferencialni tlak</span>
+                    </a>
+
                     <a href="{% url 'trends' %}" 
                        class="sidebar-link flex items-center gap-4 px-6 py-4 rounded-2xl text-slate-200 font-medium {% if request.resolver_match.url_name == 'trends' %}active{% endif %}">
                         <i class="fas fa-tachometer-alt w-5"></i>

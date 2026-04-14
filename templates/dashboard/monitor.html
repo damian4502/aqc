@@ -1,0 +1,296 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}Diferencialni tlak - Air Quality Control{% endblock %}
+
+{% block content %}
+<div class="max-w-7xl mx-auto px-6 py-8">
+    <div class="flex justify-between items-center mb-8">
+        <h1 class="text-4xl font-bold text-white">Live monitor</h1>
+        <a href="/dashboard/" class="text-blue-400 hover:text-blue-300 flex items-center gap-2">
+            ← Nazaj na pregled
+        </a>
+    </div>
+
+    <!-- Izbira referenčnega senzorja -->
+    <div class="glass rounded-3xl p-6 mb-8">
+        <label class="block text-sm text-slate-400 mb-2 font-medium">Parameter</label>
+        <select id="ref-sensor" class="w-full max-w-md bg-slate-900 border border-slate-700 rounded-2xl px-5 py-3 text-lg">
+            <option value="">-- Izberi parameter --</option>
+            {% for s in parameters %}
+            <option value="{{ s.id }}">{{ s.name }}</option>
+            {% endfor %}
+        </select>
+    </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-12 gap-8">
+        <!-- Tabela ΔP -->
+        <div class="lg:col-span-5 glass rounded-3xl p-6">
+            <h2 class="text-lg font-semibold mb-4">Trenutne vrednosti</h2>
+            <table class="w-full">
+                <thead>
+                    <tr class="border-b border-slate-700">
+                        <th class="text-left py-3 px-4">Prostor / Senzor</th>
+                        <th class="text-right py-3 px-4">Vrednost</th>
+                        <th class="text-right py-3 px-4 text-xs">Zadnja meritev</th>
+                    </tr>
+                </thead>
+                <tbody id="delta-table" class="divide-y divide-slate-700"></tbody>
+            </table>
+        </div>
+
+<!-- Graf in kontrola -->
+<div class="lg:col-span-7 glass rounded-3xl p-6">
+    <div class="flex justify-between items-center mb-4">
+        <h2 class="text-lg font-semibold" id="chart-name">Graf vrednosti</h2>
+        <div class="flex gap-2">
+        </div>
+    </div>
+    
+    <!-- Pomembno: fiksna višina + omejitev Y-osi -->
+    <div style="height: 460px;">
+        <canvas id="deltaChart"></canvas>
+    </div>
+</div>
+    </div>
+</div>
+
+
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script>
+    let socket;
+    let chart;
+    let offset = 0;
+    let referenceValue = 0;
+    let referenceSensorId = null;
+	let selectedParameter = null;
+	let selectedRoom = null;
+    let maxPoints = 300;
+	let lastChartVlaue = 0;
+
+    function connectWebSocket() {
+        socket = new WebSocket('ws://' + window.location.host + '/ws/live/');
+        
+        socket.onmessage = function(e) {
+            try {
+                const response = JSON.parse(e.data);
+                if (response.type === 'live_update' && response.data) {
+                    if (selectedParameter && response.data.parameter_id == selectedParameter) {
+                        updateLiveData(response.data);
+                    }
+                }
+            } catch (err) {
+                console.error('Parse error:', err);
+            }
+        };
+    }
+
+    function updateLiveData(data) {
+        updateDeltaTable(data);
+
+        if (selectedRoom == parseInt(data.sensor_id) && chart) {
+            const time = new Date().toLocaleTimeString('sl-SI', {hour:'2-digit', minute:'2-digit'});
+
+			document.getElementById('chart-name').innerHTML = 'Graf vrednosti - ' + data.room;
+			
+			lastChartVlaue = parseFloat(data.value);
+
+            if (chart.data.labels.length > maxPoints) {
+                chart.data.labels.shift();
+                chart.data.datasets[0].data.shift();
+            }
+            chart.update('none');
+        }
+    }
+
+    function updateDeltaTable(data) {
+        const tableBody = document.getElementById('delta-table');
+        
+        // Uporabimo room kot ključ (zanesljivejše kot sensor_id)
+        const rowId = 'delta-row-' + data.sensor_id;
+        let row = document.getElementById(rowId);
+        
+        if (!row) {
+            row = document.createElement('tr');
+            row.id = rowId;
+			row.draggable = true;
+			row.ondragover = "dragOver(event)";
+			row.ondragstart = "dragStart(event)";
+            tableBody.appendChild(row);
+        }
+
+		if (referenceSensorId == data.sensor_id) {
+			referenceValue = data.value;
+		}
+		
+		if (!selectedRoom) {
+			selectedRoom = parseInt(data.sensor_id);
+		}
+
+        const currentPressure = parseFloat(data.value).toFixed(2);
+        const delta = referenceSensorId ? 
+            (parseFloat(data.value) - referenceValue - offset).toFixed(2) : '—';
+
+        row.innerHTML = `
+            <td class="py-4 px-4 font-medium" style="cursor:pointer;">${data.room}</td>
+            <td class="text-right py-4 px-4">${currentPressure}</td>
+            <td class="text-right py-4 px-4 text-xs text-slate-400">${data.time}</td>
+        `;
+
+		row.classList.add('!text-emerald-400');
+		setTimeout(() => row.classList.remove('!text-emerald-400'), 300);
+		
+		row.addEventListener('click', reloadChart);
+    }
+
+	setInterval(updateChart, 1000);
+	
+	function updateChart() {
+        const tableBody = document.getElementById('delta-table');
+		
+		
+
+        if (chart) {
+			if ( tableBody.querySelectorAll('tr').length > 1 ) {
+				tableBody.querySelectorAll('tr').forEach((e, i) => {
+					if (i < 2) {
+						console.log(i);
+						console.log(e);
+						chart.data.datasets[i].data.push( parseFloat( e.querySelectorAll('td')[1].innerHTML ) );
+					} else {
+						return true;
+					}
+				});
+
+			const time = new Date().toLocaleTimeString('sl-SI', {hour:'2-digit', minute:'2-digit'});
+            chart.data.labels.push(time);
+			}
+
+
+            if (chart.data.labels.length > maxPoints) {
+                chart.data.labels.shift();
+                chart.data.datasets[0].data.shift();
+                chart.data.datasets[1].data.shift();
+            }
+
+            chart.update();
+        }
+	}
+
+    // Izbira referenčnega senzorja
+    document.getElementById('ref-sensor').addEventListener('change', function() {
+		selectedParameter = parseInt(this.value);
+		lastChartVlaue = 0;
+		selectedRoom = 0;
+		const tableBody = document.getElementById('delta-table');
+		
+		tableBody.innerHTML = "";
+		
+        if (chart) {
+            chart.data.labels = [];
+            chart.data.datasets[0].data = [];
+            chart.data.datasets[1].data = [];
+            chart.update();
+        }
+    });
+
+    function zeroOffset() {
+        const currentDelta = parseFloat(document.querySelector('.font-bold')?.textContent) || 0;
+        offset = currentDelta;
+        alert(`Offset nastavljen na ${offset.toFixed(2)} Pa`);
+    }
+
+    function reloadChart() {
+		selectedRoom = parseInt(this.id.split('-')[2]);
+		const tableBody = document.getElementById('delta-table');
+		
+		document.getElementById('chart-name').innerHTML = 'Graf vrednosti - ' + this.querySelectorAll('td')[0].innerHTML;
+		
+        if (chart) {
+            chart.data.labels = [];
+            chart.data.datasets[0].data = [];
+			
+			lastChartVlaue = parseFloat( this.querySelectorAll('td')[1].innerHTML );
+
+            chart.update();
+        }
+    }
+
+    function resetOffset() {
+        offset = 0;
+        alert('Offset resetiran na 0 Pa');
+    }
+
+    function exportCSV() {
+        if (!chart || chart.data.datasets[0].data.length === 0) {
+            alert("Ni podatkov za izvoz!");
+            return;
+        }
+        let csv = "Čas;ΔP (Pa)\n";
+        chart.data.labels.forEach((time, i) => {
+            csv += time + ";" + chart.data.datasets[0].data[i] + "\n";
+        });
+        const blob = new Blob([csv], { type: 'text/csv' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = "diferencial_tlak.csv";
+        a.click();
+    }
+
+    function initChart() {
+        const ctx = document.getElementById('deltaChart').getContext('2d');
+        chart = new Chart(ctx, {
+            type: 'line',
+            data: { labels: [], datasets: [{ label: 'ΔP (Pa)', data: [], borderColor: '#ef4444', tension: 0.25, borderWidth: 3, pointRadius: 0, fill: false }, { label: 'ΔP 2(Pa)', data: [], borderColor: 'green', tension: 0.25, borderWidth: 3, pointRadius: 0, fill: false }] },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                animation: { duration: 0 },
+                scales: {
+                    y: { beginAtZero: false, grid: { color: 'rgba(148,163,184,0.15)' } },
+                    x: { grid: { color: 'rgba(148,163,184,0.15)' }, ticks: { maxRotation: 0 } }
+                },
+                plugins: { legend: { display: false } }
+            }
+        });
+    }
+
+    window.onload = function() {
+        initChart();
+        connectWebSocket();
+    };
+	
+	
+	
+	
+	
+	
+	
+	
+	
+var _el;
+
+function dragOver(e) {
+  if (isBefore(_el, e.target))
+    e.target.parentNode.insertBefore(_el, e.target);
+  else
+    e.target.parentNode.insertBefore(_el, e.target.nextSibling);
+}
+
+function dragStart(e) {
+  e.dataTransfer.effectAllowed = "move";
+  e.dataTransfer.setData("text/plain", null); // Thanks to bqlou for their comment.
+  _el = e.target;
+}
+
+function isBefore(el1, el2) {
+  if (el2.parentNode === el1.parentNode)
+    for (var cur = el1.previousSibling; cur && cur.nodeType !== 9; cur = cur.previousSibling)
+      if (cur === el2)
+        return true;
+  return false;
+}	
+</script>
+{% endblock %}

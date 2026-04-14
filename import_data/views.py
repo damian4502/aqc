@@ -66,6 +66,20 @@ class ImportMeasurementsView(View):
 
             # Pretvorba v UTC (najboljša praksa za shranjevanje)
             df['timestamp'] = df['timestamp'].apply(lambda x: tz.localize(x).astimezone(pytz.UTC) if x.tzinfo is None else x)
+            
+            for col in df.columns:
+                if 'aqi' in col.lower():
+                    df = df.rename(columns={col: 'aqi'})
+                if 'pm2.5' in col.lower():
+                    df = df.rename(columns={col: 'pm2.5'})
+                if ('co' in col.lower()) and ('ppm' in col.lower()):
+                    df = df.rename(columns={col: 'co2'})
+                if 'temperature' in col.lower():
+                    df = df.rename(columns={col: 'temperature'})
+                if 'humidity' in col.lower():
+                    df = df.rename(columns={col: 'humidity'})
+                if 'tvoc' in col.lower():
+                    df = df.rename(columns={col: 'tvoc'})
 
             # Preveri parametre
             parameter_columns = [col for col in df.columns if col != 'timestamp']

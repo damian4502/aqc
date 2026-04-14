@@ -66,6 +66,7 @@ class MQTTListener:
                 'room': measurement.sensor.room.name,
                 'parameter': measurement.parameter.name,
                 'value': float(measurement.value),
+                'sensor_id': measurement.sensor.id,
                 'unit': measurement.parameter.unit or '',
                 'time': measurement.timestamp.strftime("%H:%M:%S"),
                 'room_id': measurement.sensor.room.id,
