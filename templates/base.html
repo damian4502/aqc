@@ -40,83 +40,115 @@
 </head>
 <body class="min-h-screen">
     <div class="flex h-screen">
-        
-        <!-- Izboljšan Sidebar -->
-        <div class="w-72 glass border-r border-slate-700 flex flex-col">
-            
-            <!-- Logo -->
-            <div class="px-8 pt-8 pb-10 flex items-center gap-3">
-                <div class="w-11 h-11 bg-gradient-to-br from-blue-500 via-cyan-400 to-violet-500 rounded-2xl flex items-center justify-center text-white font-bold text-2xl shadow-lg">AQC</div>
-                <div>
-                    <h1 class="text-2xl font-semibold tracking-tighter text-white">Air Quality</h1>
-                    <p class="text-xs text-slate-400 -mt-1">Control System</p>
-                </div>
-            </div>
-
-            <!-- Navigacija -->
-            <nav class="flex-1 px-4">
-                <div class="space-y-1">
-                    <a href="{% url 'dashboard' %}" 
-                       class="sidebar-link flex items-center gap-4 px-6 py-4 rounded-2xl text-slate-200 font-medium {% if request.resolver_match.url_name == 'dashboard' %}active{% endif %}">
-                        <i class="fas fa-tachometer-alt w-5"></i>
-                        <span>Pregled prostorov</span>
-                    </a>
-                    
-                    <a href="{% url 'monitor' %}" 
-                       class="sidebar-link flex items-center gap-4 px-6 py-4 rounded-2xl text-slate-200 font-medium {% if request.resolver_match.url_name == 'monitor' %}active{% endif %}">
-                        <i class="fas fa-tachometer-alt w-5"></i>
-                        <span>Monitor</span>
-                    </a>
-
-                    <a href="{% url 'differential_pressure' %}" 
-                       class="sidebar-link flex items-center gap-4 px-6 py-4 rounded-2xl text-slate-200 font-medium {% if request.resolver_match.url_name == 'differential_pressure' %}active{% endif %}">
-                        <i class="fas fa-tachometer-alt w-5"></i>
-                        <span>Diferencialni tlak</span>
-                    </a>
-
-                    <a href="{% url 'trends' %}" 
-                       class="sidebar-link flex items-center gap-4 px-6 py-4 rounded-2xl text-slate-200 font-medium {% if request.resolver_match.url_name == 'trends' %}active{% endif %}">
-                        <i class="fas fa-tachometer-alt w-5"></i>
-                        <span>Trendi</span>
-                    </a>
-
-                    <a href="{% url 'import_measurements' %}" 
-                       class="sidebar-link flex items-center gap-4 px-6 py-4 rounded-2xl text-slate-200 font-medium">
-                        <i class="fas fa-upload w-5"></i>
-                        <span>Uvoz meritev</span>
-                    </a>
-                </div>
-
-                <!-- Dodaten razdelek (lahko kasneje razširimo) -->
-                <div class="mt-12 px-6">
-                    <p class="text-xs uppercase tracking-widest text-slate-500 mb-3">Analize</p>
-                    <div class="text-xs text-slate-400 space-y-2 pl-2">
-                        <div class="flex items-center gap-2">
-                            <i class="fas fa-chart-line text-blue-400"></i>
-                            <span>Trendi</span>
-                        </div>
-                        <div class="flex items-center gap-2">
-                            <i class="fas fa-project-diagram text-violet-400"></i>
-                            <span>Korelacije</span>
-                        </div>
-                    </div>
-                </div>
-            </nav>
-
-            <!-- Footer del sidebarja -->
-            <div class="p-6 border-t border-slate-700 text-xs text-slate-500">
-                <div class="flex items-center justify-between">
-					<span><a href="/admin/" target="_blank">Admin</a></span>
-                    <span class="text-emerald-400">● Online</span>
-                </div>
-            </div>
+        <!-- Sidebar -->
+<div class="w-72 glass border-r border-slate-700 flex flex-col h-screen overflow-hidden">
+    
+    <!-- Logo -->
+    <div class="px-8 pt-8 pb-8 flex items-center gap-3 border-b border-slate-700">
+        <div class="w-10 h-10 bg-gradient-to-br from-blue-500 to-cyan-400 rounded-2xl flex items-center justify-center text-white font-bold text-3xl shadow-inner">AQC</div>
+        <div>
+            <h1 class="text-2xl font-semibold tracking-tighter text-white">Air Quality</h1>
+            <p class="text-xs text-slate-400 -mt-0.5">Control System</p>
         </div>
+    </div>
 
+    <!-- Meni -->
+    <nav class="flex-1 px-3 py-6 overflow-y-auto">
+        <div class="space-y-1">
+
+            <!-- DIREKTNE POVEZAVE -->
+            <a href="/dashboard/" 
+               class="flex items-center gap-4 px-6 py-4 text-slate-200 hover:bg-slate-800 rounded-2xl transition-all">
+                <i class="fas fa-tachometer-alt w-5"></i>
+                <span class="font-medium">Pregled</span>
+            </a>
+
+            <a href="/dashboard/monitor/" 
+               class="flex items-center gap-4 px-6 py-4 text-slate-200 hover:bg-slate-800 rounded-2xl transition-all">
+                <i class="fas fa-chart-line w-5"></i>
+                <span class="font-medium">Live monitor</span>
+            </a>
+
+
+            <a href="/dashboard/differential-pressure/" 
+               class="flex items-center gap-4 px-6 py-4 text-slate-200 hover:bg-slate-800 rounded-2xl transition-all">
+                <i class="fas fa-exchange-alt w-5"></i>
+                <span class="font-medium">Diferencialni tlak</span>
+            </a>
+
+
+            <!-- DROPDOWN GRUPA -->
+            <div class="menu-group mt-6">
+                <button onclick="toggleSubmenu(this)" 
+                        class="w-full flex items-center justify-between px-6 py-4 text-slate-200 hover:bg-slate-800 rounded-2xl transition-all">
+                    <div class="flex items-center gap-4">
+                        <i class="fas fa-chart-line w-5"></i>
+                        <span class="font-medium">Analize</span>
+                    </div>
+                    <i class="fas fa-chevron-down text-xs transition-transform"></i>
+                </button>
+                <div class="submenu hidden pl-12 pr-4 space-y-1 mt-1">
+                    <a href="/dashboard/trends/" class="flex items-center gap-3 px-6 py-3 text-slate-300 hover:text-white hover:bg-slate-800 rounded-2xl">
+                        Trendi
+                    </a>
+                    <a href="#" class="flex items-center gap-3 px-6 py-3 text-slate-300 hover:text-white hover:bg-slate-800 rounded-2xl">
+                        Korelacije
+                    </a>
+                    <a href="#" class="flex items-center gap-3 px-6 py-3 text-slate-300 hover:text-white hover:bg-slate-800 rounded-2xl">
+                        Tedenski vzorci
+                    </a>
+                </div>
+            </div>
+
+            <a href="/import/import/" 
+               class="flex items-center gap-4 px-6 py-4 text-slate-200 hover:bg-slate-800 rounded-2xl transition-all">
+                <i class="fas fa-upload w-5"></i>
+                <span class="font-medium">Uvoz meritev</span>
+            </a>
+
+            <!-- Lahko dodaš še en dropdown ali direktno povezavo -->
+            <!-- Primer: Nastavitve -->
+            <a href="/admin/" target="_blank" 
+               class="flex items-center gap-4 px-6 py-4 text-slate-200 hover:bg-slate-800 rounded-2xl transition-all mt-6">
+                <i class="fas fa-cog w-5"></i>
+                <span class="font-medium">Nastavitve</span>
+            </a>
+
+        </div>
+    </nav>
+
+    <!-- Footer -->
+    <div class="p-6 border-t border-slate-700 text-xs text-slate-500">
+        <div class="flex items-center justify-between">
+            <span class="text-emerald-400">● Online</span>
+        </div>
+    </div>
+</div>
         <!-- Glavna vsebina -->
         <div class="flex-1 overflow-auto p-8">
             {% block content %}{% endblock %}
         </div>
     </div>
+
+<script>
+    function toggleSubmenu(btn) {
+        const submenu = btn.nextElementSibling;
+        const icon = btn.querySelector('i.fas.fa-chevron-down');
+        
+        // Zapri vse ostale submenuje
+        document.querySelectorAll('.submenu').forEach(sub => {
+            if (sub !== submenu) {
+                sub.classList.add('hidden');
+                const otherIcon = sub.previousElementSibling.querySelector('i.fas.fa-chevron-down');
+                if (otherIcon) otherIcon.style.transform = 'rotate(0deg)';
+            }
+        });
+
+        // Toggle trenutnega
+        submenu.classList.toggle('hidden');
+        icon.style.transform = submenu.classList.contains('hidden') ? 'rotate(0deg)' : 'rotate(180deg)';
+    }
+</script>
 
     {% block scripts %}{% endblock %}
 </body>
