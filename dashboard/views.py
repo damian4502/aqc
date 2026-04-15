@@ -333,16 +333,23 @@ def room_detail(request, room_id):
         if 'fill_method' in request.GET:
             request.session['resample_fill_method'] = request.GET.get('fill_method')
 
-    # Privzete vrednosti, če v sessionu še ni ničesar
-    interval_minutes = request.session.get('resample_interval', 15)
-    fill_method = request.session.get('resample_fill_method', 'ffill')
+    # Resampling parametri
+    interval_minutes = int(request.GET.get('interval', request.session.get('resample_interval', 15)))
+    fill_method = request.GET.get('fill_method', request.session.get('resample_fill_method', 'ffill'))
+    ignore_spikes = request.GET.get('ignore_spikes') == 'on' or request.session.get('ignore_spikes', False)
+
+    # Shrani v session
+    request.session['resample_interval'] = interval_minutes
+    request.session['resample_fill_method'] = fill_method
+    request.session['ignore_spikes'] = ignore_spikes
 
     context['interval'] = interval_minutes
     context['fill_method'] = fill_method
-
+    context['ignore_spikes'] = ignore_spikes
+    
     # === Glavna logika po view_type ===
     if view_type == 'trend':
-        resampled = resample_measurements(df, interval_minutes, fill_method)
+        resampled = resample_measurements(df, interval_minutes, fill_method, ignore_spikes)
         if not resampled.empty:
             fig = px.line(resampled, x=resampled.index, y=resampled.columns,
                          title=f'Časovni trend - {room.name}',
@@ -351,7 +358,7 @@ def room_detail(request, room_id):
             context['fig'] = fig.to_html(full_html=False, include_plotlyjs='cdn')
 
     elif view_type == 'correlation':
-        resampled = resample_measurements(df, interval_minutes, fill_method)
+        resampled = resample_measurements(df, interval_minutes, fill_method, ignore_spikes)
         
         if resampled.empty or len(resampled.columns) < 2:
             context['no_data'] = True
@@ -408,12 +415,7 @@ def room_detail(request, room_id):
     
 import pandas as pd
 from django.utils import timezone
-def resample_measurements(df, interval_minutes=15, fill_method='ffill', column_name='parameter'):
-    """
-    Univerzalna resampling funkcija.
-    column_name = 'parameter' za room_detail
-                  'room'      za parameter_detail
-    """
+def resample_measurements(df, interval_minutes=15, fill_method='ffill', ignore_spikes=False):
     if df.empty:
         return pd.DataFrame()
 
@@ -421,20 +423,31 @@ def resample_measurements(df, interval_minutes=15, fill_method='ffill', column_n
     df['timestamp'] = pd.to_datetime(df['timestamp'])
     df = df.set_index('timestamp')
 
-    # Pivot: stolpci so bodisi parametri ali prostori
-    pivot = df.pivot_table(
-        index=df.index, 
-        columns=column_name, 
-        values='value', 
-        aggfunc='mean'
-    )
+    # Pivot
+    pivot = df.pivot_table(index=df.index, columns='parameter' if 'parameter' in df.columns else 'room', 
+                          values='value', aggfunc='mean')
 
-    freq_map = {1: '1min', 5: '5min', 15: '15min', 60: 'h', 1440: 'D'}
+    # Resampling
+    freq_map = {1: '1min', 5: '5min', 15: '15min', 60: 'H', 1440: 'D'}
     freq = freq_map.get(interval_minutes, '15min')
-
     resampled = pivot.resample(freq).mean()
 
-    # Ravnanje z manjkajočimi vrednostmi
+    # === ODSTRANJEVANJE SKOKOV (outlier removal) ===
+    if ignore_spikes and not resampled.empty:
+        for col in resampled.columns:
+            series = resampled[col]
+            # IQR metoda
+            Q1 = series.quantile(0.25)
+            Q3 = series.quantile(0.75)
+            IQR = Q3 - Q1
+            lower_bound = Q1 - 2.5 * IQR
+            upper_bound = Q3 + 2.5 * IQR
+            
+            # Zamenjamo ekstremne vrednosti z rolling median (okno 5 točk)
+            rolling_median = series.rolling(window=5, center=True, min_periods=1).median()
+            resampled[col] = series.where((series >= lower_bound) & (series <= upper_bound), rolling_median)
+
+    # Polnjenje manjkajočih vrednosti
     if fill_method == 'ffill':
         resampled = resampled.ffill()
     elif fill_method == 'bfill':
@@ -445,7 +458,7 @@ def resample_measurements(df, interval_minutes=15, fill_method='ffill', column_n
         resampled = resampled.fillna(0)
 
     return resampled
-    
+
 def room_graph_fragment(request, room_id):
     """Vrača SAMO graf za HTMX (fragment)"""
     room = get_object_or_404(Room, id=room_id)
@@ -828,13 +841,20 @@ def parameter_detail(request, parameter_id):
         if 'fill_method' in request.GET:
             request.session['resample_fill_method'] = request.GET.get('fill_method')
 
-    # Privzete vrednosti, če v sessionu še ni ničesar
-    interval_minutes = request.session.get('resample_interval', 15)
-    fill_method = request.session.get('resample_fill_method', 'ffill')
+    # Resampling parametri
+    interval_minutes = int(request.GET.get('interval', request.session.get('resample_interval', 15)))
+    fill_method = request.GET.get('fill_method', request.session.get('resample_fill_method', 'ffill'))
+    ignore_spikes = request.GET.get('ignore_spikes') == 'on' or request.session.get('ignore_spikes', False)
+
+    # Shrani v session
+    request.session['resample_interval'] = interval_minutes
+    request.session['resample_fill_method'] = fill_method
+    request.session['ignore_spikes'] = ignore_spikes
 
     context['interval'] = interval_minutes
     context['fill_method'] = fill_method
-
+    context['ignore_spikes'] = ignore_spikes
+    
     # Meritve za grafe
     qs = Measurement.objects.filter(parameter=parameter)
 
@@ -853,7 +873,7 @@ def parameter_detail(request, parameter_id):
         df = df.rename(columns={'sensor__room__name': 'room'})
 
         if view_type == 'trend':
-            resampled = resample_measurements(df, interval_minutes, fill_method, column_name='room')
+            resampled = resample_measurements(df, interval_minutes, fill_method, ignore_spikes=ignore_spikes)
 
             fig = px.line(resampled, x=resampled.index, y=resampled.columns,
                          title=f'Časovni trend - {parameter.name}',
@@ -862,7 +882,7 @@ def parameter_detail(request, parameter_id):
             context['fig'] = fig.to_html(full_html=False, include_plotlyjs='cdn')
 
         elif view_type == 'correlation':
-            resampled = resample_measurements(df, interval_minutes, fill_method, column_name='room')
+            resampled = resample_measurements(df, interval_minutes, fill_method, ignore_spikes=ignore_spikes)
             
             if resampled.empty or len(resampled.columns) < 2:
                 context['no_data'] = True

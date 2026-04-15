@@ -120,6 +120,15 @@
                 <i class="fas fa-download"></i>
                 Izvozi CSV
             </button>
+
+<div class="flex items-center gap-2 mt-2">
+    <input type="checkbox" id="ignore_spikes" name="ignore_spikes" 
+           {% if ignore_spikes %}checked{% endif %} class="w-4 h-4 accent-blue-600">
+    <label for="ignore_spikes" class="text-sm text-slate-300 cursor-pointer">
+        Ignoriraj skoke (outlierje)
+    </label>
+</div>
+
         </div>
     </form>
 </div>
