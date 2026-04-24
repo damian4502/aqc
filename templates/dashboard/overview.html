@@ -2,6 +2,7 @@
 {% block title %}Air Quality Control - Pregled{% endblock %}
 {% load time_filters %}
 {% block content %}
+{% load smart_filters %}
 <div class="max-w-7xl mx-auto">
 
 {% comment %}
@@ -29,60 +30,32 @@
         <!-- 4 prostori v vrsto -->
     <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-4 gap-6">
         {% for item in room_data %}
-        <div class="glass rounded-3xl overflow-hidden hover:scale-[1.02] transition-all duration-300 neon-blue group">
-            
-            <!-- Naslov kartice -->
-            <div class="bg-gradient-to-r from-slate-800 to-slate-900 px-8 py-6 border-b border-slate-700">
-                <a href="{% url 'room_detail' item.room.id %}" class="hover:text-blue-400 transition-colors">
-                    <h2 class="text-2xl font-semibold text-white">{{ item.room.name }}</h2>
-                </a>
-                {% if item.room.description %}
-                    <p class="text-slate-400 text-sm mt-1">{{ item.room.description }}</p>
-                {% endif %}
-            </div>
+<!-- Kompaktna kartica prostora -->
+<div class="glass rounded-3xl overflow-hidden hover:scale-[1.02] transition-all duration-300">
+    
+    <!-- Naslov -->
+    <div class="bg-gradient-to-r from-slate-800 to-slate-900 px-8 py-5 border-b border-slate-700">
+        <a href="{% url 'room_detail' item.room.id %}" class="hover:text-blue-400 transition-colors">
+            <h2 class="text-xl font-semibold text-white">{{ item.room.name }}</h2>
+        </a>
+    </div>
 
-            <!-- AQI Gauge -->
-            <div class="p-5 bg-slate-950/50 min-h-[120px] flex items-center justify-center border-b border-slate-700">
-                {% if item.aqi_gauge %}
-                    {{ item.aqi_gauge|safe }}
-                {% else %}
-                    <div class="text-center text-slate-500 text-xs">
-                        <i class="fas fa-tachometer-alt text-3xl mb-2 block opacity-40"></i>
-                        AQI ni na voljo
-                    </div>
-                {% endif %}
+    <!-- Kompaktni grid: prvih 8 parametrov po order -->
+    <div class="p-6">
+        <div class="grid grid-cols-4 gap-x-5 gap-y-6 text-center">
+            {% for m in item.latest|slice:":8" %}
+            <div>
+                <p class="text-xs text-slate-400 mb-1">{{ m.parameter.name }}</p>
+                <p class="text-2xl font-semibold text-white">
+                    {{ m.value|smart_float:m.parameter.name }}
+                    <span class="text-xs font-normal text-slate-400">{{ m.parameter.unit }}</span>
+                </p>
+                <p class="text-[10px] text-emerald-400 mt-1">{{ m.timestamp|time_ago }}</p>
             </div>
-			
-            <!-- Zadnje vrednosti z linki na parameter_detail -->
-            <div class="p-8">
-                <div class="grid grid-cols-2 gap-x-8 gap-y-6">
-                    {% for m in item.latest %}
-                    <div class="group/item">
-                        <a href="{% url 'parameter_detail' m.parameter.id %}" 
-                           class="hover:text-blue-400 transition-colors block">
-                            <p class="text-xs text-slate-400 group-hover/item:text-slate-300">{{ m.parameter.name }}</p>
-                            <p class="text-2xl font-semibold text-white mt-1 group-hover/item:text-blue-300">
-                                {{ m.value|floatformat:1 }} 
-                                <span class="text-xs font-normal text-slate-400">{{ m.parameter.unit }}</span>
-                            </p>
-                        </a>
-                        <p class="text-xs text-emerald-400">{{ m.timestamp|time_ago }}</p>
-                    </div>
-                    {% endfor %}
-                </div>
-            </div>
-
-			{% comment %}
-            <!-- Gumb za podrobni pogled prostora -->
-            <div class="border-t border-slate-700 px-8 py-6">
-                <a href="{% url 'room_detail' item.room.id %}" 
-                   class="block w-full text-center py-4 bg-slate-800 hover:bg-slate-700 rounded-2xl font-medium transition-all text-slate-200">
-                    Podrobni pogled prostora →
-                </a>
-            </div>
-			{% endcomment %}
+            {% endfor %}
         </div>
-        {% empty %}
+    </div>
+</div>        {% empty %}
         <div class="col-span-full text-center py-20 text-slate-400">
             <p class="text-xl">Ni dodanih prostorov.</p>
         </div>
@@ -179,46 +152,62 @@
         connectWebSocket();
     });
 
-    function updateRoomCard(data) {
-        // Poišči kartico po imenu prostora
-        const cards = document.querySelectorAll('.glass.rounded-3xl');
-        
-        cards.forEach(card => {
-            const title = card.querySelector('h2');
-			console.log(title);
-            if (!title || title.textContent.trim() !== data.room) return;
-
-            // Posodobi vrednost parametra
-			console.log(title);
-            const paramTexts = card.querySelectorAll('p.text-xs.text-slate-400');
-            paramTexts.forEach(p => {
-                if (p.textContent.trim() === data.parameter) {
-                    const valueContainer = p.nextElementSibling;
-                    if (valueContainer) {
-                        valueContainer.innerHTML = `
-                            ${parseFloat(data.value).toFixed(1)}
-                            <span class="text-xs font-normal text-slate-400">${data.unit}</span>
-                        `;
-                        // Kratka animacija
-                        valueContainer.classList.add('!text-emerald-400');
-                        setTimeout(() => valueContainer.classList.remove('!text-emerald-400'), 300);
-                    }
-                }
-            });
-
-            // Posodobi vse "time_ago" tekste na kartici
-            const timeElements = card.querySelectorAll('p.text-xs.text-emerald-400');
-            timeElements.forEach(el => {
-                el.textContent = data.time;
-            });
-
-            console.log(`Kartica posodobljena: ${data.room} → ${data.parameter} = ${data.value}`);
-        });
-    }
 
     // Zaženi WebSocket
     document.addEventListener('DOMContentLoaded', function() {
         connectWebSocket();
     });
+</script>
+
+<script>
+    function smartFormatValue(value, parameterName) {
+        const val = parseFloat(value);
+        if (isNaN(val)) return value;
+
+        const param = (parameterName || '').toLowerCase();
+
+        // Parametri, ki naj imajo 1 decimalko
+        const decimalParams = ['temperatura', 'vlaga', 'humidity', 'pm2.5', 'pm10', 'tvoc', 'pm1'];
+
+        if (decimalParams.some(p => param.includes(p))) {
+            return val.toFixed(1);           // npr. 22.7, 41.3
+        } else {
+            // Ostali parametri (AQI, CO2, tlak, ...) → cela števila brez .0
+            return val % 1 === 0 ? val.toFixed(0) : val.toFixed(1);
+        }
+    }
+
+    function updateRoomCard(data) {
+        const cards = document.querySelectorAll('.glass.rounded-3xl');
+        
+        cards.forEach(card => {
+            const title = card.querySelector('h2');
+            if (!title || title.textContent.trim() !== data.room) return;
+
+            // Poišči parameter po imenu
+            const paramTexts = card.querySelectorAll('p.text-xs.text-slate-400');
+            paramTexts.forEach(p => {
+                if (p.textContent.trim() === data.parameter) {
+                    const valueContainer = p.nextElementSibling;
+                    if (valueContainer) {
+                        const formattedValue = smartFormatValue(data.value, data.parameter);
+                        
+                        valueContainer.innerHTML = `
+                            ${formattedValue}
+                            <span class="text-xs font-normal text-slate-400">${data.unit}</span>
+                        `;
+                        
+                        // Kratka animacija
+                        valueContainer.classList.add('!text-emerald-400');
+                        setTimeout(() => valueContainer.classList.remove('!text-emerald-400'), 1800);
+                    }
+
+                    // Posodobi čas
+                    const timeEl = p.parentElement.querySelector('p.text-xs.text-emerald-400');
+                    if (timeEl) timeEl.textContent = data.time;
+                }
+            });
+        });
+    }
 </script>
 {% endblock %}

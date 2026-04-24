@@ -23,8 +23,10 @@
         <div class="glass rounded-3xl p-6" id="room_{{ m.sensor.room.id }}">
             <div class="flex justify-between">
                 <div>
+			<a href="{% url 'room_detail' m.sensor.room.id %}" class="hover:text-blue-400 transition-colors">
                     <p class="text-slate-400">{{ m.sensor.room.name }}</p>
                     <p class="text-3xl font-semibold text-white mt-2"><span class="last_value" id="parameter_{{ parameter.id }}">{{ m.value }}</span> <span class="text-lg">{{ parameter.unit }}</span></p>
+				</a>
                 </div>
                 <div class="text-right text-sm">
                     <p class="text-emerald-400">{{ m.timestamp|date:"H:i" }}</p>

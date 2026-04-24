@@ -28,10 +28,13 @@
     <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4" id="latest_measurements">
         {% for m in latest_measurements %}
         <div class="glass rounded-2xl p-5 text-sm" id="parameter_{{m.parameter.id}}">
+		<a href="{% url 'parameter_detail' m.parameter.id %}" 
+                           class="hover:text-blue-400 transition-colors block">
             <p class="text-slate-400 text-xs">{{ m.parameter.name }} ({{ m.parameter.unit }})</p>
             <p class="text-2xl font-semibold text-white mt-1">{{ m.value }}</p>
             <p class="text-xs text-emerald-400 mt-1">{{ m.timestamp|date:"d.m H:i" }}</p>
             <p class="text-[10px] text-slate-500 mt-3">{{ m.sensor.get_location_display }}</p>
+			</a>
         </div>
         {% endfor %}
     </div>

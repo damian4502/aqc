@@ -671,8 +671,8 @@ def dashboard_overview(request):
         # Zadnje meritve (vse parametre še vedno prikažemo v tabeli)
         latest = Measurement.objects.filter(sensor__room=room)\
             .select_related('parameter', 'sensor')\
-            .order_by('parameter_id', '-timestamp')\
-            .distinct('parameter_id')[:8]
+            .order_by('parameter__order', '-timestamp')\
+            .distinct('parameter__order')[:8]
         
         # Mini graf - samo AQI za zadnjih 24 ur
         mini_fig = None
