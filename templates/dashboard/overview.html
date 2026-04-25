@@ -45,12 +45,15 @@
         <div class="grid grid-cols-4 gap-x-5 gap-y-6 text-center">
             {% for m in item.latest|slice:":8" %}
             <div>
+				<a href="{% url 'parameter_detail' m.parameter.id %}" 
+                           class="hover:text-blue-400 transition-colors block">
                 <p class="text-xs text-slate-400 mb-1">{{ m.parameter.name }}</p>
                 <p class="text-2xl font-semibold text-white">
                     {{ m.value|smart_float:m.parameter.name }}
                     <span class="text-xs font-normal text-slate-400">{{ m.parameter.unit }}</span>
                 </p>
                 <p class="text-[10px] text-emerald-400 mt-1">{{ m.timestamp|time_ago }}</p>
+				</a>
             </div>
             {% endfor %}
         </div>

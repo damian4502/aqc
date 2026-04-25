@@ -663,7 +663,7 @@ def create_aqi_gauge(aqi_value):
     return fig.to_html(full_html=False, include_plotlyjs='cdn')
     
 def dashboard_overview(request):
-    rooms = Room.objects.all().order_by('name')
+    rooms = Room.objects.all().order_by('order')
     
     room_data = []
     
