@@ -11,6 +11,14 @@ services:
     ports:
       - "5432:5432"
 
+  mqtt:
+      image: eclipse-mosquitto:2
+      restart: always
+      ports:
+        - "1883:1883"              # MQTT port
+      volumes:
+        - ./mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      
   redis:
     image: redis:alpine
     restart: always

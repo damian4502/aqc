@@ -17,7 +17,7 @@ class MQTTListener:
         self.client.on_connect = self.on_connect
         self.client.on_message = self.on_message
 
-        self.broker = "broker.hivemq.com"
+        self.broker = "mqtt"
         self.port = 1883
 
     def on_connect(self, client, userdata, flags, rc):
