@@ -236,6 +236,8 @@ from django.utils import timezone
 def monitor(request):
     context = {}
     context['parameters'] = Parameter.objects.all().order_by('name')
+    context['rooms'] = Room.objects.all().order_by('order')
+
 
     return render(request, 'dashboard/monitor.html', context)
 

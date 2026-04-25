@@ -21,6 +21,14 @@
             <option value="{{ s.id }}">{{ s.name }}</option>
             {% endfor %}
         </select>
+
+        <label class="block text-sm text-slate-400 mb-2 font-medium">Prostor</label>
+        <select id="add-room" class="w-full max-w-md bg-slate-900 border border-slate-700 rounded-2xl px-5 py-3 text-lg">
+            <option value="">-- Izberi prostor --</option>
+            {% for s in rooms %}
+            <option value="delta-row-{{ s.id }}">{{ s.name }}</option>
+            {% endfor %}
+        </select>
     </div>
 
     <div class="grid grid-cols-1 lg:grid-cols-12 gap-8">
@@ -108,10 +116,11 @@
         const tableBody = document.getElementById('delta-table');
         
         // Uporabimo room kot ključ (zanesljivejše kot sensor_id)
-        const rowId = 'delta-row-' + data.sensor_id;
+        const rowId = 'delta-row-' + data.room_id;
         let row = document.getElementById(rowId);
         
         if (!row) {
+			return true;
             row = document.createElement('tr');
             row.id = rowId;
 			row.draggable = true;
@@ -193,6 +202,21 @@
             chart.data.datasets[1].data = [];
             chart.update();
         }
+    });
+
+    document.getElementById('add-room').addEventListener('change', function() {
+        const tableBody = document.getElementById('delta-table');
+		row = document.createElement('tr');
+		row.id = this.value;
+		tableBody.appendChild(row);
+		
+		console.log(this);
+
+        row.innerHTML = '<td class="py-4 px-4 font-medium" style="cursor:pointer;">' + this.options[this.options.selectedIndex].innerHTML + '</td><td class="text-right py-4 px-4"></td><td class="text-right py-4 px-4 text-xs text-slate-400"></td>';
+
+		row.classList.add('!text-emerald-400');
+		setTimeout(() => row.classList.remove('!text-emerald-400'), 300);
+
     });
 
     function zeroOffset() {
