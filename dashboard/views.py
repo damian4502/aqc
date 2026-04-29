@@ -233,6 +233,29 @@ import pandas as pd
 from datetime import datetime, timedelta
 from django.utils import timezone
 
+from django.shortcuts import render, get_object_or_404
+from .models import Dashboard, DashboardWidget
+
+def custom_dashboard(request):
+    dashboard = Dashboard.objects.filter(is_default=True).first()
+    if not dashboard:
+        dashboard = Dashboard.objects.create(name="Moj dashboard", is_default=True)
+
+    widgets = dashboard.widgets.all().order_by('row', 'column')
+
+    # Za room_card widgete naložimo zadnje meritve
+    for widget in widgets:
+        if widget.widget_type == 'room_card' and widget.config.get('room_id'):
+            widget.latest_measurements = Measurement.objects.filter(
+                sensor__room_id=widget.config['room_id']
+            ).select_related('parameter').order_by('parameter_id', '-timestamp').distinct('parameter_id')[:8]
+
+    context = {
+        'dashboard': dashboard,
+        'widgets': widgets,
+    }
+    return render(request, 'dashboard/custom_dashboard.html', context)
+    
 def monitor(request):
     context = {}
     context['parameters'] = Parameter.objects.all().order_by('name')
@@ -430,7 +453,7 @@ def resample_measurements(df, interval_minutes=15, fill_method='ffill', ignore_s
                           values='value', aggfunc='mean')
 
     # Resampling
-    freq_map = {1: '1min', 5: '5min', 15: '15min', 60: 'H', 1440: 'D'}
+    freq_map = {1: '1min', 5: '5min', 15: '15min', 60: 'h', 1440: 'D'}
     freq = freq_map.get(interval_minutes, '15min')
     resampled = pivot.resample(freq).mean()
 

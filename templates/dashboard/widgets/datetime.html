@@ -1,0 +1,14 @@
+<div class="glass rounded-3xl p-8 text-center">
+    <div id="live-clock" class="text-6xl font-light text-white tabular-nums"></div>
+    <div id="live-date" class="text-slate-400 mt-3"></div>
+</div>
+
+<script>
+    function updateClock() {
+        const now = new Date();
+        document.getElementById('live-clock').textContent = now.toLocaleTimeString('sl-SI', {hour:'2-digit', minute:'2-digit', second:'2-digit'});
+        document.getElementById('live-date').textContent = now.toLocaleDateString('sl-SI', {weekday:'long', day:'numeric', month:'long'});
+    }
+    setInterval(updateClock, 1000);
+    updateClock();
+</script>

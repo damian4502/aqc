@@ -1,0 +1,81 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}{{ dashboard.name }}{% endblock %}
+
+{% block content %}
+<div class="max-w-screen-2xl mx-auto p-8">
+    <h1 class="text-4xl font-bold text-white mb-10">{{ dashboard.name }}</h1>
+
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+        {% for widget in widgets %}
+            {% if widget.widget_type == 'room_card' %}
+                {% include 'dashboard/widgets/room_card.html' with widget=widget room=widget.config.room %}
+            {% elif widget.widget_type == 'datetime' %}
+                {% include 'dashboard/widgets/datetime.html' with widget=widget %}
+            {% elif widget.widget_type == 'single_value' %}
+                {% include 'dashboard/widgets/single_value.html' with widget=widget %}
+            {% else %}
+                <div class="glass rounded-3xl p-8 text-slate-400">
+                    Nepodprt widget: {{ widget.get_widget_type_display }}
+                </div>
+            {% endif %}
+        {% empty %}
+            <div class="col-span-full text-center py-32 text-slate-400">
+                <p class="text-2xl">Dashboard je prazen.</p>
+                <p class="mt-4">Dodaj widgete preko Django admina.</p>
+            </div>
+        {% endfor %}
+    </div>
+</div>
+
+<script>
+    let socket;
+
+    function connectWidgetWebSocket() {
+        socket = new WebSocket('ws://' + window.location.host + '/ws/live/');
+        
+        socket.onmessage = function(e) {
+            const response = JSON.parse(e.data);
+            if (response.type === 'live_update') {
+                const data = response.data;
+                
+                // Posodobi room_card widgete
+                const roomWidget = document.getElementById('widget-room-' + data.room_id);
+                if (roomWidget) {
+                    updateRoomCardWidget(roomWidget, data);
+                }
+
+                // Posodobi single_value widgete
+                const singleWidget = document.getElementById('widget-single-' + data.parameter_id);
+                if (singleWidget) {
+                    updateSingleValueWidget(singleWidget, data);
+                }
+            }
+        };
+    }
+
+    function updateRoomCardWidget(widgetElement, data) {
+        const valueEl = widgetElement.querySelector(`[data-param="${data.parameter}"]`);
+        if (valueEl) {
+            valueEl.innerHTML = `
+                ${parseFloat(data.value).toFixed(1)}
+                <span class="text-xs font-normal text-slate-400">${data.unit}</span>
+            `;
+            valueEl.classList.add('!text-emerald-400');
+            setTimeout(() => valueEl.classList.remove('!text-emerald-400'), 2000);
+        }
+    }
+
+    function updateSingleValueWidget(widgetElement, data) {
+        const display = document.getElementById('single-value-display-' + widgetElement.dataset.widgetId);
+        if (display) {
+            display.textContent = parseFloat(data.value).toFixed(1);
+            display.classList.add('!text-emerald-400');
+            setTimeout(() => display.classList.remove('!text-emerald-400'), 1500);
+        }
+    }
+
+    document.addEventListener('DOMContentLoaded', connectWidgetWebSocket);
+</script>
+{% endblock %}

@@ -13,4 +13,5 @@ urlpatterns = [
     path('trends/', trends_view, name='trends'),
     path('monitor/', monitor, name='monitor'),
     path('differential-pressure/', differential_pressure_view, name='differential_pressure'),
+    path('custom/', custom_dashboard, name='custom_dashboard'),
 ]

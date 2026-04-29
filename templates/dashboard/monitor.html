@@ -29,7 +29,18 @@
             <option value="delta-row-{{ s.id }}">{{ s.name }}</option>
             {% endfor %}
         </select>
-    </div>
+
+        <div class="flex gap-3 mt-6">
+            <button onclick="addAllRooms()" 
+                    class="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white font-medium px-6 py-3 rounded-2xl transition-all active:scale-95">
+                ➕ Dodaj vse prostore
+            </button>
+            <button onclick="removeAllRooms()" 
+                    class="flex-1 bg-red-600 hover:bg-red-500 text-white font-medium px-6 py-3 rounded-2xl transition-all active:scale-95">
+                🗑️ Odstrani vse
+            </button>
+        </div>
+		</div>
 
     <div class="grid grid-cols-1 lg:grid-cols-12 gap-8">
         <!-- Tabela ΔP -->
@@ -65,6 +76,7 @@
 
 
 
+
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script>
     let socket;
@@ -72,10 +84,10 @@
     let offset = 0;
     let referenceValue = 0;
     let referenceSensorId = null;
-	let selectedParameter = null;
-	let selectedRoom = null;
+    let selectedParameter = null;
     let maxPoints = 300;
-	let lastChartVlaue = 0;
+
+    const chartColors = ['#ef4444', '#22c55e', '#3b82f6', '#a855f7', '#f59e0b', '#ec4899', '#06b67f', '#6366f1', '#f97316', '#8b5cf6'];
 
     function connectWebSocket() {
         socket = new WebSocket('ws://' + window.location.host + '/ws/live/');
@@ -96,50 +108,20 @@
 
     function updateLiveData(data) {
         updateDeltaTable(data);
-
-        if (selectedRoom == parseInt(data.sensor_id) && chart) {
-            const time = new Date().toLocaleTimeString('sl-SI', {hour:'2-digit', minute:'2-digit'});
-
-			document.getElementById('chart-name').innerHTML = 'Graf vrednosti - ' + data.room;
-			
-			lastChartVlaue = parseFloat(data.value);
-
-            if (chart.data.labels.length > maxPoints) {
-                chart.data.labels.shift();
-                chart.data.datasets[0].data.shift();
-            }
-            chart.update('none');
-        }
     }
 
     function updateDeltaTable(data) {
         const tableBody = document.getElementById('delta-table');
-        
-        // Uporabimo room kot ključ (zanesljivejše kot sensor_id)
         const rowId = 'delta-row-' + data.room_id;
         let row = document.getElementById(rowId);
         
-        if (!row) {
-			return true;
-            row = document.createElement('tr');
-            row.id = rowId;
-			row.draggable = true;
-			row.ondragover = "dragOver(event)";
-			row.ondragstart = "dragStart(event)";
-            tableBody.appendChild(row);
+        if (!row) return; // samo ročno dodani prostori
+
+        if (referenceSensorId == data.sensor_id) {
+            referenceValue = parseFloat(data.value);
         }
 
-		if (referenceSensorId == data.sensor_id) {
-			referenceValue = data.value;
-		}
-		
-		if (!selectedRoom) {
-			selectedRoom = parseInt(data.sensor_id);
-		}
-
         const currentPressure = parseFloat(data.value).toFixed(2);
-        const delta = referenceSensorId ? 
-            (parseFloat(data.value) - referenceValue - offset).toFixed(2) : '—';
 
         row.innerHTML = `
             <td class="py-4 px-4 font-medium" style="cursor:pointer;">${data.room}</td>
@@ -147,98 +129,194 @@
             <td class="text-right py-4 px-4 text-xs text-slate-400">${data.time}</td>
         `;
 
-		row.classList.add('!text-emerald-400');
-		setTimeout(() => row.classList.remove('!text-emerald-400'), 300);
-		
-		row.addEventListener('click', reloadChart);
+        row.classList.add('!text-emerald-400');
+        setTimeout(() => row.classList.remove('!text-emerald-400'), 300);
+        row.addEventListener('click', reloadChart);
     }
 
-	setInterval(updateChart, 1000);
-	
-	function updateChart() {
+    function updateChart() {
+        if (!chart) return;
+        
         const tableBody = document.getElementById('delta-table');
-		
-		
+        const rows = Array.from(tableBody.querySelectorAll('tr'));
+        
+        if (rows.length === 0) return;
 
-        if (chart) {
-			if ( tableBody.querySelectorAll('tr').length > 1 ) {
-				tableBody.querySelectorAll('tr').forEach((e, i) => {
-					if (i < 2) {
-						console.log(i);
-						console.log(e);
-						chart.data.datasets[i].data.push( parseFloat( e.querySelectorAll('td')[1].innerHTML ) );
-					} else {
-						return true;
-					}
-				});
+        const time = new Date().toLocaleTimeString('sl-SI', {hour:'2-digit', minute:'2-digit'});
 
-			const time = new Date().toLocaleTimeString('sl-SI', {hour:'2-digit', minute:'2-digit'});
-            chart.data.labels.push(time);
-			}
+        // Sinhronizacija datasetov (poravnava na desno)
+        while (chart.data.datasets.length < rows.length) {
+            const color = chartColors[chart.data.datasets.length % chartColors.length];
+            chart.data.datasets.push({
+                label: 'Prostor',
+                data: new Array(chart.data.labels.length).fill(null),
+                borderColor: color,
+                tension: 0.25,
+                borderWidth: 3,
+                pointRadius: 0,
+                fill: false
+            });
+        }
 
-
-            if (chart.data.labels.length > maxPoints) {
-                chart.data.labels.shift();
-                chart.data.datasets[0].data.shift();
-                chart.data.datasets[1].data.shift();
+        rows.forEach((row, i) => {
+            const tds = row.querySelectorAll('td');
+            const roomName = tds[0] ? tds[0].textContent.trim() : `Prostor ${i+1}`;
+            const valueStr = tds[1] ? tds[1].textContent.trim() : '';
+            
+            let value = null;
+            if (valueStr !== '' && !isNaN(parseFloat(valueStr))) {
+                value = parseFloat(valueStr);
             }
 
-            chart.update();
-        }
-	}
+            if (chart.data.datasets[i]) {
+                chart.data.datasets[i].label = roomName;
+                chart.data.datasets[i].data.push(value);
+            }
+        });
 
-    // Izbira referenčnega senzorja
-    document.getElementById('ref-sensor').addEventListener('change', function() {
-		selectedParameter = parseInt(this.value);
-		lastChartVlaue = 0;
-		selectedRoom = 0;
-		const tableBody = document.getElementById('delta-table');
-		
-		tableBody.innerHTML = "";
-		
+        chart.data.labels.push(time);
+
+        // Omejitev števila točk
+        if (chart.data.labels.length > maxPoints) {
+            chart.data.labels.shift();
+            chart.data.datasets.forEach(ds => {
+                if (ds.data.length > 0) ds.data.shift();
+            });
+        }
+
+        chart.update('none');
+    }
+
+    // ==================== Dodaj vse / Odstrani vse ====================
+    function addAllRooms() {
+        const select = document.getElementById('add-room');
+        const tableBody = document.getElementById('delta-table');
+        
+        for (let i = 1; i < select.options.length; i++) {
+            const option = select.options[i];
+            const rowId = option.value;
+            if (document.getElementById(rowId)) continue;
+
+            const row = document.createElement('tr');
+            row.id = rowId;
+            row.draggable = true;
+            row.ondragover = "dragOver(event)";
+            row.ondragstart = "dragStart(event)";
+            tableBody.appendChild(row);
+
+            const roomName = option.innerHTML;
+            row.innerHTML = `
+                <td class="py-4 px-4 font-medium" style="cursor:pointer;">${roomName}</td>
+                <td class="text-right py-4 px-4"></td>
+                <td class="text-right py-4 px-4 text-xs text-slate-400"></td>
+            `;
+
+            // Takoj dodamo dataset z null vrednostmi (poravnava na desno)
+            if (chart) {
+                const padLength = chart.data.labels.length;
+                const color = chartColors[chart.data.datasets.length % chartColors.length];
+                chart.data.datasets.push({
+                    label: roomName,
+                    data: new Array(padLength).fill(null),
+                    borderColor: color,
+                    tension: 0.25,
+                    borderWidth: 3,
+                    pointRadius: 0,
+                    fill: false
+                });
+            }
+
+            row.classList.add('!text-emerald-400');
+            setTimeout(() => row.classList.remove('!text-emerald-400'), 300);
+            row.addEventListener('click', reloadChart);
+        }
+    }
+
+    function removeAllRooms() {
+        if (!confirm('Res želiš odstraniti vse prostore iz tabele in grafa?')) return;
+        
+        document.getElementById('delta-table').innerHTML = '';
+        
         if (chart) {
             chart.data.labels = [];
-            chart.data.datasets[0].data = [];
-            chart.data.datasets[1].data = [];
+            chart.data.datasets = [];
+            chart.update();
+        }
+    }
+    // =====================================================================
+
+    document.getElementById('ref-sensor').addEventListener('change', function() {
+        selectedParameter = parseInt(this.value) || null;
+        referenceSensorId = null;
+        referenceValue = 0;
+        offset = 0;
+        
+        const tableBody = document.getElementById('delta-table');
+        tableBody.innerHTML = "";
+        
+        if (chart) {
+            chart.data.labels = [];
+            chart.data.datasets = [];
             chart.update();
         }
     });
 
     document.getElementById('add-room').addEventListener('change', function() {
+        if (!this.value) return;
+        
         const tableBody = document.getElementById('delta-table');
-		row = document.createElement('tr');
-		row.id = this.value;
-		tableBody.appendChild(row);
-		
-		console.log(this);
+        const rowId = this.value;
+        
+        if (document.getElementById(rowId)) {
+            this.value = '';
+            return;
+        }
 
-        row.innerHTML = '<td class="py-4 px-4 font-medium" style="cursor:pointer;">' + this.options[this.options.selectedIndex].innerHTML + '</td><td class="text-right py-4 px-4"></td><td class="text-right py-4 px-4 text-xs text-slate-400"></td>';
+        const row = document.createElement('tr');
+        row.id = rowId;
+        row.draggable = true;
+        row.ondragover = "dragOver(event)";
+        row.ondragstart = "dragStart(event)";
+        tableBody.appendChild(row);
+        
+        const roomName = this.options[this.options.selectedIndex].innerHTML;
+        
+        row.innerHTML = `
+            <td class="py-4 px-4 font-medium" style="cursor:pointer;">${roomName}</td>
+            <td class="text-right py-4 px-4"></td>
+            <td class="text-right py-4 px-4 text-xs text-slate-400"></td>
+        `;
 
-		row.classList.add('!text-emerald-400');
-		setTimeout(() => row.classList.remove('!text-emerald-400'), 300);
+        // Takoj dodamo dataset z null vrednostmi (poravnava na desno)
+        if (chart) {
+            const padLength = chart.data.labels.length;
+            const color = chartColors[chart.data.datasets.length % chartColors.length];
+            chart.data.datasets.push({
+                label: roomName,
+                data: new Array(padLength).fill(null),
+                borderColor: color,
+                tension: 0.25,
+                borderWidth: 3,
+                pointRadius: 0,
+                fill: false
+            });
+        }
 
+        row.classList.add('!text-emerald-400');
+        setTimeout(() => row.classList.remove('!text-emerald-400'), 300);
+        row.addEventListener('click', reloadChart);
+        this.value = '';
     });
+
+    function reloadChart() {
+        const roomName = this.querySelector('td:first-child').textContent;
+        document.getElementById('chart-name').innerHTML = `Graf vrednosti – ${roomName} in ostali`;
+    }
 
     function zeroOffset() {
         const currentDelta = parseFloat(document.querySelector('.font-bold')?.textContent) || 0;
         offset = currentDelta;
         alert(`Offset nastavljen na ${offset.toFixed(2)} Pa`);
-    }
-
-    function reloadChart() {
-		selectedRoom = parseInt(this.id.split('-')[2]);
-		const tableBody = document.getElementById('delta-table');
-		
-		document.getElementById('chart-name').innerHTML = 'Graf vrednosti - ' + this.querySelectorAll('td')[0].innerHTML;
-		
-        if (chart) {
-            chart.data.labels = [];
-            chart.data.datasets[0].data = [];
-			
-			lastChartVlaue = parseFloat( this.querySelectorAll('td')[1].innerHTML );
-
-            chart.update();
-        }
     }
 
     function resetOffset() {
@@ -247,14 +325,23 @@
     }
 
     function exportCSV() {
-        if (!chart || chart.data.datasets[0].data.length === 0) {
+        if (!chart || chart.data.datasets.length === 0) {
             alert("Ni podatkov za izvoz!");
             return;
         }
-        let csv = "Čas;ΔP (Pa)\n";
-        chart.data.labels.forEach((time, i) => {
-            csv += time + ";" + chart.data.datasets[0].data[i] + "\n";
-        });
+        let csv = "Čas";
+        chart.data.datasets.forEach(ds => csv += ";" + ds.label);
+        csv += "\n";
+        
+        const numPoints = chart.data.labels.length;
+        for (let i = 0; i < numPoints; i++) {
+            csv += chart.data.labels[i];
+            chart.data.datasets.forEach(ds => {
+                csv += ";" + (ds.data[i] !== undefined && ds.data[i] !== null ? ds.data[i] : '');
+            });
+            csv += "\n";
+        }
+        
         const blob = new Blob([csv], { type: 'text/csv' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
@@ -267,7 +354,7 @@
         const ctx = document.getElementById('deltaChart').getContext('2d');
         chart = new Chart(ctx, {
             type: 'line',
-            data: { labels: [], datasets: [{ label: 'ΔP (Pa)', data: [], borderColor: '#ef4444', tension: 0.25, borderWidth: 3, pointRadius: 0, fill: false }, { label: 'ΔP 2(Pa)', data: [], borderColor: 'green', tension: 0.25, borderWidth: 3, pointRadius: 0, fill: false }] },
+            data: { labels: [], datasets: [] },
             options: {
                 responsive: true,
                 maintainAspectRatio: false,
@@ -276,7 +363,13 @@
                     y: { beginAtZero: false, grid: { color: 'rgba(148,163,184,0.15)' } },
                     x: { grid: { color: 'rgba(148,163,184,0.15)' }, ticks: { maxRotation: 0 } }
                 },
-                plugins: { legend: { display: false } }
+                plugins: { 
+                    legend: { 
+                        display: true, 
+                        position: 'top',
+                        labels: { color: '#e2e8f0', boxWidth: 12, padding: 15 }
+                    } 
+                }
             }
         });
     }
@@ -284,37 +377,27 @@
     window.onload = function() {
         initChart();
         connectWebSocket();
+        setInterval(updateChart, 1000);
     };
-	
-	
-	
-	
-	
-	
-	
-	
-	
-var _el;
 
-function dragOver(e) {
-  if (isBefore(_el, e.target))
-    e.target.parentNode.insertBefore(_el, e.target);
-  else
-    e.target.parentNode.insertBefore(_el, e.target.nextSibling);
-}
-
-function dragStart(e) {
-  e.dataTransfer.effectAllowed = "move";
-  e.dataTransfer.setData("text/plain", null); // Thanks to bqlou for their comment.
-  _el = e.target;
-}
-
-function isBefore(el1, el2) {
-  if (el2.parentNode === el1.parentNode)
-    for (var cur = el1.previousSibling; cur && cur.nodeType !== 9; cur = cur.previousSibling)
-      if (cur === el2)
-        return true;
-  return false;
-}	
+    // Drag & drop
+    var _el;
+    function dragOver(e) {
+      if (isBefore(_el, e.target))
+        e.target.parentNode.insertBefore(_el, e.target);
+      else
+        e.target.parentNode.insertBefore(_el, e.target.nextSibling);
+    }
+    function dragStart(e) {
+      e.dataTransfer.effectAllowed = "move";
+      e.dataTransfer.setData("text/plain", null);
+      _el = e.target;
+    }
+    function isBefore(el1, el2) {
+      if (el2.parentNode === el1.parentNode)
+        for (var cur = el1.previousSibling; cur && cur.nodeType !== 9; cur = cur.previousSibling)
+          if (cur === el2) return true;
+      return false;
+    }
 </script>
 {% endblock %}

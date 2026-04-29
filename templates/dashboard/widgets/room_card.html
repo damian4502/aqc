@@ -1,0 +1,26 @@
+{% load smart_filters %}
+{% load time_filters %}
+
+
+<div class="glass rounded-3xl overflow-hidden" id="widget-room-{{ widget.config.room_id }}">
+    <div class="bg-gradient-to-r from-slate-800 to-slate-900 px-8 py-5 border-b border-slate-700">
+        <a href="{% url 'room_detail' widget.config.room_id %}" class="hover:text-blue-400 transition-colors">
+            <h3 class="font-semibold text-lg">{{ widget.title }}</h3>
+        </a>
+    </div>
+
+    <div class="p-6">
+        <div class="grid grid-cols-4 gap-x-5 gap-y-6 text-center">
+            {% for m in widget.latest_measurements %}
+            <div>
+                <p class="text-xs text-slate-400 mb-1">{{ m.parameter.name }}</p>
+                <p class="text-2xl font-semibold text-white">
+                    {{ m.value|smart_float:m.parameter.name }}
+                    <span class="text-xs font-normal text-slate-400">{{ m.parameter.unit }}</span>
+                </p>
+                <p class="text-[10px] text-emerald-400 mt-1">{{ m.timestamp|time_ago }}</p>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+</div>
