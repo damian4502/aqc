@@ -85,7 +85,7 @@ class MQTTListener:
                     'data': data          # pošljemo posamezno meritev, ne ticker
                 }
             )
-            print(f"  → Broadcastano v WebSocket: {data['room']} | {data['parameter']} = {data['value']}")
+            #print(f"  → Broadcastano v WebSocket: {data['room']} | {data['parameter']} = {data['value']}")
             
         except Exception as e:
             print(f"  Napaka pri broadcastu: {e}")

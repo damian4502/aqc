@@ -10,6 +10,9 @@ local_settings.py
 media/
 staticfiles/
 static/admin/
+static/*.bin
+static/sensor_firmware
+static/offsets.json
 
 # Docker
 postgres_data/

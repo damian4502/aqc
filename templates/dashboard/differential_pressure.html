@@ -4,7 +4,7 @@
 {% block title %}Diferencialni tlak - Air Quality Control{% endblock %}
 
 {% block content %}
-<div class="max-w-7xl mx-auto px-6 py-8">
+<div class="max-w-7xl mx-auto px-8 py-8">
     <div class="flex justify-between items-center mb-8">
         <h1 class="text-4xl font-bold text-white">Diferencialni tlak</h1>
         <a href="/dashboard/" class="text-blue-400 hover:text-blue-300 flex items-center gap-2">
@@ -23,20 +23,22 @@
         </select>
     </div>
 
-    <div class="grid grid-cols-1 lg:grid-cols-12 gap-8">
+    <div class="grid grid-cols-1 lg:grid-cols-13 gap-8">
         <!-- Tabela ΔP -->
         <div class="lg:col-span-5 glass rounded-3xl p-6">
             <h2 class="text-lg font-semibold mb-4">Diferencialni tlak</h2>
             <table class="w-full">
-                <thead>
-                    <tr class="border-b border-slate-700">
-                        <th class="text-left py-3 px-4">Prostor / Senzor</th>
-                        <th class="text-right py-3 px-4">Trenutni tlak</th>
-                        <th class="text-right py-3 px-4">ΔP</th>
-                        <th class="text-right py-3 px-4 text-xs">Zadnja meritev</th>
-                    </tr>
-                </thead>
-                <tbody id="delta-table" class="divide-y divide-slate-700"></tbody>
+<thead>
+    <tr class="border-b border-slate-900">
+        <th class="text-left py-3 px-4">Prostor / Senzor</th>
+        <th class="text-left py-3 px-4">Lokacija</th>
+        <th class="text-right py-3 px-4">Trenutni tlak</th>
+        <th class="text-right py-3 px-4">ΔP</th>
+        <th class="text-right py-3 px-4">Povp. ΔP</th>
+        <th class="text-right py-3 px-4 text-xs">Zadnja meritev</th>
+        <th class="w-12"></th>
+    </tr>
+</thead>              <tbody id="delta-table" class="divide-y divide-slate-700"></tbody>
             </table>
         </div>
 
@@ -50,6 +52,7 @@
             <button onclick="exportCSV()" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 rounded-2xl text-sm flex items-center gap-2">
                 <i class="fas fa-download"></i> CSV
             </button>
+			<button onclick="resetHiddenSensors()" class="px-4 py-2 bg-slate-700 hover:bg-slate-600 rounded-2xl text-sm">Prikaži vse</button>
         </div>
     </div>
     
@@ -60,9 +63,6 @@
 </div>
     </div>
 </div>
-
-
-
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script>
     let socket;
@@ -70,7 +70,35 @@
     let offset = 0;
     let referenceValue = 0;
     let referenceSensorId = null;
-    let maxPoints = 10;
+    let maxPoints = 20;
+    let hiddenSensors = new Set();
+    let sensorDeltas = {};
+    let sensorValues = {};
+    let latestValues = {};           // ← NOVO: shranjuje zadnje absolutne vrednosti vseh senzorjev
+    const MAX_DELTA_HISTORY = 5000;
+
+    function loadHiddenSensors() {
+        const saved = localStorage.getItem('hiddenDeltaSensors');
+        if (saved) hiddenSensors = new Set(JSON.parse(saved));
+    }
+
+    function saveHiddenSensors() {
+        localStorage.setItem('hiddenDeltaSensors', JSON.stringify(Array.from(hiddenSensors)));
+    }
+
+    function removeSensor(sensorId) {
+        hiddenSensors.add(sensorId.toString());
+        saveHiddenSensors();
+        const row = document.getElementById(`delta-row-${sensorId}`);
+        if (row) row.remove();
+    }
+
+    function resetHiddenSensors() {
+        hiddenSensors.clear();
+        saveHiddenSensors();
+        document.getElementById('delta-table').innerHTML = '';
+        alert('Vsi prostori so ponovno prikazani.');
+    }
 
     function connectWebSocket() {
         socket = new WebSocket('ws://' + window.location.host + '/ws/live/');
@@ -91,14 +119,27 @@
     }
 
     function updateLiveData(data) {
+        if (!data.sensor_id) return;
+
+        // Shranimo zadnjo vrednost tega senzorja
+        latestValues[data.sensor_id] = parseFloat(data.value);
+
+        // Če je to referenčni senzor, posodobimo referenčno vrednost
+        if (referenceSensorId && referenceSensorId.toString() === data.sensor_id.toString()) {
+            referenceValue = latestValues[data.sensor_id];
+        }
+
         updateDeltaTable(data);
 
+        // Posodobitev grafa (samo če imamo referenco)
         if (referenceSensorId && chart) {
             const delta = (parseFloat(data.value) - referenceValue - offset).toFixed(2);
             const time = new Date().toLocaleTimeString('sl-SI', {hour:'2-digit', minute:'2-digit'});
 
+			if (data.sensor_id == 10) {
             chart.data.labels.push(time);
             chart.data.datasets[0].data.push(parseFloat(delta));
+			}
 
             if (chart.data.labels.length > maxPoints) {
                 chart.data.labels.shift();
@@ -110,39 +151,71 @@
 
     function updateDeltaTable(data) {
         const tableBody = document.getElementById('delta-table');
-        
-        // Uporabimo room kot ključ (zanesljivejše kot sensor_id)
-        const rowId = 'delta-row-' + data.room.replace(/\s+/g, '-');
+        const sensorId = data.sensor_id.toString();
+        if (hiddenSensors.has(sensorId)) return;
+
+        const rowId = `delta-row-${sensorId}`;
         let row = document.getElementById(rowId);
-        
+
+        const currentPressure = parseFloat(data.value).toFixed(2);
+        let delta = '—';
+        let avgDeltaDisplay = '—';
+        let deltaNum = null;
+
+        if (referenceSensorId) {
+            const refVal = latestValues[referenceSensorId] || referenceValue;
+            deltaNum = parseFloat(data.value) - refVal - offset;
+            delta = deltaNum.toFixed(2);
+
+            // Rolling average
+            if (!sensorDeltas[sensorId]) sensorDeltas[sensorId] = [];
+            if (!sensorValues[sensorId]) sensorValues[sensorId] = [];
+            sensorDeltas[sensorId].push(deltaNum);
+			sensorValues[sensorId].push(parseFloat(data.value));
+            if (sensorDeltas[sensorId].length > MAX_DELTA_HISTORY) sensorDeltas[sensorId].shift();
+
+           // const sum = sensorDeltas[sensorId].reduce((a, b) => a + b, 0);
+           // avgDeltaDisplay = (sum / sensorDeltas[sensorId].length).toFixed(2);
+
+            const sum1 = sensorValues[sensorId].reduce((a, b) => a + b, 0);
+			const sum2 = sensorValues[referenceSensorId].reduce((a, b) => a + b, 0);
+			avgDeltaDisplay = ( ((sum1 / sensorValues[sensorId].length) - (sum2 / sensorValues[referenceSensorId].length)).toFixed(2) );
+        }
+
+        const deltaClass = deltaNum !== null ? (deltaNum >= 0 ? 'text-red-400' : 'text-emerald-400') : '';
+        const avgClass = deltaNum !== null ? (parseFloat(avgDeltaDisplay) >= 0 ? 'text-red-400' : 'text-emerald-400') : '';
+
+        const location = data.location || data.get_location_display || data.sensor_location || '—';
+
         if (!row) {
             row = document.createElement('tr');
             row.id = rowId;
             tableBody.appendChild(row);
         }
 
-		if (referenceSensorId == data.sensor_id) {
-			referenceValue = data.value;
-		}
-
-        const currentPressure = parseFloat(data.value).toFixed(2);
-        const delta = referenceSensorId ? 
-            (parseFloat(data.value) - referenceValue - offset).toFixed(2) : '—';
-
         row.innerHTML = `
             <td class="py-4 px-4 font-medium">${data.room}</td>
-            <td class="text-right py-4 px-4">${currentPressure} Pa</td>
-            <td class="text-right py-4 px-4 font-bold ${delta >= 0 ? 'text-red-400' : 'text-emerald-400'}">
-                ${delta} Pa
+            <td class="py-4 px-4 text-slate-400">${location}</td>
+            <td class="text-right py-4 px-4 font-mono text-slate-300">${currentPressure} Pa</td>
+            <td class="text-right py-4 px-4 font-bold ${deltaClass}">${delta} Pa</td>
+            <td class="text-right py-4 px-4 font-medium ${avgClass}">${avgDeltaDisplay} Pa</td>
+            <td class="text-right py-4 px-4 text-xs text-slate-400">${data.time || ''}</td>
+            <td class="py-4 px-2 text-center">
+                <button onclick="removeSensor('${sensorId}')" class="text-slate-400 hover:text-red-400 text-3xl leading-none" title="Odstrani iz spremljanja">×</button>
             </td>
-            <td class="text-right py-4 px-4 text-xs text-slate-400">${data.time}</td>
         `;
     }
 
     // Izbira referenčnega senzorja
     document.getElementById('ref-sensor').addEventListener('change', function() {
         referenceSensorId = this.value;
-        referenceValue = 0;
+        // Takoj vzamemo zadnjo znano vrednost referenčnega senzorja (če obstaja)
+        if (referenceSensorId && latestValues[referenceSensorId]) {
+            referenceValue = latestValues[referenceSensorId];
+        } else {
+            referenceValue = 0;
+        }
+        sensorDeltas = {};
         if (chart) {
             chart.data.labels = [];
             chart.data.datasets[0].data = [];
@@ -188,7 +261,7 @@
                 maintainAspectRatio: false,
                 animation: { duration: 0 },
                 scales: {
-                    y: { beginAtZero: false, suggestedMin: -100, suggestedMax: 100, grid: { color: 'rgba(148,163,184,0.15)' } },
+                    y: { beginAtZero: false, grid: { color: 'rgba(148,163,184,0.15)' } },
                     x: { grid: { color: 'rgba(148,163,184,0.15)' }, ticks: { maxRotation: 0 } }
                 },
                 plugins: { legend: { display: false } }
@@ -197,6 +270,7 @@
     }
 
     window.onload = function() {
+        loadHiddenSensors();
         initChart();
         connectWebSocket();
     };

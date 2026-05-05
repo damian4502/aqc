@@ -39,6 +39,10 @@
                     class="flex-1 bg-red-600 hover:bg-red-500 text-white font-medium px-6 py-3 rounded-2xl transition-all active:scale-95">
                 🗑️ Odstrani vse
             </button>
+            <button onclick="clearChart()" 
+                    class="flex-1 bg-slate-700 hover:bg-slate-600 text-white font-medium px-6 py-3 rounded-2xl transition-all active:scale-95">
+                🧹 Počisti graf
+            </button>
         </div>
 		</div>
 
@@ -73,7 +77,6 @@
 </div>
     </div>
 </div>
-
 
 
 
@@ -115,7 +118,7 @@
         const rowId = 'delta-row-' + data.room_id;
         let row = document.getElementById(rowId);
         
-        if (!row) return; // samo ročno dodani prostori
+        if (!row) return;
 
         if (referenceSensorId == data.sensor_id) {
             referenceValue = parseFloat(data.value);
@@ -124,14 +127,17 @@
         const currentPressure = parseFloat(data.value).toFixed(2);
 
         row.innerHTML = `
-            <td class="py-4 px-4 font-medium" style="cursor:pointer;">${data.room}</td>
+            <td class="py-4 px-4 font-medium flex items-center">
+                <span style="cursor:pointer;" onclick="reloadChart.call(this.parentElement.parentElement)">${data.room}</span>
+                <span onclick="removeRoom('${rowId}'); event.stopImmediatePropagation();" 
+                      class="ml-auto text-red-400 hover:text-red-500 text-2xl leading-none cursor-pointer">✕</span>
+            </td>
             <td class="text-right py-4 px-4">${currentPressure}</td>
             <td class="text-right py-4 px-4 text-xs text-slate-400">${data.time}</td>
         `;
 
         row.classList.add('!text-emerald-400');
         setTimeout(() => row.classList.remove('!text-emerald-400'), 300);
-        row.addEventListener('click', reloadChart);
     }
 
     function updateChart() {
@@ -144,7 +150,6 @@
 
         const time = new Date().toLocaleTimeString('sl-SI', {hour:'2-digit', minute:'2-digit'});
 
-        // Sinhronizacija datasetov (poravnava na desno)
         while (chart.data.datasets.length < rows.length) {
             const color = chartColors[chart.data.datasets.length % chartColors.length];
             chart.data.datasets.push({
@@ -160,7 +165,7 @@
 
         rows.forEach((row, i) => {
             const tds = row.querySelectorAll('td');
-            const roomName = tds[0] ? tds[0].textContent.trim() : `Prostor ${i+1}`;
+            const roomName = tds[0] ? tds[0].querySelector('span').textContent.trim() : `Prostor ${i+1}`;
             const valueStr = tds[1] ? tds[1].textContent.trim() : '';
             
             let value = null;
@@ -176,7 +181,6 @@
 
         chart.data.labels.push(time);
 
-        // Omejitev števila točk
         if (chart.data.labels.length > maxPoints) {
             chart.data.labels.shift();
             chart.data.datasets.forEach(ds => {
@@ -185,6 +189,33 @@
         }
 
         chart.update('none');
+    }
+
+    // ==================== NOVO: Odstrani posamezen prostor ====================
+    function removeRoom(rowId) {
+        const row = document.getElementById(rowId);
+        if (!row) return;
+
+        const tableBody = document.getElementById('delta-table');
+        const rows = Array.from(tableBody.querySelectorAll('tr'));
+        const index = rows.indexOf(row);
+
+        // odstranimo vrstico iz tabele
+        row.remove();
+
+        // odstranimo dataset iz grafa
+        if (chart && index >= 0 && index < chart.data.datasets.length) {
+            chart.data.datasets.splice(index, 1);
+            chart.update();
+        }
+    }
+
+    // ==================== NOVO: Počisti graf ====================
+    function clearChart() {
+        if (!chart) return;
+        chart.data.labels = [];
+        chart.data.datasets.forEach(ds => ds.data = []);
+        chart.update();
     }
 
     // ==================== Dodaj vse / Odstrani vse ====================
@@ -206,12 +237,15 @@
 
             const roomName = option.innerHTML;
             row.innerHTML = `
-                <td class="py-4 px-4 font-medium" style="cursor:pointer;">${roomName}</td>
+                <td class="py-4 px-4 font-medium flex items-center">
+                    <span style="cursor:pointer;" onclick="reloadChart.call(this.parentElement.parentElement)">${roomName}</span>
+                    <span onclick="removeRoom('${rowId}'); event.stopImmediatePropagation();" 
+                          class="ml-auto text-red-400 hover:text-red-500 text-2xl leading-none cursor-pointer">✕</span>
+                </td>
                 <td class="text-right py-4 px-4"></td>
                 <td class="text-right py-4 px-4 text-xs text-slate-400"></td>
             `;
 
-            // Takoj dodamo dataset z null vrednostmi (poravnava na desno)
             if (chart) {
                 const padLength = chart.data.labels.length;
                 const color = chartColors[chart.data.datasets.length % chartColors.length];
@@ -228,22 +262,18 @@
 
             row.classList.add('!text-emerald-400');
             setTimeout(() => row.classList.remove('!text-emerald-400'), 300);
-            row.addEventListener('click', reloadChart);
         }
     }
 
     function removeAllRooms() {
         if (!confirm('Res želiš odstraniti vse prostore iz tabele in grafa?')) return;
-        
         document.getElementById('delta-table').innerHTML = '';
-        
         if (chart) {
             chart.data.labels = [];
             chart.data.datasets = [];
             chart.update();
         }
     }
-    // =====================================================================
 
     document.getElementById('ref-sensor').addEventListener('change', function() {
         selectedParameter = parseInt(this.value) || null;
@@ -251,8 +281,7 @@
         referenceValue = 0;
         offset = 0;
         
-        const tableBody = document.getElementById('delta-table');
-        tableBody.innerHTML = "";
+        document.getElementById('delta-table').innerHTML = "";
         
         if (chart) {
             chart.data.labels = [];
@@ -282,12 +311,15 @@
         const roomName = this.options[this.options.selectedIndex].innerHTML;
         
         row.innerHTML = `
-            <td class="py-4 px-4 font-medium" style="cursor:pointer;">${roomName}</td>
+            <td class="py-4 px-4 font-medium flex items-center">
+                <span style="cursor:pointer;" onclick="reloadChart.call(this.parentElement.parentElement)">${roomName}</span>
+                <span onclick="removeRoom('${rowId}'); event.stopImmediatePropagation();" 
+                      class="ml-auto text-red-400 hover:text-red-500 text-2xl leading-none cursor-pointer">✕</span>
+            </td>
             <td class="text-right py-4 px-4"></td>
             <td class="text-right py-4 px-4 text-xs text-slate-400"></td>
         `;
 
-        // Takoj dodamo dataset z null vrednostmi (poravnava na desno)
         if (chart) {
             const padLength = chart.data.labels.length;
             const color = chartColors[chart.data.datasets.length % chartColors.length];
@@ -304,12 +336,11 @@
 
         row.classList.add('!text-emerald-400');
         setTimeout(() => row.classList.remove('!text-emerald-400'), 300);
-        row.addEventListener('click', reloadChart);
         this.value = '';
     });
 
     function reloadChart() {
-        const roomName = this.querySelector('td:first-child').textContent;
+        const roomName = this.querySelector('span').textContent;
         document.getElementById('chart-name').innerHTML = `Graf vrednosti – ${roomName} in ostali`;
     }
 
@@ -380,7 +411,7 @@
         setInterval(updateChart, 1000);
     };
 
-    // Drag & drop
+    // Drag & drop (nespremenjeno)
     var _el;
     function dragOver(e) {
       if (isBefore(_el, e.target))
