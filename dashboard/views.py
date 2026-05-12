@@ -694,11 +694,14 @@ def dashboard_overview(request):
     
     for room in rooms:
         # Zadnje meritve (vse parametre še vedno prikažemo v tabeli)
-        latest = Measurement.objects.filter(sensor__room=room)\
-            .select_related('parameter', 'sensor')\
-            .order_by('parameter__order', '-timestamp')\
-            .distinct('parameter__order')[:8]
+        #latest = Measurement.objects.filter(sensor__room=room)\
+        #    .select_related('parameter', 'sensor')\
+        #    .order_by('parameter__order', '-timestamp')\
+        #    .distinct('parameter__order')[:8]
         
+        params = Parameter.objects.all().order_by('order')
+        
+        """
         # Mini graf - samo AQI za zadnjih 24 ur
         mini_fig = None
         aqi_measurements = Measurement.objects.filter(
@@ -707,7 +710,7 @@ def dashboard_overview(request):
             timestamp__gte=timezone.now() - timedelta(hours=24)
         ).order_by('timestamp')
         
-        if aqi_measurements.exists():
+        if aqi_measurements.exists() and 1 == 2:
             df = pd.DataFrame(list(aqi_measurements.values('timestamp', 'value')))
             df['timestamp'] = pd.to_datetime(df['timestamp'])
             
@@ -740,13 +743,14 @@ def dashboard_overview(request):
         
         if latest_aqi:
             aqi_gauge = create_aqi_gauge(latest_aqi.value)
+        """
             
         room_data.append({
             'room': room,
-            'latest': latest,
-            'mini_fig': mini_fig,
-            'aqi_gauge': aqi_gauge,
-            'has_aqi': aqi_measurements.exists()
+            'latest': params,
+            #'mini_fig': mini_fig,
+            #'aqi_gauge': aqi_gauge,
+            #'has_aqi': aqi_measurements.exists()
         })
     
     context = {'room_data': room_data}

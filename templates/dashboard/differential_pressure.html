@@ -136,7 +136,7 @@
             const delta = (parseFloat(data.value) - referenceValue - offset).toFixed(2);
             const time = new Date().toLocaleTimeString('sl-SI', {hour:'2-digit', minute:'2-digit'});
 
-			if (data.sensor_id == 10) {
+			if (data.sensor_id == 4) {
             chart.data.labels.push(time);
             chart.data.datasets[0].data.push(parseFloat(delta));
 			}
@@ -182,8 +182,8 @@
 			avgDeltaDisplay = ( ((sum1 / sensorValues[sensorId].length) - (sum2 / sensorValues[referenceSensorId].length)).toFixed(2) );
         }
 
-        const deltaClass = deltaNum !== null ? (deltaNum >= 0 ? 'text-red-400' : 'text-emerald-400') : '';
-        const avgClass = deltaNum !== null ? (parseFloat(avgDeltaDisplay) >= 0 ? 'text-red-400' : 'text-emerald-400') : '';
+        const deltaClass = deltaNum !== null ? (deltaNum < 0 ? 'text-red-400' : 'text-emerald-400') : '';
+        const avgClass = deltaNum !== null ? (parseFloat(avgDeltaDisplay) < 0 ? 'text-red-400' : 'text-emerald-400') : '';
 
         const location = data.location || data.get_location_display || data.sensor_location || '—';
 
