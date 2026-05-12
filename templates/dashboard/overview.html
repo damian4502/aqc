@@ -48,8 +48,8 @@
 				<a href="{% url 'parameter_detail' m.id %}" 
                            class="hover:text-blue-400 transition-colors block">
                 <p class="text-xs text-slate-400 mb-1">{{ m.name }}</p>
-                <p class="text-2xl font-semibold text-white">
-                    {{ m.value|smart_float:m.name }} &nbsp;&nbsp;&nbsp;&nbsp;</br>
+                <p class="text-2xl font-semibold text-white opacity-25">
+                    {% latest_measurement item.room.id m.id as last_value %} {{ last_value|smart_float:m.name }}</br>
                     <span class="text-xs font-normal text-slate-400">{{ m.unit }}</span>
                 </p>
                 <p class="text-[10px] text-emerald-400 mt-1">{{ m.timestamp|time_ago }}</p>
@@ -170,10 +170,12 @@
         const param = (parameterName || '').toLowerCase();
 
         // Parametri, ki naj imajo 1 decimalko
-        const decimalParams = ['temperatura', 'vlaga', 'humidity', 'pm2.5', 'pm10', 'tvoc', 'pm1'];
+        const decimalParams = ['temp', 'humidity', 'pm2.5', 'pm10', 'pm1'];
 
         if (decimalParams.some(p => param.includes(p))) {
             return val.toFixed(1);           // npr. 22.7, 41.3
+		} else if (param.includes('vlaga')) {
+			return val.toFixed(0);
         } else {
             // Ostali parametri (AQI, CO2, tlak, ...) → cela števila brez .0
             return val % 1 === 0 ? val.toFixed(0) : val.toFixed(1);
@@ -202,6 +204,7 @@
                         
                         // Kratka animacija
                         valueContainer.classList.add('!text-emerald-400');
+						valueContainer.classList.remove('opacity-25');
                         setTimeout(() => valueContainer.classList.remove('!text-emerald-400'), 300);
                     }
 

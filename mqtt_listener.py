@@ -3,19 +3,21 @@ import paho.mqtt.client as mqtt
 from django.utils import timezone
 from django.db import transaction
 import os
-import django
+import django, json
+from django.core.cache import cache
 
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings')
 django.setup()
 
 from sensors.models import MqttSubscription
 from measurements.models import Measurement
+from parameters.models import Parameter
 
 class MQTTListener:
     def __init__(self):
         self.client = mqtt.Client()
         self.client.on_connect = self.on_connect
-        self.client.on_message = self.on_message
+        self.client.on_message = self.on_message_new
 
         self.broker = "mqtt"
         self.port = 1883
@@ -30,7 +32,7 @@ class MQTTListener:
         else:
             print(f"MQTT Listener: Napaka pri povezavi (rc={rc})")
 
-    def on_message(self, client, userdata, msg):
+    def aaon_message(self, client, userdata, msg):
         try:
             topic = msg.topic
             payload = msg.payload.decode('utf-8').strip()
@@ -59,6 +61,81 @@ class MQTTListener:
         except Exception as e:
             print(f"  ❌ Napaka pri obdelavi sporočila: {e}")
 
+    def on_message_new(self, client, userdata, msg):
+        try:
+            topic = msg.topic
+            payload_str = msg.payload.decode('utf-8').strip()
+
+            # Poskusi parsati kot JSON
+            try:
+                data = json.loads(payload_str)
+
+                if isinstance(data, dict):
+                    # JSON objekt → več parametrov ali {"value": ...}
+                    if 'value' in data and len(data) <= 3:  # npr. {"value": 23.5, "unit": "C"}
+                        value = data['value']
+                        param_name = data.get('parameter') or topic.split('/')[-1]
+                        self._save_measurement(topic, param_name, value)
+                    else:
+                        # Več parametrov v enem sporočilu
+                        for key, value in data.items():
+                            self._save_measurement(topic, key, value)
+                    return
+
+                else:
+                    # JSON je bil primitiv (število ali niz)
+                    self._save_measurement(topic, None, data)
+                    return
+
+            except (json.JSONDecodeError, TypeError, ValueError):
+                pass  # Ni JSON → nadaljuj z navadnim načinom
+
+            # Navaden payload (npr. "23.5")
+            self._save_measurement(topic, None, payload_str)
+
+        except Exception as e:
+            print(f"[MQTT] Napaka pri obdelavi sporočila: {e}")
+
+    def _save_measurement(self, topic, param_name, value):
+        """Shrani meritvijo - prilagodi glede na tvojo obstoječo logiko"""
+        try:
+            # Pretvori vrednost v float
+            try:
+                value = float(value)
+            except (ValueError, TypeError):
+                print(f"[MQTT] Neveljavna vrednost: {value} (topic: {topic})")
+                return
+
+            # Če param_name ni podan, ga vzemi iz zadnjega dela topica
+            if not param_name:
+                topic_parts = topic.split('/')
+                param_name = topic_parts[-1] if topic_parts else 'unknown'
+
+            subscription = MqttSubscription.objects.select_related('sensor', 'parameter').get(topic=topic)
+            try:
+                parameter = Parameter.objects.get(identifier=param_name)
+            except:
+                parameter = subscription.parameter
+
+            with transaction.atomic():
+                measurement = Measurement.objects.create(
+                    sensor=subscription.sensor,
+                    parameter=parameter,
+                    timestamp=timezone.now(),
+                    value=value
+                )
+            
+            key = "last_value" + str(subscription.sensor.room.id) + "_" + str(parameter.id)
+            cache.set(key, value, 3600*24)
+            print(cache.get(key))
+            
+            self.broadcast_update(measurement)
+
+            print(f"[MQTT] Shranjeno: {param_name} = {value} (topic: {topic})")
+
+        except Exception as e:
+            print(f"[MQTT] Napaka pri shranjevanju meritve: {e}")
+        
     def broadcast_update(self, measurement):
         """Pošlje novo meritev preko WebSocket"""
         try:

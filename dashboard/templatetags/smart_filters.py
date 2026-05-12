@@ -1,4 +1,6 @@
 from django import template
+from measurements.models import Measurement
+from django.core.cache import cache
 
 register = template.Library()
 
@@ -9,7 +11,7 @@ def smart_float(value, parameter_name=""):
         float_value = float(value)
         
         # Parametri, ki naj imajo vedno 1 decimalko
-        decimal_params = ['temperatura', 'vlaga', 'pm2.5', 'pm10', 'tvoc', 'pm1']
+        decimal_params = ['temp', 'vlag', 'pm2.5', 'pm10', 'pm1']
         
         if any(p in parameter_name.lower() for p in decimal_params):
             return f"{float_value:.1f}"
@@ -21,3 +23,17 @@ def smart_float(value, parameter_name=""):
                 return f"{float_value:.1f}"
     except (ValueError, TypeError):
         return value
+        
+@register.simple_tag
+def latest_measurement  (room, param):
+    key = "last_value" + str(room) + "_" + str(param)
+    
+    
+    try:
+        value = cache.get(key, 0)
+    except:
+        value = 0
+    
+    #cache.set(key, value, 3600)
+
+    return value

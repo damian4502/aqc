@@ -144,3 +144,16 @@ ALLOWED_HOSTS = ['*']
 
 # Za WebSockets v razvoju
 CSRF_TRUSTED_ORIGINS = ['http://192.168.1.95', 'http://localhost', 'http://127.0.0.1']
+
+CACHES = {
+    "default": {
+        "BACKEND": "django.core.cache.backends.memcached.PyMemcacheCache",
+        "LOCATION": "memcached:11211",
+        "OPTIONS": {
+            "no_delay": True,
+            "ignore_exc": True,
+            "max_pool_size": 4,
+            "use_pooling": True,
+        },
+    }
+}

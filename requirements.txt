@@ -12,3 +12,5 @@ channels-redis
 daphne
 scipy
 uvicorn[standard]
+memcache
+pymemcache
