@@ -33,11 +33,45 @@
 <!-- Kompaktna kartica prostora -->
 <div class="glass rounded-3xl overflow-hidden hover:scale-[1.02] transition-all duration-300">
     
-    <!-- Naslov -->
-    <div class="bg-gradient-to-r from-slate-800 to-slate-900 px-8 py-5 border-b border-slate-700">
-        <a href="{% url 'room_detail' item.room.id %}" class="hover:text-blue-400 transition-colors">
-            <h2 class="text-xl font-semibold text-white">{{ item.room.name }}</h2>
+    <!-- Naslov + AQI Progress Bar (top-right) -->
+    <div class="bg-gradient-to-r from-slate-800 to-slate-900 px-8 py-5 border-b border-slate-700 flex items-center justify-between relative">
+        <a href="{% url 'room_detail' item.room.id %}" class="hover:text-blue-400 transition-colors flex-1 min-w-0 pr-4">
+            <h2 class="text-xl font-semibold text-white truncate">{{ item.room.name }}</h2>
         </a>
+
+        <!-- Mini AQI Progress Bar - FIKSI GRADIENT -->
+        <div class="flex items-center gap-2 flex-shrink-0">
+			{% comment %}
+            <div class="text-right leading-none">
+                <div class="text-[9px] font-medium tracking-[0.5px] text-slate-400">AQI</div>
+                <div class="text-[17px] font-bold tabular-nums text-emerald-400" data-aqi-value="{{ item.room.id }}">42</div>
+            </div>
+			{% endcomment %}
+
+            <div class="aqi-bar-wrapper relative w-[92px] h-[6px] bg-[#0a0a0a] rounded-[1px] border border-slate-700 overflow-hidden shadow-[inset_0_1px_2px_rgba(0,0,0,0.6)]">
+                
+                <!-- Fiksni gradient čez celotno širino bara -->
+                <div class="absolute inset-0 bg-gradient-to-r from-emerald-500 via-amber-400 to-red-600"></div>
+
+                <!-- Dark overlay (prekriva desni del gradienta) - width = 100% - AQI% -->
+                <div class="aqi-progress absolute right-0 top-0 h-full bg-[#0a0a0a] "
+                     style="width: 58%;"></div>
+
+                <!-- Subtle scanlines -->
+                <div class="absolute inset-0 pointer-events-none" 
+                     style="background-image: repeating-linear-gradient(
+                         to bottom,
+                         transparent 0%,
+                         transparent 40%,
+                         rgba(148,163,184,0.12) 40%,
+                         rgba(148,163,184,0.12) 42%
+                     );"></div>
+
+            </div>
+        </div>
+		
+		
+		
     </div>
 
     <!-- Kompaktni grid: prvih 8 parametrov po order -->
@@ -189,7 +223,7 @@
             const title = card.querySelector('h2');
             if (!title || title.textContent.trim() !== data.room) return;
 
-            // Poišči parameter po imenu
+            // 1. Posodobi običajne parametre v gridu (obstoječa logika)
             const paramTexts = card.querySelectorAll('p.text-xs.text-slate-400');
             paramTexts.forEach(p => {
                 if (p.textContent.trim() === data.parameter) {
@@ -213,7 +247,135 @@
                     if (timeEl) timeEl.textContent = data.time;
                 }
             });
+
+            // 2. Posebna logika za AQI Progress Bar (top-right)
+            const paramLower = (data.parameter || '').toLowerCase();
+            if (paramLower.includes('aqi') || paramLower.includes('air quality')) {
+                const aqiValueEl = card.querySelector('[data-aqi-value]');
+                const aqiBar = card.querySelector('.aqi-progress');
+
+                if (aqiValueEl || aqiBar) {
+                    const val = parseFloat(data.value);
+                    if (!isNaN(val)) {
+                        // AQI 0-500 → 0-100%
+                        const percent = Math.min(100, Math.max(0, (val / 500) * 100));
+                        
+                        if (aqiBar) {
+                            aqiBar.style.width = percent + '%';
+                            // Neon glow intensity based on level
+                            if (val > 150) {
+                                aqiBar.style.boxShadow = '0 0 14px rgba(239, 68, 68, 0.9)';
+                            } else if (val > 100) {
+                                aqiBar.style.boxShadow = '0 0 10px rgba(245, 158, 11, 0.8)';
+                            } else {
+                                aqiBar.style.boxShadow = '0 0 10px rgba(16, 185, 129, 0.7)';
+                            }
+                        }
+
+                        if (aqiValueEl) {
+                            aqiValueEl.textContent = Math.round(val);
+                            
+                            // Dinamična barva glede na AQI nivo (standardne barve)
+                            let colorClass = 'text-emerald-400';
+                            if (val > 300) colorClass = 'text-purple-400';
+                            else if (val > 200) colorClass = 'text-red-400';
+                            else if (val > 150) colorClass = 'text-orange-400';
+                            else if (val > 100) colorClass = 'text-yellow-400';
+                            else if (val > 50) colorClass = 'text-lime-400';
+                            
+                            aqiValueEl.className = `text-[17px] font-bold tabular-nums ${colorClass}`;
+                        }
+                    }
+                }
+            }
+
+if (['PM2.5', 'PM10', 'CO2', 'VOC'].some(p => data.parameter.includes(p))) {
+  updateAQIProgressBar(card);
+}
         });
     }
+
+
+// === INDOOR AQI IZRAČUN NA KARTICAH (dodaj tukaj) ===
+function getParameterValue(card, paramKey) {
+  const labels = card.querySelectorAll('p.text-xs.text-slate-400');
+  for (let label of labels) {
+    if (label.textContent.trim().toLowerCase().includes(paramKey.toLowerCase())) {
+      const valueContainer = label.nextElementSibling;
+      if (valueContainer) {
+        const match = valueContainer.textContent.match(/[0-9.]+/);
+        return match ? parseFloat(match[0]) : null;
+      }
+    }
+  }
+  return null;
+}
+
+function calculateSubIndex(value, breakpoints) {
+  if (value == null || isNaN(value) || value < 0) return 0;
+  for (let i = 0; i < breakpoints.length - 1; i++) {
+    const [lo, hi, aqiLo, aqiHi] = breakpoints[i];
+    if (value >= lo && value <= hi) {
+      return Math.round(aqiLo + ((aqiHi - aqiLo) * (value - lo)) / (hi - lo));
+    }
+  }
+  return 500; // nad maksimumom
+}
+
+// Breakpoints (EPA za PM + indoor za CO2/VOC)
+const PM25_BP = [[0, 12.0, 0, 50], [12.1, 35.4, 51, 100], [35.5, 55.4, 101, 150], [55.5, 150.4, 151, 200], [150.5, 250.4, 201, 300], [250.5, 500.4, 301, 500]];
+const PM10_BP = [[0, 54, 0, 50], [55, 154, 51, 100], [155, 254, 101, 150], [255, 354, 151, 200], [355, 424, 201, 300], [425, 604, 301, 500]];
+const CO2_BP  = [[0, 800, 0, 50], [801, 1200, 51, 100], [1201, 1800, 101, 150], [1801, 3000, 151, 250]];
+const VOC_BP  = [[0, 100, 0, 50], [101, 300, 51, 100], [301, 600, 101, 150], [601, 1000, 151, 250]];
+
+function calculateIndoorAQI(card) {
+  const pm25 = getParameterValue(card, 'PM2.5');
+  const pm10 = getParameterValue(card, 'PM10');
+  const co2  = getParameterValue(card, 'CO2');
+  const voc  = getParameterValue(card, 'VOC');
+
+  const aPM25 = calculateSubIndex(pm25, PM25_BP);
+  const aPM10 = calculateSubIndex(pm10, PM10_BP);
+  const aCO2  = calculateSubIndex(co2, CO2_BP);
+  const aVOC  = calculateSubIndex(voc, VOC_BP);
+
+  return Math.max(aPM25, aPM10, aCO2, aVOC, 0);
+}
+
+function updateAQIProgressBar(card) {
+  const aqi = calculateIndoorAQI(card);
+  const aqiValueEl = card.querySelector('[data-aqi-value]');
+  const aqiBar = card.querySelector('.aqi-progress');
+
+  if (aqiValueEl) {
+    aqiValueEl.textContent = Math.round(aqi);
+    let colorClass = 'text-emerald-400';
+    if (aqi > 300) colorClass = 'text-purple-400';
+    else if (aqi > 200) colorClass = 'text-red-400';
+    else if (aqi > 150) colorClass = 'text-orange-400';
+    else if (aqi > 100) colorClass = 'text-yellow-400';
+    else if (aqi > 50) colorClass = 'text-lime-400';
+    aqiValueEl.className = `text-[17px] font-bold tabular-nums ${colorClass}`;
+  }
+
+  if (aqiBar) {
+    const percent = Math.min(100, Math.max(0, (aqi / 500) * 100));
+	const overlayWidth = 100 - percent;
+    aqiBar.style.width = overlayWidth + '%';
+    // neon glow
+    if (aqi > 150) aqiBar.style.boxShadow = '0 0 14px rgba(239, 68, 68, 0.9)';
+    else if (aqi > 100) aqiBar.style.boxShadow = '0 0 10px rgba(245, 158, 11, 0.8)';
+    else aqiBar.style.boxShadow = '0 0 10px rgba(16, 185, 129, 0.7)';
+  }
+}
+
+// Inicializacija ob nalaganju strani
+document.addEventListener('DOMContentLoaded', function() {
+  document.querySelectorAll('.glass.rounded-3xl').forEach(card => {
+    updateAQIProgressBar(card);
+  });
+});
+
+// Avtomatsko posodabljanje pri live update-ih (dodaj v obstoječo updateRoomCard funkcijo na koncu forEach zanke)
 </script>
 {% endblock %}
