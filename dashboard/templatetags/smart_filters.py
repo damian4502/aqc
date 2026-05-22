@@ -37,3 +37,48 @@ def latest_measurement  (room, param):
     #cache.set(key, value, 3600)
 
     return value
+    
+@register.simple_tag
+def all_parameters  ():
+    key = "all_parameters"
+    
+    from parameters.models import Parameter
+    
+    try:
+        value = cache.get_or_set(key, Parameter.objects.all(), 3600)
+    except:
+        value = 0
+    
+    #cache.set(key, value, 3600)
+
+    return value
+
+@register.simple_tag
+def all_rooms  ():
+    key = "all_rooms"
+    
+    from rooms.models import Room
+    
+    try:
+        value = cache.get_or_set(key, Room.objects.all(), 3600)
+    except:
+        value = 0
+    
+    #cache.set(key, value, 3600)
+
+    return value
+
+@register.simple_tag
+def all_mqtt_topics  ():
+    key = "all_mqtt_topics"
+    
+    from sensors.models import MqttSubscription
+    
+    try:
+        value = cache.get_or_set(key, MqttSubscription.objects.all(), 3600)
+    except:
+        value = 0
+    
+    #cache.set(key, value, 3600)
+
+    return value

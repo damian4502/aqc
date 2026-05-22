@@ -30,6 +30,7 @@
             {% endfor %}
         </select>
 
+		{% comment %}
         <div class="flex gap-3 mt-6">
             <button onclick="addAllRooms()" 
                     class="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white font-medium px-6 py-3 rounded-2xl transition-all active:scale-95">
@@ -44,6 +45,7 @@
                 🧹 Počisti graf
             </button>
         </div>
+		{% endcomment %}
 		</div>
 
     <div class="grid grid-cols-1 lg:grid-cols-12 gap-8">
@@ -79,19 +81,115 @@
 </div>
 
 
-
+<script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+
 <script>
+let pageVisible = true;
+// Spremljanje vidnosti zavihka
+document.addEventListener('visibilitychange', () => {
+    pageVisible = document.visibilityState === 'visible';
+    
+    if (pageVisible) {
+        console.log('%c✅ Zavihek viden – nadaljujem z live updat-i', 'color: #10b981; font-weight: bold');
+        // Tukaj lahko po želji tudi reconnectaš WebSocket
+		connectMQTT();
+    } else {
+        console.log('%c⏸️ Zavihek v ozadju – zaustavljam updat-e', 'color: #f59e0b');
+		client.end();
+    }
+});
+
+
+    let client;
+	
+	let parameter_map = {};
+	
+	{% for p in parameters %}
+	parameter_map["{{p.identifier}}"] = {{p.id}};
+	{% endfor %}
+
+    function connectMQTT() {
+      client = mqtt.connect('ws://192.168.1.95:9001', {
+        reconnectPeriod: 3000,
+        connectTimeout: 10000
+      });
+
+      client.on('connect', function () {
+        client.subscribe('vila/sentjane/#', function (err) {
+          if (!err) console.log('Naročen na vse senzorje: vila/sentjane/#');
+        });
+      });
+
+      client.on('message', function (topic, message) {
+        const time = new Date().toLocaleTimeString('sl-SI', {hour:'2-digit', minute:'2-digit', second:'2-digit'});
+        const payload = message.toString();
+		try { jdata = JSON.parse(payload); } catch (e) { console.warn("Received non-JSON message on ${topic}: ${payload}"); return;}
+		
+		
+		for (item in jdata) {
+			if (!mqtt_topics[topic]) continue;
+			let data = {}
+			data['parameter_id'] = parameter_map[item]
+			if (data['parameter_id'] == selectedParameter) {
+				data["room_id"] = mqtt_topics[topic].room_id
+				data["sensor_id"] = mqtt_topics[topic].sensor_id
+				data["value"] = jdata[item]
+				//console.log(data);
+				updateLiveData(data);
+			}
+		}
+				
+		
+		
+
+		//console.log(payload);
+		
+		
+      });
+
+	
+
+    }
+
+	setInterval(publishLiveDataMode, 10000);
+	
+	function publishLiveDataMode() {
+		if (pageVisible)
+		for (p in parameter_map) if (parameter_map[p] == selectedParameter) client.publish("vila/sentjane/asgard/live_data", p , { qos: 0 });
+	}
+	
+	window.onload = connectMQTT;
+	
     let socket;
     let chart;
     let offset = 0;
     let referenceValue = 0;
     let referenceSensorId = null;
     let selectedParameter = null;
-    let maxPoints = 300;
+    let maxPoints = 1000;
+	let pointIndex = 0;
+	let deltas = {};
+	let firstData = false;
 
-    const chartColors = ['#ef4444', '#22c55e', '#3b82f6', '#a855f7', '#f59e0b', '#ec4899', '#06b67f', '#6366f1', '#f97316', '#8b5cf6'];
+	let liveRooms = {};
+	
+{% for p in parameters %}
+liveRooms["{{p.id}}"] = [];
+	{% for r in p.live_rooms %}
+		liveRooms["{{p.id}}"].push({{r}});
+	{% endfor %}
+{% endfor %}
 
+	let mqtt_topics = {};
+	{% for t in mqtt_topics %}
+		mqtt_topics["{{t.topic}}"] = {"room_id": {{t.sensor.room.id}}, "sensor_id": {{t.sensor.id}} };
+	{% endfor %}
+	
+
+    const chartColors = ['white', '#ef4444', '#22c55e', '#3b82f6', '#a855f7', '#f59e0b', '#ec4899', '#06b67f', '#f97316', '#8b5cf6'];
+
+{% comment %}
     function connectWebSocket() {
         socket = new WebSocket('ws://' + window.location.host + '/ws/live/');
         
@@ -107,16 +205,30 @@
                 console.error('Parse error:', err);
             }
         };
+
+        socket.onclose = function() {
+            console.log('%cWebSocket zaprt. Ponovni poskus čez 3s...', 'color: #f59e0b');
+            setTimeout(connectWebSocket, 3000);
+        };
+
+        socket.onerror = function(err) {
+            console.error('WebSocket napaka:', err);
+
+            console.log('%cWebSocket zaprt. Ponovni poskus čez 3s...', 'color: #f59e0b');
+            setTimeout(connectWebSocket, 3000);
+        };
     }
+{% endcomment %}
 
     function updateLiveData(data) {
-        updateDeltaTable(data);
+		if (data["parameter_id"] == selectedParameter) updateDeltaTable(data);
     }
 
     function updateDeltaTable(data) {
         const tableBody = document.getElementById('delta-table');
         const rowId = 'delta-row-' + data.room_id;
-        let row = document.getElementById(rowId);
+        let row = document.getElementById(rowId)
+		firstData = true;;
         
         if (!row) return;
 
@@ -124,24 +236,18 @@
             referenceValue = parseFloat(data.value);
         }
 
-        const currentPressure = parseFloat(data.value).toFixed(2);
+        const currentPressure = parseFloat(data.value);
+		
+		let value_td = row.querySelector('.lastValue');
+		value_td.innerHTML = currentPressure;
 
-        row.innerHTML = `
-            <td class="py-4 px-4 font-medium flex items-center">
-                <span style="cursor:pointer;" onclick="reloadChart.call(this.parentElement.parentElement)">${data.room}</span>
-                <span onclick="removeRoom('${rowId}'); event.stopImmediatePropagation();" 
-                      class="ml-auto text-red-400 hover:text-red-500 text-2xl leading-none cursor-pointer">✕</span>
-            </td>
-            <td class="text-right py-4 px-4">${currentPressure}</td>
-            <td class="text-right py-4 px-4 text-xs text-slate-400">${data.time}</td>
-        `;
-
-        row.classList.add('!text-emerald-400');
-        setTimeout(() => row.classList.remove('!text-emerald-400'), 300);
+        value_td.classList.add('!text-emerald-400');
+        setTimeout(() => value_td.classList.remove('!text-emerald-400'), 300);
     }
 
     function updateChart() {
         if (!chart) return;
+		if (!firstData) return;
         
         const tableBody = document.getElementById('delta-table');
         const rows = Array.from(tableBody.querySelectorAll('tr'));
@@ -173,20 +279,43 @@
                 value = parseFloat(valueStr);
             }
 
+			
+			if (pointIndex > 0 && chart.data.datasets[i].data[pointIndex-1] > 0) {
+				let delta = (value - chart.data.datasets[i].data[pointIndex-1]);
+				deltas[i] = ((deltas[i]*100) + delta) / 101;
+				
+				if (isNaN(deltas[i])) deltas[i] = delta;
+				
+				if (value > chart.data.datasets[i].data[pointIndex-1] || true) {
+					let nvalue = chart.data.datasets[i].data[pointIndex-1] + (deltas[i] / 51);
+					value = nvalue;
+				} else {
+					let nvalue = chart.data.datasets[i].data[pointIndex-1] - (deltas[i] / 51);
+					if (nvalue > value) value = nvalue;
+				}
+			}
+			//console.log(deltas);
+						
             if (chart.data.datasets[i]) {
                 chart.data.datasets[i].label = roomName;
-                chart.data.datasets[i].data.push(value);
+				if (pointIndex >= maxPoints) {
+					chart.data.datasets[i].data.push(value);
+				} else {
+					chart.data.datasets[i].data[pointIndex] = value;
+				}
+                
             }
         });
 
-        chart.data.labels.push(time);
+        
 
-        if (chart.data.labels.length > maxPoints) {
+        if (pointIndex >= maxPoints) {
+			chart.data.labels.push(time);
             chart.data.labels.shift();
             chart.data.datasets.forEach(ds => {
                 if (ds.data.length > 0) ds.data.shift();
             });
-        }
+        } else { pointIndex += 1; }
 
         chart.update('none');
     }
@@ -227,6 +356,7 @@
             const option = select.options[i];
             const rowId = option.value;
             if (document.getElementById(rowId)) continue;
+			if (!liveRooms[selectedParameter.toString()].includes(parseInt(rowId.split('-')[2]))) continue;
 
             const row = document.createElement('tr');
             row.id = rowId;
@@ -242,7 +372,7 @@
                     <span onclick="removeRoom('${rowId}'); event.stopImmediatePropagation();" 
                           class="ml-auto text-red-400 hover:text-red-500 text-2xl leading-none cursor-pointer">✕</span>
                 </td>
-                <td class="text-right py-4 px-4"></td>
+                <td class="text-right py-4 px-4 lastValue"></td>
                 <td class="text-right py-4 px-4 text-xs text-slate-400"></td>
             `;
 
@@ -253,10 +383,10 @@
                     label: roomName,
                     data: new Array(padLength).fill(null),
                     borderColor: color,
-                    tension: 0.25,
+                    tension: 0.4,
                     borderWidth: 3,
                     pointRadius: 0,
-                    fill: false
+                    fill: false,
                 });
             }
 
@@ -269,25 +399,33 @@
         if (!confirm('Res želiš odstraniti vse prostore iz tabele in grafa?')) return;
         document.getElementById('delta-table').innerHTML = '';
         if (chart) {
-            chart.data.labels = [];
+            chart.data.labels = new Array(maxPoints).fill(null);
             chart.data.datasets = [];
             chart.update();
+			pointIndex = 0;
         }
     }
 
     document.getElementById('ref-sensor').addEventListener('change', function() {
+		firstData = false;
         selectedParameter = parseInt(this.value) || null;
+		publishLiveDataMode();
         referenceSensorId = null;
         referenceValue = 0;
         offset = 0;
+		pointIndex = 0;
         
         document.getElementById('delta-table').innerHTML = "";
+		document.getElementById('chart-name').innerHTML = this.options[this.options.selectedIndex].innerHTML;
         
         if (chart) {
-            chart.data.labels = [];
+            chart.data.labels = new Array(maxPoints).fill(true);
             chart.data.datasets = [];
             chart.update();
         }
+		
+		deltas = {};
+		addAllRooms();
     });
 
     document.getElementById('add-room').addEventListener('change', function() {
@@ -316,7 +454,7 @@
                 <span onclick="removeRoom('${rowId}'); event.stopImmediatePropagation();" 
                       class="ml-auto text-red-400 hover:text-red-500 text-2xl leading-none cursor-pointer">✕</span>
             </td>
-            <td class="text-right py-4 px-4"></td>
+            <td class="text-right py-4 px-4 lastValue"></td>
             <td class="text-right py-4 px-4 text-xs text-slate-400"></td>
         `;
 
@@ -327,10 +465,11 @@
                 label: roomName,
                 data: new Array(padLength).fill(null),
                 borderColor: color,
-                tension: 0.25,
+                tension: 0.4,
                 borderWidth: 3,
                 pointRadius: 0,
-                fill: false
+                fill: false,
+				cubicInterpolationMode: 'monotone'
             });
         }
 
@@ -385,7 +524,7 @@
         const ctx = document.getElementById('deltaChart').getContext('2d');
         chart = new Chart(ctx, {
             type: 'line',
-            data: { labels: [], datasets: [] },
+            data: { labels: new Array(50).fill(1), datasets: [] },
             options: {
                 responsive: true,
                 maintainAspectRatio: false,
@@ -407,28 +546,11 @@
 
     window.onload = function() {
         initChart();
-        connectWebSocket();
-        setInterval(updateChart, 1000);
+        //connectWebSocket();
+        setInterval(updateChart, 41);
+		connectMQTT();
     };
 
-    // Drag & drop (nespremenjeno)
-    var _el;
-    function dragOver(e) {
-      if (isBefore(_el, e.target))
-        e.target.parentNode.insertBefore(_el, e.target);
-      else
-        e.target.parentNode.insertBefore(_el, e.target.nextSibling);
-    }
-    function dragStart(e) {
-      e.dataTransfer.effectAllowed = "move";
-      e.dataTransfer.setData("text/plain", null);
-      _el = e.target;
-    }
-    function isBefore(el1, el2) {
-      if (el2.parentNode === el1.parentNode)
-        for (var cur = el1.previousSibling; cur && cur.nodeType !== 9; cur = cur.previousSibling)
-          if (cur === el2) return true;
-      return false;
-    }
 </script>
+
 {% endblock %}

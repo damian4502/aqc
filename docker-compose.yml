@@ -16,9 +16,9 @@ services:
       restart: always
       ports:
         - "1883:1883"              # MQTT port
+        - "9001:9001"              # MQTT port
       volumes:
-        - ./mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
-
+        - ./mosquitto.conf:/mosquitto/config/mosquitto.conf
   memcached:
     image: memcached
     restart: always

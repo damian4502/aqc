@@ -5,10 +5,11 @@ from channels.auth import AuthMiddlewareStack
 from channels.security.websocket import AllowedHostsOriginValidator
 from django.urls import path
 
-from dashboard.consumers import LiveDataConsumer
+#from dashboard.consumers import LiveDataConsumer
 
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings')
 
+"""
 application = ProtocolTypeRouter({
     "http": get_asgi_application(),
     "websocket": AllowedHostsOriginValidator(
@@ -18,4 +19,9 @@ application = ProtocolTypeRouter({
             ])
         )
     ),
+})
+"""
+
+application = ProtocolTypeRouter({
+    "http": get_asgi_application(),
 })

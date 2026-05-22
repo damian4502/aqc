@@ -1,5 +1,6 @@
 {% extends 'base.html' %}
 {% load static %}
+{% load smart_filters %}
 
 {% block title %}Diferencialni tlak - Air Quality Control{% endblock %}
 
@@ -31,7 +32,6 @@
 <thead>
     <tr class="border-b border-slate-900">
         <th class="text-left py-3 px-4">Prostor / Senzor</th>
-        <th class="text-left py-3 px-4">Lokacija</th>
         <th class="text-right py-3 px-4">Trenutni tlak</th>
         <th class="text-right py-3 px-4">ΔP</th>
         <th class="text-right py-3 px-4">Povp. ΔP</th>
@@ -64,8 +64,74 @@
     </div>
 </div>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
 <script>
     let socket;
+	{% all_parameters as parameters %}
+	{% all_mqtt_topics as mqtt_topics %}
+	{% all_rooms as rooms %}
+
+	let mqtt_topics = {};
+	{% for t in mqtt_topics %}
+		mqtt_topics["{{t.topic}}"] = {"room_id": {{t.sensor.room.id}}, "sensor_id": {{t.sensor.id}} };
+	{% endfor %}
+
+	let parameter_map = {};
+	{% for p in parameters %}
+	parameter_map["{{p.identifier}}"] = {{p.id}};
+	{% endfor %}
+	
+	let room_map = {};
+	{% for r in rooms %}
+	room_map["{{r.id}}"] = "{{r.name}}";
+	{% endfor %}
+
+    function connectMQTT() {
+      client = mqtt.connect('ws://192.168.1.95:9001', {
+        reconnectPeriod: 3000,
+        connectTimeout: 10000
+      });
+
+      client.on('connect', function () {
+        client.subscribe('vila/sentjane/#', function (err) {
+          if (!err) console.log('Naročen na vse senzorje: vila/sentjane/#');
+        });
+      });
+
+      client.on('message', function (topic, message) {
+        const time = new Date().toLocaleTimeString('sl-SI', {hour:'2-digit', minute:'2-digit', second:'2-digit'});
+        const payload = message.toString();
+		try { jdata = JSON.parse(payload); } catch (e) { console.warn("Received non-JSON message on ${topic}: ${payload}"); return;}
+		
+		for (item in jdata) {
+			if (!mqtt_topics[topic]) continue;
+			let data = {}
+			data['parameter_id'] = parameter_map[item]
+			data["room_id"] = mqtt_topics[topic].room_id
+			data["sensor_id"] = mqtt_topics[topic].sensor_id
+			data["value"] = jdata[item]
+			setTimeout(() => { updateLiveData(data); }, Math.floor(Math.random() * 2000));
+		}
+				
+		
+		
+
+		//console.log(payload);
+		return true;
+		
+		
+      });
+
+	
+
+    }
+
+	
+	
+	function publishLiveDataMode() {
+		client.publish("vila/sentjane/asgard/live_data", "pressure", { qos: 0 });
+	}
+
     let chart;
     let offset = 0;
     let referenceValue = 0;
@@ -74,8 +140,10 @@
     let hiddenSensors = new Set();
     let sensorDeltas = {};
     let sensorValues = {};
+	let sensorValuesIndex = {};
     let latestValues = {};           // ← NOVO: shranjuje zadnje absolutne vrednosti vseh senzorjev
     const MAX_DELTA_HISTORY = 5000;
+	let base_offset = 0;
 
     function loadHiddenSensors() {
         const saved = localStorage.getItem('hiddenDeltaSensors');
@@ -100,25 +168,9 @@
         alert('Vsi prostori so ponovno prikazani.');
     }
 
-    function connectWebSocket() {
-        socket = new WebSocket('ws://' + window.location.host + '/ws/live/');
-        
-        socket.onmessage = function(e) {
-            try {
-                const response = JSON.parse(e.data);
-                if (response.type === 'live_update' && response.data) {
-                    const param = (response.data.parameter || '').toString().toLowerCase();
-                    if (param.includes('tlak') || param.includes('pressure') || param.includes('pa')) {
-                        updateLiveData(response.data);
-                    }
-                }
-            } catch (err) {
-                console.error('Parse error:', err);
-            }
-        };
-    }
 
     function updateLiveData(data) {
+		if (data.parameter_id != parameter_map["pressure"]) return;
         if (!data.sensor_id) return;
 
         // Shranimo zadnjo vrednost tega senzorja
@@ -133,6 +185,7 @@
 
         // Posodobitev grafa (samo če imamo referenco)
         if (referenceSensorId && chart) {
+			return;
             const delta = (parseFloat(data.value) - referenceValue - offset).toFixed(2);
             const time = new Date().toLocaleTimeString('sl-SI', {hour:'2-digit', minute:'2-digit'});
 
@@ -163,52 +216,79 @@
         let deltaNum = null;
 
         if (referenceSensorId) {
+			if (base_offset == 0) base_offset = parseFloat(data.value);
             const refVal = latestValues[referenceSensorId] || referenceValue;
             deltaNum = parseFloat(data.value) - refVal - offset;
             delta = deltaNum.toFixed(2);
 
             // Rolling average
-            if (!sensorDeltas[sensorId]) sensorDeltas[sensorId] = [];
-            if (!sensorValues[sensorId]) sensorValues[sensorId] = [];
-            sensorDeltas[sensorId].push(deltaNum);
-			sensorValues[sensorId].push(parseFloat(data.value));
-            if (sensorDeltas[sensorId].length > MAX_DELTA_HISTORY) sensorDeltas[sensorId].shift();
+            //if (!sensorDeltas[sensorId]) sensorDeltas[sensorId] = [];
+            if (!sensorValues[sensorId]) {
+				sensorValues[sensorId] = parseFloat(data.value) -base_offset;
+				sensorValuesIndex[sensorId] = 1;
+			} else {
+				sensorValues[sensorId] += parseFloat(data.value) -base_offset;
+				sensorValuesIndex[sensorId] += 1;
+			}
+            //sensorDeltas[sensorId].push(deltaNum);
+			//sensorValues[sensorId] = parseFloat(data.value);
+            //if (sensorDeltas[sensorId].length > MAX_DELTA_HISTORY) sensorDeltas[sensorId].shift();
 
            // const sum = sensorDeltas[sensorId].reduce((a, b) => a + b, 0);
            // avgDeltaDisplay = (sum / sensorDeltas[sensorId].length).toFixed(2);
 
-            const sum1 = sensorValues[sensorId].reduce((a, b) => a + b, 0);
-			const sum2 = sensorValues[referenceSensorId].reduce((a, b) => a + b, 0);
-			avgDeltaDisplay = ( ((sum1 / sensorValues[sensorId].length) - (sum2 / sensorValues[referenceSensorId].length)).toFixed(2) );
+			//if (sensorValues[sensorId] > 2 && sensorValues[referenceSensorId] > 2) {
+			//	const sum1 = sensorValues[sensorId].reduce((a, b) => a + b, 0);
+			//	const sum2 = sensorValues[referenceSensorId].reduce((a, b) => a + b, 0);
+			//	avgDeltaDisplay = ( ((sum1 / sensorValues[sensorId].length) - (sum2 / sensorValues[referenceSensorId].length)).toFixed(2) );
+			avgDeltaDisplay = ( ((sensorValues[sensorId] / sensorValuesIndex[sensorId]) - (sensorValues[referenceSensorId] / sensorValuesIndex[referenceSensorId])).toFixed(2) );
+			//}
         }
 
         const deltaClass = deltaNum !== null ? (deltaNum < 0 ? 'text-red-400' : 'text-emerald-400') : '';
         const avgClass = deltaNum !== null ? (parseFloat(avgDeltaDisplay) < 0 ? 'text-red-400' : 'text-emerald-400') : '';
 
-        const location = data.location || data.get_location_display || data.sensor_location || '—';
+        const location = room_map[data.room_id] || data.location || data.get_location_display || data.sensor_location || '—';
 
         if (!row) {
             row = document.createElement('tr');
             row.id = rowId;
             tableBody.appendChild(row);
+			row.innerHTML = `
+				<td class="py-4 px-4 font-medium ">${location}</td>
+				<td class="text-right py-4 px-4 font-mono text-slate-300 current" id="${sensorId}_current">${currentPressure} Pa</td>
+				<td class="text-right py-4 px-4 font-bold delta">${delta} Pa</td>
+				<td class="text-right py-4 px-4 font-medium avg" id="${sensorId}_avg">${avgDeltaDisplay} Pa</td>
+				<td class="text-right py-4 px-4 text-xs text-slate-400 data_time">${data.time || ''}</td>
+				<td class="py-4 px-2 text-center">
+					<button onclick="removeSensor('${sensorId}')" class="text-slate-400 hover:text-red-400 text-3xl leading-none" title="Odstrani iz spremljanja">×</button>
+				</td>
+			`;
         }
+		
+		row.querySelector('.current').innerHTML = currentPressure;
+		row.querySelector('.avg').innerHTML = avgDeltaDisplay;
+		row.querySelector('.delta').innerHTML = delta;
+		row.querySelector('.data_time').innerHTML = data.time;
+		if (avgDeltaDisplay < 0) {
+			row.querySelector('.avg').classList.add( 'text-red-400');
+		} else {
+			row.querySelector('.avg').classList.add( 'text-emerald-400');
+		}
 
-        row.innerHTML = `
-            <td class="py-4 px-4 font-medium">${data.room}</td>
-            <td class="py-4 px-4 text-slate-400">${location}</td>
-            <td class="text-right py-4 px-4 font-mono text-slate-300">${currentPressure} Pa</td>
-            <td class="text-right py-4 px-4 font-bold ${deltaClass}">${delta} Pa</td>
-            <td class="text-right py-4 px-4 font-medium ${avgClass}">${avgDeltaDisplay} Pa</td>
-            <td class="text-right py-4 px-4 text-xs text-slate-400">${data.time || ''}</td>
-            <td class="py-4 px-2 text-center">
-                <button onclick="removeSensor('${sensorId}')" class="text-slate-400 hover:text-red-400 text-3xl leading-none" title="Odstrani iz spremljanja">×</button>
-            </td>
-        `;
+		if (delta < 0) {
+			row.querySelector('.delta').classList.add( 'text-red-400');
+		} else {
+			row.querySelector('.delta').classList.add( 'text-emerald-400');
+		}
+
     }
 
     // Izbira referenčnega senzorja
     document.getElementById('ref-sensor').addEventListener('change', function() {
         referenceSensorId = this.value;
+		sensorValues = {};
+		sensorValuesIndex = {};
         // Takoj vzamemo zadnjo znano vrednost referenčnega senzorja (če obstaja)
         if (referenceSensorId && latestValues[referenceSensorId]) {
             referenceValue = latestValues[referenceSensorId];
@@ -272,7 +352,9 @@
     window.onload = function() {
         loadHiddenSensors();
         initChart();
-        connectWebSocket();
+        connectMQTT();
+		publishLiveDataMode();
+		setInterval(publishLiveDataMode, 10000);
     };
 </script>
 {% endblock %}
