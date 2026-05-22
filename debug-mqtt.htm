@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="sl">
+<head>
+  <meta charset="UTF-8">
+  <title>MQTT Debug - Vsi senzorji</title>
+  <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+  <style>
+    body { font-family: 'Segoe UI', Arial, sans-serif; background: #1e1e1e; color: #eee; margin: 0; padding: 20px; }
+    .container { max-width: 1600px; margin: 0 auto; }
+    h1 { color: #0ea5e9; margin-bottom: 10px; }
+    .status { font-size: 0.95em; margin-bottom: 15px; }
+    .connected { color: #22c55e; }
+    .disconnected { color: #ef4444; }
+
+    .controls {
+      background: #27272a;
+      padding: 15px;
+      border-radius: 12px;
+      margin-bottom: 20px;
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+      align-items: end;
+    }
+    input, button {
+      padding: 10px 14px;
+      border: none;
+      border-radius: 8px;
+    }
+    input[type="text"] { background: #18181b; color: #eee; }
+    button { background: #22c55e; color: white; cursor: pointer; font-weight: 600; }
+    button:hover { background: #16a34a; }
+    .clear-btn { background: #ef4444; }
+
+    table { width: 100%; border-collapse: collapse; background: #27272a; border-radius: 12px; overflow: hidden; }
+    th, td { padding: 12px 16px; text-align: left; border-bottom: 1px solid #3f3f46; }
+    th { background: #18181b; color: #a1a1aa; }
+    tr:hover { background: #3b3b40; }
+    .timestamp { color: #a1a1aa; font-size: 0.85em; width: 140px; }
+    .topic { color: #60a5fa; font-family: monospace; }
+    .payload { font-family: monospace; word-break: break-all; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>MQTT Debug - Vsi senzorji</h1>
+    <div class="status" id="status">Povezujem se na Mosquitto...</div>
+
+    <div class="controls">
+      <!-- Subscribe topic -->
+      <div style="flex: 2;">
+        <label style="font-size:0.85em; color:#a1a1aa;">Subscribe topic</label><br>
+        <input type="text" id="subscribe-topic" value="vila/sentjane/#" style="width:100%;">
+      </div>
+      <button onclick="changeSubscription()">Naroči se na topic</button>
+
+      <!-- Publish -->
+      <div style="flex: 2;">
+        <label style="font-size:0.85em; color:#a1a1aa;">Publish Topic</label><br>
+        <input type="text" id="pub-topic" value="vila/sentjane/test" style="width:100%;">
+      </div>
+      <div style="flex: 3;">
+        <label style="font-size:0.85em; color:#a1a1aa;">Message / Payload</label><br>
+        <input type="text" id="pub-message" value='{"test": 123}' style="width:100%;">
+      </div>
+      <button onclick="publishMessage()">Pošlji</button>
+
+      <button class="clear-btn" onclick="clearTable()">Počisti tabelo</button>
+    </div>
+
+    <table>
+      <thead>
+        <tr>
+          <th>Čas</th>
+          <th>Topic</th>
+          <th>Sporočilo (Payload)</th>
+        </tr>
+      </thead>
+      <tbody id="log-table"></tbody>
+    </table>
+  </div>
+
+  <script>
+    let client;
+    let currentSubscription = "vila/sentjane/#";
+
+    function connectMQTT() {
+      client = mqtt.connect('ws://localhost:9001', {
+        reconnectPeriod: 3000,
+        connectTimeout: 10000
+      });
+
+      client.on('connect', function () {
+        document.getElementById('status').innerHTML = 
+          '<span class="connected">✅ Povezan na Mosquitto (ws://localhost:9001)</span>';
+        subscribeToTopic(currentSubscription);
+      });
+
+      client.on('message', function (topic, message) {
+        const time = new Date().toLocaleTimeString('sl-SI', {hour:'2-digit', minute:'2-digit', second:'2-digit'});
+        const payload = message.toString();
+
+        const row = document.createElement('tr');
+        row.innerHTML = `
+          <td class="timestamp">${time}</td>
+          <td class="topic">${topic}</td>
+          <td class="payload">${payload}</td>
+        `;
+
+        const tableBody = document.getElementById('log-table');
+        tableBody.insertBefore(row, tableBody.firstChild);
+
+        // Avtomatsko čiščenje
+        const max = 300;
+        if (tableBody.children.length > max) tableBody.removeChild(tableBody.lastChild);
+      });
+    }
+
+    function subscribeToTopic(topic) {
+      if (client) {
+        // Odjavi se od starega
+        client.unsubscribe(currentSubscription);
+        // Naroči se na novega
+        client.subscribe(topic, function (err) {
+          if (!err) {
+            currentSubscription = topic;
+            console.log(`Naročen na: ${topic}`);
+          }
+        });
+      }
+    }
+
+    function changeSubscription() {
+      const newTopic = document.getElementById('subscribe-topic').value.trim();
+      if (newTopic) {
+        subscribeToTopic(newTopic);
+      }
+    }
+
+    function publishMessage() {
+      const topic = document.getElementById('pub-topic').value.trim();
+      const message = document.getElementById('pub-message').value.trim();
+      if (!topic || !client) return alert("Topic ne sme biti prazen!");
+
+      client.publish(topic, message, { qos: 0 }, function (err) {
+        if (err) console.error("Napaka pri pošiljanju:", err);
+        else console.log(`📤 Poslano → ${topic}: ${message}`);
+      });
+    }
+
+    function clearTable() {
+      document.getElementById('log-table').innerHTML = '';
+    }
+
+    window.onload = connectMQTT;
+  </script>
+</body>
+</html>
