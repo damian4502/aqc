@@ -21,6 +21,9 @@ class MQTTListener:
 
         self.broker = "mqtt"
         self.port = 1883
+        self.topics = {}
+        self.parameters = {}
+        self.update_timestamps = {}
 
     def on_connect(self, client, userdata, flags, rc):
         if rc == 0:
@@ -65,6 +68,7 @@ class MQTTListener:
         try:
             topic = msg.topic
             payload_str = msg.payload.decode('utf-8').strip()
+            #print(payload_str)
 
             # Poskusi parsati kot JSON
             try:
@@ -103,7 +107,7 @@ class MQTTListener:
             try:
                 value = float(value)
             except (ValueError, TypeError):
-                print(f"[MQTT] Neveljavna vrednost: {value} (topic: {topic})")
+                print(f"[MQTT] Neveljavna vrednost: {value} za {param_name} (topic: {topic})")
                 return
 
             # Če param_name ni podan, ga vzemi iz zadnjega dela topica
@@ -111,32 +115,58 @@ class MQTTListener:
                 topic_parts = topic.split('/')
                 param_name = topic_parts[-1] if topic_parts else 'unknown'
 
-            subscription = MqttSubscription.objects.select_related('sensor', 'parameter').get(topic=topic)
+
             try:
-                parameter = Parameter.objects.get(identifier=param_name)
+                sensor_id = self.topics[topic]['sensor_id']
             except:
+                subscription = MqttSubscription.objects.select_related('sensor', 'parameter').get(topic=topic)
+                self.topics[topic] = {}
+                self.topics[topic]['sensor_id'] = subscription.sensor.id
+                self.topics[topic]['room_id'] = subscription.sensor.room.id
+                raise
+
+            try:
+                parameter_id = self.parameters[param_name]
+            except:
+                parameter = Parameter.objects.get(identifier=param_name)
+                self.parameters[param_name] = parameter.id
+                raise
                 parameter = subscription.parameter
 
-            with transaction.atomic():
-                measurement = Measurement.objects.create(
-                    sensor=subscription.sensor,
-                    parameter=parameter,
-                    timestamp=timezone.now(),
-                    value=value
-                )
+            try:
+                time_diff = time.time() - self.update_timestamps[sensor_id + parameter_id]
+            except:
+                time_diff = 999999
             
-            key = "last_value" + str(subscription.sensor.room.id) + "_" + str(parameter.id)
-            cache.set(key, value, 3600*24)
-            print(cache.get(key))
-            
-            self.broadcast_update(measurement)
+            if (time_diff < 1):
+                print(f"[MQTT] Discard: {param_name} = {value} (topic: {topic}, {time_diff}s < 1)")
+                return
 
-            print(f"[MQTT] Shranjeno: {param_name} = {value} (topic: {topic})")
+            #with transaction.atomic():
+            #if parameter.identifier == 'voc_index_state0':
+            #    print (Measurement.objects.filter(parameter=parameter).filter(sensor=subscription.sensor).count())
+            measurement = Measurement.objects.create(
+                sensor_id=self.topics[topic]['sensor_id'],
+                parameter_id=self.parameters[param_name],
+                timestamp=timezone.now(),
+                value=value
+            )
+            
+
+            self.update_timestamps[sensor_id + parameter_id] = time.time()
+            
+            key = "last_value" + str(self.topics[topic]['room_id']) + "_" + str(self.parameters[param_name])
+            cache.set(key, value, 3600*24)
+            
+            #self.broadcast_update(measurement)
+
+            print(f"[MQTT] Shranjeno: {param_name} = {value} (topic: {topic}, {time_diff}s)")
 
         except Exception as e:
             print(f"[MQTT] Napaka pri shranjevanju meritve: {e}")
         
     def broadcast_update(self, measurement):
+        return True
         """Pošlje novo meritev preko WebSocket"""
         try:
             data = {
