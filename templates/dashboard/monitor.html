@@ -30,7 +30,6 @@
             {% endfor %}
         </select>
 
-		{% comment %}
         <div class="flex gap-3 mt-6">
             <button onclick="addAllRooms()" 
                     class="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white font-medium px-6 py-3 rounded-2xl transition-all active:scale-95">
@@ -45,7 +44,7 @@
                 🧹 Počisti graf
             </button>
         </div>
-		{% endcomment %}
+
 		</div>
 
     <div class="grid grid-cols-1 lg:grid-cols-12 gap-8">
@@ -94,6 +93,7 @@ document.addEventListener('visibilitychange', () => {
         console.log('%c✅ Zavihek viden – nadaljujem z live updat-i', 'color: #10b981; font-weight: bold');
         // Tukaj lahko po želji tudi reconnectaš WebSocket
 		connectMQTT();
+		publishLiveDataMode();
     } else {
         console.log('%c⏸️ Zavihek v ozadju – zaustavljam updat-e', 'color: #f59e0b');
 		client.end();
@@ -152,11 +152,18 @@ document.addEventListener('visibilitychange', () => {
 
     }
 
-	setInterval(publishLiveDataMode, 10000);
+	setInterval(publishLiveDataMode, 9000);
 	
 	function publishLiveDataMode() {
 		if (pageVisible)
-		for (p in parameter_map) if (parameter_map[p] == selectedParameter) client.publish("vila/sentjane/asgard/live_data", p , { qos: 0 });
+		
+		for (p in parameter_map) if (parameter_map[p] == selectedParameter) {
+			//client.publish("vila/sentjane/asgard/live_data", p , { qos: 0 });
+			
+			document.querySelectorAll(".room-ticker").forEach(function (t) {
+				client.publish("vila/sentjane/asgard/cmd/" + t.dataset.sensor_identifier, p, { qos: 0 });
+			});
+		}
 	}
 	
 	window.onload = connectMQTT;
@@ -360,10 +367,11 @@ liveRooms["{{p.id}}"] = [];
 
             const row = document.createElement('tr');
             row.id = rowId;
-            row.draggable = true;
-            row.ondragover = "dragOver(event)";
-            row.ondragstart = "dragStart(event)";
+			row.dataset.room_id = parseInt(rowId.split('-')[2]);
+			row.classList.add("room-ticker");
             tableBody.appendChild(row);
+			
+			for (topic in mqtt_topics) if (parseInt(mqtt_topics[topic]['room_id']) == row.dataset.room_id) row.dataset.sensor_identifier = topic.split('/')[2];
 
             const roomName = option.innerHTML;
             row.innerHTML = `
@@ -393,6 +401,8 @@ liveRooms["{{p.id}}"] = [];
             row.classList.add('!text-emerald-400');
             setTimeout(() => row.classList.remove('!text-emerald-400'), 300);
         }
+		
+		publishLiveDataMode();
     }
 
     function removeAllRooms() {
@@ -425,7 +435,7 @@ liveRooms["{{p.id}}"] = [];
         }
 		
 		deltas = {};
-		addAllRooms();
+		//addAllRooms();
     });
 
     document.getElementById('add-room').addEventListener('change', function() {
@@ -441,12 +451,16 @@ liveRooms["{{p.id}}"] = [];
 
         const row = document.createElement('tr');
         row.id = rowId;
-        row.draggable = true;
-        row.ondragover = "dragOver(event)";
-        row.ondragstart = "dragStart(event)";
+		row.classList.add("room-ticker");
         tableBody.appendChild(row);
+
+		row.dataset.room_id = parseInt(rowId.split('-')[2]);
+		for (topic in mqtt_topics) if (parseInt(mqtt_topics[topic]['room_id']) == row.dataset.room_id) row.dataset.sensor_identifier = topic.split('/')[2];
+
+		publishLiveDataMode();
         
         const roomName = this.options[this.options.selectedIndex].innerHTML;
+		row.dataset.room_name = roomName;
         
         row.innerHTML = `
             <td class="py-4 px-4 font-medium flex items-center">
@@ -476,6 +490,7 @@ liveRooms["{{p.id}}"] = [];
         row.classList.add('!text-emerald-400');
         setTimeout(() => row.classList.remove('!text-emerald-400'), 300);
         this.value = '';
+		
     });
 
     function reloadChart() {
