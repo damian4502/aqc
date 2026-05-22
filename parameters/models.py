@@ -1,4 +1,7 @@
 from django.db import models
+import datetime
+from django.core.cache import cache
+from random import randrange
 
 class Parameter(models.Model):
     identifier = models.CharField(max_length=50, unique=True)
@@ -19,6 +22,13 @@ class Parameter(models.Model):
     
     def __str__(self):
         return f"{self.name} ({self.unit})" if self.unit else self.name
+
+    def live_rooms(self):
+        from measurements.models import Measurement
+
+        rooms = cache.get_or_set("1liverooms_param_%s" % self.id, [x['sensor__room'] for x in Measurement.objects.filter(parameter=self).filter(timestamp__gte=datetime.datetime.now() - datetime.timedelta(hours=1)).values('sensor__room').annotate(dcount=models.Count('sensor__room'))], randrange(1000))
+
+        return rooms
 
     class Meta:
         ordering = ['name']
