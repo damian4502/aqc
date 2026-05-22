@@ -235,6 +235,7 @@ from django.utils import timezone
 
 from django.shortcuts import render, get_object_or_404
 from .models import Dashboard, DashboardWidget
+from django.views.decorators.cache import cache_page
 
 def custom_dashboard(request):
     dashboard = Dashboard.objects.filter(is_default=True).first()
@@ -256,10 +257,14 @@ def custom_dashboard(request):
     }
     return render(request, 'dashboard/custom_dashboard.html', context)
     
+#@cache_page(60)
 def monitor(request):
     context = {}
     context['parameters'] = Parameter.objects.all().order_by('name')
     context['rooms'] = Room.objects.all().order_by('order')
+    
+    from sensors.models import MqttSubscription
+    context["mqtt_topics"] = MqttSubscription.objects.all()
 
 
     return render(request, 'dashboard/monitor.html', context)
@@ -1085,12 +1090,8 @@ def trends_view(request):
     return render(request, 'dashboard/trends.html', context)
 
 
-from django.db import models
 def differential_pressure_view(request):
-    # Najdi parameter "Tlak" (lahko prilagodiš ime)
-    pressure_param = Parameter.objects.filter(
-        models.Q(name__icontains='tlak') | models.Q(name__icontains='pressure')
-    ).first()
+    pressure_param = Parameter.objects.filter(id=11).first()
 
     sensors = Sensor.objects.filter(
         parameter=pressure_param
@@ -1101,3 +1102,20 @@ def differential_pressure_view(request):
         'pressure_parameter': pressure_param,
     }
     return render(request, 'dashboard/differential_pressure.html', context)
+    
+    from django.db import models
+
+def get_last_voc_states(request, sensor):
+    data = {}
+
+    
+
+    
+    try:
+        data['state0'] = Measurement.objects.filter(parameter__identifier="voc_index_state0").filter(timestamp__gte=datetime.now()-timedelta(minutes=10)).filter(sensor__name__icontains=sensor).values('value', 'timestamp').order_by('-id')[0]
+        data['state1'] = Measurement.objects.filter(parameter__identifier="voc_index_state1").filter(timestamp__gte=datetime.now()-timedelta(minutes=10)).filter(sensor__name__icontains=sensor).values('value', 'timestamp').order_by('-id')[0]
+    except:
+        pass
+    
+    from django.http import JsonResponse
+    return JsonResponse(data)

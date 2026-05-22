@@ -16,6 +16,7 @@ class Room(models.Model):
         index = cache.get_or_set("room_get_aqi_%s" % self.id, randrange(100), 120)
         return randrange(100)
 
+
     def __str__(self):
         return self.name
 

@@ -5,6 +5,7 @@ urlpatterns = [
     path('', dashboard_overview, name='dashboard'),
     path('room/<int:room_id>/', room_detail, name='room_detail'),
     path('room/<int:room_id>/export/', export_room_csv, name='export_room_csv'),
+    path('api/voc_states/<str:sensor>/', get_last_voc_states, name='get_last_voc_states'),
     path('parameter/<int:parameter_id>/', parameter_detail, name='parameter_detail'),
     path('room/<int:room_id>/graph/', room_graph_fragment, name='room_graph_fragment'),
     path('api/latest-measurements/', latest_measurements_api, name='latest_measurements_api'),
