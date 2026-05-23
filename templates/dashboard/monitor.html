@@ -92,11 +92,11 @@ document.addEventListener('visibilitychange', () => {
     if (pageVisible) {
         console.log('%c✅ Zavihek viden – nadaljujem z live updat-i', 'color: #10b981; font-weight: bold');
         // Tukaj lahko po želji tudi reconnectaš WebSocket
-		connectMQTT();
+		//connectMQTT();
 		publishLiveDataMode();
     } else {
         console.log('%c⏸️ Zavihek v ozadju – zaustavljam updat-e', 'color: #f59e0b');
-		client.end();
+		//client.end();
     }
 });
 
