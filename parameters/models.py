@@ -19,6 +19,11 @@ class Parameter(models.Model):
         help_text="Označi, če višja vrednost parametra pomeni slabšo kakovost zraka "
                   "(npr. CO2, AQI, PM2.5). Za temperaturo označi False."
     )
+    format_decimals = models.PositiveIntegerField(
+        default=2,
+        verbose_name="Number of decimal places on room cards etc.",
+    )
+    
     
     def __str__(self):
         return f"{self.name} ({self.unit})" if self.unit else self.name
