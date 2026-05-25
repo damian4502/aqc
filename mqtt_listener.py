@@ -134,7 +134,7 @@ class MQTTListener:
                 parameter = subscription.parameter
 
             try:
-                time_diff = time.time() - self.update_timestamps[sensor_id + parameter_id]
+                time_diff = time.time() - self.update_timestamps[(sensor_id*23) + parameter_id]
             except:
                 time_diff = 999999
             
@@ -153,7 +153,7 @@ class MQTTListener:
             )
             
 
-            self.update_timestamps[sensor_id + parameter_id] = time.time()
+            self.update_timestamps[(sensor_id*23) + parameter_id] = time.time()
             
             key = "last_value" + str(self.topics[topic]['room_id']) + "_" + str(self.parameters[param_name])
             cache.set(key, value, 3600*24)
