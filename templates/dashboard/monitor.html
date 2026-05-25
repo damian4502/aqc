@@ -125,6 +125,7 @@ document.addEventListener('visibilitychange', () => {
         const time = new Date().toLocaleTimeString('sl-SI', {hour:'2-digit', minute:'2-digit', second:'2-digit'});
         const payload = message.toString();
 		try { jdata = JSON.parse(payload); } catch (e) { console.warn("Received non-JSON message on ${topic}: ${payload}"); return;}
+		console.log(payload);
 		
 		
 		for (item in jdata) {

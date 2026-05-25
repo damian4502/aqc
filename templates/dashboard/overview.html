@@ -100,7 +100,6 @@
     </div>
 </div>
 
-<script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
 <script>
 
 let pageVisible = true;
@@ -112,16 +111,15 @@ document.addEventListener('visibilitychange', () => {
     if (pageVisible) {
         console.log('%c✅ Zavihek viden – nadaljujem z live updat-i', 'color: #10b981; font-weight: bold');
         // Tukaj lahko po želji tudi reconnectaš WebSocket
-		connectMQTT();
+		//connectMQTT();
+		for (parameter in parameter_map) client.publish("vila/sentjane/asgard/cmd/all", parameter, { qos: 0 });
     } else {
         console.log('%c⏸️ Zavihek v ozadju – zaustavljam updat-e', 'color: #f59e0b');
-		client.end();
+		//client.end();
     }
 });
 
 
-    let socket;
-	let client;
 	{% all_parameters as parameters %}
 	{% all_mqtt_topics as mqtt_topics %}
 
@@ -129,13 +127,15 @@ document.addEventListener('visibilitychange', () => {
 	{% for t in mqtt_topics %}
 		mqtt_topics["{{t.topic}}"] = {"room_id": {{t.sensor.room.id}}, "sensor_id": {{t.sensor.id}} };
 	{% endfor %}
+	
+
 
 	let parameter_map = {};
 	{% for p in parameters %}
 	parameter_map["{{p.identifier}}"] = {{p.id}};
 	{% endfor %}
 
-    function connectMQTT() {
+    function connectMQTTaaa() {
       client = mqtt.connect('ws://192.168.1.95:9001', {
         reconnectPeriod: 3000,
         connectTimeout: 10000
@@ -145,13 +145,15 @@ document.addEventListener('visibilitychange', () => {
         client.subscribe('vila/sentjane/#', function (err) {
           if (!err) console.log('Naročen na vse senzorje: vila/sentjane/#');
         });
+		
+		for (parameter in parameter_map) client.publish("vila/sentjane/asgard/cmd/all", parameter, { qos: 0 });
       });
 
       client.on('message', function (topic, message) {
-		if (!pageVisible) return;
+		if (!pageVisible) return true;
         const time = new Date().toLocaleTimeString('sl-SI', {hour:'2-digit', minute:'2-digit', second:'2-digit'});
         const payload = message.toString();
-		try { jdata = JSON.parse(payload); } catch (e) { console.warn("Received non-JSON message on ${topic}: ${payload}"); return;}
+		try { jdata = JSON.parse(payload); } catch (e) { return true;}
 		
 		for (item in jdata) {
 			if (!mqtt_topics[topic]) continue;
@@ -161,6 +163,9 @@ document.addEventListener('visibilitychange', () => {
 			data["sensor_id"] = mqtt_topics[topic].sensor_id
 			data["value"] = jdata[item]
 			setTimeout(() => { updateRoomCard(data); }, Math.floor(Math.random() * 2000));
+			if (data["room_id"] == outdoor_room_id) {
+				document.getElementById('outdoor-PM10').innerHTML = data["value"];
+			}
 		}
 				
 		
@@ -174,6 +179,7 @@ document.addEventListener('visibilitychange', () => {
 	
 
     }
+
 
 {% comment %}
     function connectWebSocket() {
@@ -261,33 +267,10 @@ document.addEventListener('visibilitychange', () => {
         console.log('%cDodana nova meritev v ticker', 'color: #34d399');
     }
 
-    // Zaženi
-    document.addEventListener('DOMContentLoaded', function() {
-        connectMQTT();
-    });
-
 
 </script>
 
 <script>
-    function smartFormatValue(value, parameterName) {
-        const val = parseFloat(value);
-        if (isNaN(val)) return value;
-
-        const param = (parameterName || '').toLowerCase();
-
-        // Parametri, ki naj imajo 1 decimalko
-        const decimalParams = ['temp', 'humidity', 'pm2.5', 'pm10', 'pm1'];
-
-        if (decimalParams.some(p => param.includes(p))) {
-            return val.toFixed(1);           // npr. 22.7, 41.3
-		} else if (param.includes('vlaga')) {
-			return val.toFixed(0);
-        } else {
-            // Ostali parametri (AQI, CO2, tlak, ...) → cela števila brez .0
-            return val % 1 === 0 ? val.toFixed(0) : val.toFixed(1);
-        }
-    }
 
     function updateRoomCardAQI(data) {
 	}
@@ -411,10 +394,49 @@ function updateAQIProgressBar(card) {
 
 // Inicializacija ob nalaganju strani
 document.addEventListener('DOMContentLoaded', function() {
+      client.on('message', function (topic, message) {
+		if (!pageVisible) return;
+
+		updateTopBar(topic, message);
+
+
+        const time = new Date().toLocaleTimeString('sl-SI', {hour:'2-digit', minute:'2-digit', second:'2-digit'});
+        const payload = message.toString();
+		try { jdata = JSON.parse(payload); } catch (e) { return true;}
+		
+		for (item in jdata) {
+			if (!mqtt_topics[topic]) continue;
+			let data = {}
+			data['parameter_id'] = parameter_map[item]
+			data["room_id"] = mqtt_topics[topic].room_id
+			data["sensor_id"] = mqtt_topics[topic].sensor_id
+			data["value"] = jdata[item]
+			setTimeout(() => { updateRoomCard(data); }, Math.floor(Math.random() * 2000));
+		}
+				
+		
+		
+
+		//console.log(payload);
+				
+		
+		
+      });
+	  
+	client.on('connect', function () {
+        client.subscribe('vila/sentjane/#', function (err) {
+          if (!err) console.log('Naročen na vse senzorje: vila/sentjane/#');
+        });
+		
+		for (parameter in parameter_map) client.publish("vila/sentjane/asgard/cmd/all", parameter, { qos: 0 });
+      });
+
   document.querySelectorAll('.glass.rounded-3xl').forEach(card => {
     updateAQIProgressBar(card);
+	
   });
 });
+
 
 // Avtomatsko posodabljanje pri live update-ih (dodaj v obstoječo updateRoomCard funkcijo na koncu forEach zanke)
 </script>

@@ -1,3 +1,5 @@
+{% load smart_filters %}
+
 <!DOCTYPE html>
 <html lang="sl">
 <head>
@@ -130,12 +132,15 @@
         <div class="flex-1 flex flex-col overflow-hidden">
             
             <!-- Zgornja vrstica s gumbom za skrivanje menija -->
-            <div class="h-14 border-b border-slate-700 px-6 flex items-center glass flex-shrink-0">
+            <div class="h-14 border-b border-slate-700 px-6 flex items-center glass flex-shrink-0" data-outdoor_room_id=6 data-outdoor_mqtt_topic="vila/sentjane/klub" id="top-bar">
                 <button onclick="toggleSidebar()" 
                         class="flex items-center justify-center w-10 h-10 text-slate-400 hover:text-white hover:bg-slate-800/70 rounded-2xl transition-all active:scale-95"
                         title="Skrij / prikaži stranski meni">
                     <i id="sidebar-toggle-icon" class="fas fa-chevron-left text-xl"></i>
                 </button>
+				<div>Temper: <span id="outdoor-PM10"></div>&nbsp;&nbsp;
+				<div>Temperature: <span id="outdoor-temperature"></div>&nbsp;&nbsp;
+				<div>Humidity: <span id="outdoor-humidity"></div>&nbsp;&nbsp;
             </div>
 
             <!-- Vsebina strani -->
@@ -145,7 +150,55 @@
         </div>
     </div>
 
+<script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+
 <script>
+	var outdoor_mqtt_topic = '';
+	var outdoor_room_id = -1;
+
+	 var client = mqtt.connect('ws://192.168.1.95:9001', {
+			reconnectPeriod: 3000,
+			connectTimeout: 10000
+		  });
+
+      client.on('connect', function () {
+		outdoor_mqtt_topic = document.getElementById('top-bar').dataset.outdoor_mqtt_topic
+		outdoor_room_id = document.getElementById('top-bar').dataset.outdoor_room_id;
+        //client.subscribe(outdoor_mqtt_topic);
+		//console.log(outdoor_mqtt_topic);
+		
+      });
+
+    function smartFormatValue(value, parameterName) {
+        const val = parseFloat(value);
+        if (isNaN(val)) return value;
+
+        const param = (parameterName || '').toLowerCase();
+
+        // Parametri, ki naj imajo 1 decimalko
+        const decimalParams = ['temp', 'humidity', 'pm2.5', 'pm10', 'pm1'];
+
+        if (decimalParams.some(p => param.includes(p))) {
+            return val.toFixed(1);           // npr. 22.7, 41.3
+		} else if (param.includes('vlaga')) {
+			return val.toFixed(0);
+        } else {
+            // Ostali parametri (AQI, CO2, tlak, ...) → cela števila brez .0
+            return val % 1 === 0 ? val.toFixed(0) : val.toFixed(1);
+        }
+    }
+	 
+	 function updateTopBar(topic, message) {
+        const payload = message.toString();
+		try { jdata = JSON.parse(payload); } catch (e) { return true;}
+		if (topic == outdoor_mqtt_topic) {
+			if (jdata['temperature']) document.getElementById('outdoor-temperature').innerHTML = smartFormatValue(jdata['temperature']);
+			if (jdata['humidity']) document.getElementById('outdoor-humidity').innerHTML = smartFormatValue(jdata['humidity']);
+			if (jdata['PM10']) document.getElementById('outdoor-PM10').innerHTML = smartFormatValue(jdata['PM10']);
+		}
+	  }
+
+
     // Obstoječa funkcija za podmenuje
     function toggleSubmenu(btn) {
         const submenu = btn.nextElementSibling;
@@ -196,6 +249,7 @@
 
     // Ob nalaganju strani preveri shranjeno stanje
     document.addEventListener('DOMContentLoaded', () => {
+		client.on('message', updateTopBar);
         const sidebar = document.getElementById('sidebar');
         const inner = document.getElementById('sidebar-inner');
         const icon = document.getElementById('sidebar-toggle-icon');
