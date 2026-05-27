@@ -2,6 +2,7 @@ from django.db import models
 from random import randrange
 
 from django.core.cache import cache
+from parameters.models import Parameter
 
 class RoomGroup(models.Model):
     name = models.CharField(max_length=100, unique=True, verbose_name="Ime skupine")
@@ -43,3 +44,36 @@ class Room(models.Model):
 
     class Meta:
         ordering = ['name']
+
+class Event(models.Model):
+    rooms = models.ManyToManyField(
+        'Room',
+        related_name='events',
+        blank=True,
+        verbose_name="Prostori"
+    )
+    parameters = models.ManyToManyField(
+        'parameters.Parameter',
+        related_name='events',
+        blank=True,
+        verbose_name="Parametri"
+    )
+    
+
+    timestamp = models.DateTimeField(verbose_name="Datum in čas dogodka")
+    title = models.CharField(max_length=200, verbose_name="Naziv dogodka")
+    description = models.TextField(blank=True, verbose_name="Opis / opomba")
+    color = models.CharField(
+        max_length=7,
+        default="#10b981",
+        help_text="Barva črte na grafu (hex)",
+        verbose_name="Barva"
+    )
+
+    class Meta:
+        verbose_name = "Dogodek"
+        verbose_name_plural = "Dogodki"
+        ordering = ['-timestamp']
+
+    def __str__(self):
+        return f"{self.title} — {self.timestamp.strftime('%d.%m.%Y %H:%M')}"
