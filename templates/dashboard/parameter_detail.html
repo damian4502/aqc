@@ -56,19 +56,26 @@
         {% endif %}
 
         <!-- Datumski picker -->
-        <div class="flex-1 min-w-[240px]">
-            <label class="block text-xs text-slate-400 mb-1.5">Obdobje</label>
-            <div class="flex gap-3">
-                <div class="flex-1">
-                    <input type="date" name="start_date" value="{{ start_date }}" 
-                           class="w-full bg-slate-900 border border-slate-700 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:border-blue-500">
-                </div>
-                <div class="flex-1">
-                    <input type="date" name="end_date" value="{{ end_date }}" 
-                           class="w-full bg-slate-900 border border-slate-700 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:border-blue-500">
-                </div>
-            </div>
-        </div>
+<div class="flex gap-4 items-end">
+    <div>
+        <label class="block text-sm text-slate-400 mb-1">Od</label>
+        <input type="datetime-local"
+               name="start"
+               value="{{ start|date:'Y-m-d\TH:i' }}"
+               class="bg-slate-800 border border-slate-700 rounded-2xl px-4 py-3 text-white focus:outline-none focus:border-blue-500">
+    </div>
+    <div>
+        <label class="block text-sm text-slate-400 mb-1">Do</label>
+        <input type="datetime-local"
+               name="end"
+               value="{{ end|date:'Y-m-d\TH:i' }}"
+               class="bg-slate-800 border border-slate-700 rounded-2xl px-4 py-3 text-white focus:outline-none focus:border-blue-500">
+    </div>
+    <button type="submit"
+            class="bg-gradient-to-r from-blue-600 to-cyan-500 hover:from-blue-500 hover:to-cyan-400 px-8 py-3 rounded-3xl font-medium text-white transition-all">
+        Osveži graf
+    </button>
+</div>
 
         <!-- Resampling nastavitve -->
         <div class="flex-1 min-w-[280px]">

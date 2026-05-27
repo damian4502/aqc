@@ -271,6 +271,7 @@ def monitor(request):
 
 
 def room_detail(request, room_id):
+    from django.utils.dateparse import parse_datetime
     room = get_object_or_404(Room, id=room_id)
    
     view_type = request.GET.get('view', 'trend')
@@ -283,8 +284,8 @@ def room_detail(request, room_id):
         context_start = ''
         context_end = ''
     else:
-        start_date_str = request.GET.get('start_date', request.session.get('chart_start_date') )
-        end_date_str = request.GET.get('end_date', request.session.get('chart_end_date') )
+        start_date_str = request.GET.get('start' )
+        end_date_str = request.GET.get('end')
         
         # Hitri gumbi (24h, 7d, 30d)
         quick_days = request.GET.get('quick')
@@ -299,14 +300,14 @@ def room_detail(request, room_id):
         elif start_date_str and end_date_str:
 
             try:
-                start_date = datetime.strptime(start_date_str, '%Y-%m-%d')
-                end_date = datetime.strptime(end_date_str, '%Y-%m-%d').replace(hour=23, minute=59, second=59)
+                start_date = parse_datetime(start_date_str)
+                end_date = parse_datetime(end_date_str)
             except ValueError:
-                start_date = timezone.now() - timedelta(days=14)
+                start_date = timezone.now() - timedelta(days=1)
                 end_date = timezone.now()
         else:
             # privzeto
-            start_date = timezone.now() - timedelta(days=14)
+            start_date = timezone.now() - timedelta(days=1)
             end_date = timezone.now()
 
         context_start = start_date.strftime('%Y-%m-%d') if start_date else ''
@@ -337,6 +338,8 @@ def room_detail(request, room_id):
         'view_type': view_type,
         'all_data': all_data,
         'aqi_gauge': aqi_gauge,
+        'start': start_date,
+        'end': end_date,
     }
 
     # === Meritve za grafe ===
@@ -385,6 +388,11 @@ def room_detail(request, room_id):
                          title=f'Časovni trend - {room.name}',
                          height=700)
             fig = apply_dark_theme(fig)
+
+            for trace in fig.data:
+                if trace.name.lower() not in ['pm10', 'pm1', 'pm2.5']:
+                    trace.visible = 'legendonly'
+        
             context['fig'] = fig.to_html(full_html=False, include_plotlyjs='cdn')
 
     elif view_type == 'correlation':
@@ -451,6 +459,9 @@ def resample_measurements(df, interval_minutes=15, fill_method='ffill', ignore_s
 
     df = df.copy()
     df['timestamp'] = pd.to_datetime(df['timestamp'])
+    if df['timestamp'].dt.tz is not None:
+        df['timestamp'] = df['timestamp'].dt.tz_convert('Europe/Ljubljana').dt.tz_localize(None)
+    #df.tz_localize("CET")
     df = df.set_index('timestamp')
 
     # Pivot
@@ -486,7 +497,7 @@ def resample_measurements(df, interval_minutes=15, fill_method='ffill', ignore_s
         resampled = resampled.interpolate(method='linear')
     elif fill_method == 'zero':
         resampled = resampled.fillna(0)
-
+    
     return resampled
 
 def room_graph_fragment(request, room_id):
@@ -809,6 +820,7 @@ def dashboard(request):
 
 
 def parameter_detail(request, parameter_id):
+    from django.utils.dateparse import parse_datetime
     parameter = get_object_or_404(Parameter, id=parameter_id)
     
     view_type = request.GET.get('view', 'trend')
@@ -821,8 +833,8 @@ def parameter_detail(request, parameter_id):
         context_start = ''
         context_end = ''
     else:
-        start_date_str = request.GET.get('start_date', request.session.get('chart_start_date') )
-        end_date_str = request.GET.get('end_date', request.session.get('chart_end_date') )
+        start_date_str = request.GET.get('start' )
+        end_date_str = request.GET.get('end')
         
         # Hitri gumbi (24h, 7d, 30d)
         quick_days = request.GET.get('quick')
@@ -836,14 +848,14 @@ def parameter_detail(request, parameter_id):
                 end_date = timezone.now()
         elif start_date_str and end_date_str:
             try:
-                start_date = datetime.strptime(start_date_str, '%Y-%m-%d')
-                end_date = datetime.strptime(end_date_str, '%Y-%m-%d').replace(hour=23, minute=59, second=59)
+                start_date = parse_datetime(start_date_str)
+                end_date = parse_datetime(end_date_str)
             except ValueError:
                 start_date = timezone.now() - timedelta(days=14)
                 end_date = timezone.now()
         else:
             # privzeto
-            start_date = timezone.now() - timedelta(days=14)
+            start_date = timezone.now() - timedelta(days=1)
             end_date = timezone.now()
 
         context_start = start_date.strftime('%Y-%m-%d') if start_date else ''
@@ -865,6 +877,8 @@ def parameter_detail(request, parameter_id):
         'end_date': context_end,
         'view_type': view_type,
         'all_data': all_data,
+        'start': start_date,
+        'end': end_date,
     }
 
     # === Shranjevanje / branje resampling nastavitev iz session ===
