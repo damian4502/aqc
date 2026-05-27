@@ -101,8 +101,6 @@ document.addEventListener('visibilitychange', () => {
 });
 
 
-    let client;
-	
 	let parameter_map = {};
 	
 	{% for p in parameters %}
@@ -116,6 +114,7 @@ document.addEventListener('visibilitychange', () => {
       });
 
       client.on('connect', function () {
+		baseMqttOnConnect();
         client.subscribe('vila/sentjane/#', function (err) {
           if (!err) console.log('Naročen na vse senzorje: vila/sentjane/#');
         });

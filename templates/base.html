@@ -138,9 +138,12 @@
                         title="Skrij / prikaži stranski meni">
                     <i id="sidebar-toggle-icon" class="fas fa-chevron-left text-xl"></i>
                 </button>
+				{% comment %}
 				<div>Temper: <span id="outdoor-PM10"></div>&nbsp;&nbsp;
 				<div>Temperature: <span id="outdoor-temperature"></div>&nbsp;&nbsp;
 				<div>Humidity: <span id="outdoor-humidity"></div>&nbsp;&nbsp;
+				{% endcomment %}
+				<div class="text-align:center;" id="console"></div>
             </div>
 
             <!-- Vsebina strani -->
@@ -161,13 +164,16 @@
 			connectTimeout: 10000
 		  });
 
-      client.on('connect', function () {
+      client.on('connect', baseMqttOnConnect);
+	  
+	  function baseMqttOnConnect() {
 		outdoor_mqtt_topic = document.getElementById('top-bar').dataset.outdoor_mqtt_topic
 		outdoor_room_id = document.getElementById('top-bar').dataset.outdoor_room_id;
         //client.subscribe(outdoor_mqtt_topic);
 		//console.log(outdoor_mqtt_topic);
-		
-      });
+		client.subscribe('vila/sentjane/asgard/console/#');
+	  }
+
 
     function smartFormatValue(value, parameterName) {
         const val = parseFloat(value);
@@ -190,12 +196,19 @@
 	 
 	 function updateTopBar(topic, message) {
         const payload = message.toString();
+		if (topic.includes('console')) {
+			
+			document.getElementById('console').innerHTML = topic.toString().split('/')[4] + ': ' + message.toString();
+		}
 		try { jdata = JSON.parse(payload); } catch (e) { return true;}
+
+		{% comment %}
 		if (topic == outdoor_mqtt_topic) {
 			if (jdata['temperature']) document.getElementById('outdoor-temperature').innerHTML = smartFormatValue(jdata['temperature']);
 			if (jdata['humidity']) document.getElementById('outdoor-humidity').innerHTML = smartFormatValue(jdata['humidity']);
 			if (jdata['PM10']) document.getElementById('outdoor-PM10').innerHTML = smartFormatValue(jdata['PM10']);
 		}
+		{% endcomment %}
 	  }
 
 
@@ -253,6 +266,7 @@
         const sidebar = document.getElementById('sidebar');
         const inner = document.getElementById('sidebar-inner');
         const icon = document.getElementById('sidebar-toggle-icon');
+		
         
         const savedState = localStorage.getItem('sidebarHidden');
         
