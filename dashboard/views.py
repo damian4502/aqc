@@ -237,8 +237,8 @@ from django.shortcuts import render, get_object_or_404
 from .models import Dashboard, DashboardWidget
 from django.views.decorators.cache import cache_page
 
-def custom_dashboard(request):
-    dashboard = Dashboard.objects.filter(is_default=True).first()
+def custom_dashboard(request, dashboard_id):
+    dashboard = get_object_or_404(Dashboard, id=dashboard_id)
     if not dashboard:
         dashboard = Dashboard.objects.create(name="Moj dashboard", is_default=True)
 

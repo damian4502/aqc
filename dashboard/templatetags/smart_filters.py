@@ -1,6 +1,7 @@
 from django import template
 from measurements.models import Measurement
 from django.core.cache import cache
+from dashboard.models import Dashboard
 
 register = template.Library()
 
@@ -24,7 +25,11 @@ def smart_float(value, parameter_name=""):
                 return f"{float_value:.1f}"
     except (ValueError, TypeError):
         return value
-        
+
+@register.simple_tag
+def my_dashboards():
+    return Dashboard.objects.all()
+
 @register.simple_tag
 def latest_measurement  (room, param):
     key = "last_value" + str(room) + "_" + str(param)
