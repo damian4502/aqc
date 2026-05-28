@@ -431,11 +431,17 @@ document.addEventListener('visibilitychange', () => {
         const param = (parameterName || '').toLowerCase();
 
         // Parametri, ki naj imajo 1 decimalko
+
+
+		
+        const twoDecimalParams = ['PM_typical_size'];
         const decimalParams = ['temp', 'humidity', 'pm2.5', 'pm10', 'pm1'];
 
-        if (decimalParams.some(p => param.includes(p))) {
-            return val.toFixed(1);           // npr. 22.7, 41.3
-		} else if (param.includes('vlaga')) {
+        if (twoDecimalParams.some(p => param.includes(p))) {
+            return val.toFixed(2);
+        } else if (decimalParams.some(p => param.includes(p))) {
+            return val.toFixed(1);
+		} else if (param.includes('tlak') || param.includes('pressure')) {
 			return val.toFixed(0);
 		} else if (param.includes('tlak') || param.includes('pressure')) {
 			return val.toFixed(0);
