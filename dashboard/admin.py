@@ -9,3 +9,4 @@ class Dashboard(admin.ModelAdmin):
 @admin.register(DashboardWidget)
 class DashboardWidget(admin.ModelAdmin):
     list_display = ['title']
+    list_filter = ['dashboard']

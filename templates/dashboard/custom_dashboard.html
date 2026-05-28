@@ -52,16 +52,23 @@
         }
     }
 
-    function updateSingleValueWidget(widgetElement, data) {
-        const display = document.getElementById('single-value-display-' + widgetElement.dataset.widgetId);
-        if (display) {
-            display.textContent = parseFloat(data.value).toFixed(1);
-            display.classList.add('!text-emerald-400');
-            setTimeout(() => display.classList.remove('!text-emerald-400'), 1500);
-        }
+    function updateSingleValueWidget() {
+
+        let display = document.querySelector('.single-value-widget[data-updated="1"]');
+		if(!display) { setTimeout(updateSingleValueWidget, 1000); }
+
+		display.dataset.updated = 0;
+		let valueEl = display.children.item(1);
+		valueEl.innerHTML = parseFloat(display.dataset.value).toFixed(display.dataset.decimals);
+		
+		valueEl.classList.add('!text-emerald-400');
+		setTimeout(() => valueEl.classList.remove('!text-emerald-400'), 300);
+		
+		setTimeout(updateSingleValueWidget, 1);
     }
 
     document.addEventListener('DOMContentLoaded', function() {
+		updateSingleValueWidget();
 	
 	
       client.on('message', function (topic, message) {
@@ -74,7 +81,23 @@
         const payload = message.toString();
 		try { jdata = JSON.parse(payload); } catch (e) { return true;}
 		
+		
+		
 		for (item in jdata) {
+			let parameter = item;
+			let room_id = mqtt_topics[topic]["room_id"];
+			
+			let el = document.querySelectorAll(`[data-room-id="${room_id}"][data-parameter-identifier="${parameter}"]`);
+
+			
+			
+			el.forEach(e => {
+				e.dataset.value = jdata[item];
+				e.dataset.updated = 1;
+			});
+			
+			continue;
+			
 			document.querySelectorAll(".single-value-widget").forEach(widget => {
 				if (widget.dataset.roomId == mqtt_topics[topic]["room_id"])
 					if (widget.dataset.parameterIdentifier == item) {
@@ -85,6 +108,8 @@
 					}
 			});
 		}
+		
+		
 				
 		
 		
