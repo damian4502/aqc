@@ -17,6 +17,7 @@ def smart_float(value, parameter_name=""):
             return f"{float_value:.1f}"
         else:
             # Ostali parametri (AQI, CO2, tlak...) → cela števila
+            return int(float_value)
             if float_value.is_integer():
                 return int(float_value)
             else:
