@@ -2,6 +2,7 @@ from django.db import models
 import datetime
 from django.core.cache import cache
 from random import randrange
+from django.utils import timezone
 
 class Parameter(models.Model):
     identifier = models.CharField(max_length=50, unique=True)
@@ -31,7 +32,7 @@ class Parameter(models.Model):
     def live_rooms(self):
         from measurements.models import Measurement
 
-        rooms = cache.get_or_set("1liverooms_param_%s" % self.id, [x['sensor__room'] for x in Measurement.objects.filter(parameter=self).filter(timestamp__gte=datetime.datetime.now() - datetime.timedelta(hours=24)).values('sensor__room').annotate(dcount=models.Count('sensor__room'))], randrange(1000))
+        rooms = cache.get_or_set("1liverooms_param_%s" % self.id, [x['sensor__room'] for x in Measurement.objects.filter(parameter=self).filter(timestamp__gte=timezone.now() - datetime.timedelta(hours=24)).values('sensor__room').annotate(dcount=models.Count('sensor__room'))], randrange(1000))
 
         return rooms
 
