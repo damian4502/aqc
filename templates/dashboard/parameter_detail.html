@@ -1,4 +1,6 @@
 {% extends "base.html" %}
+{% load smart_filters %}
+
 {% block title %}{{ parameter.name }} - Air Quality Control{% endblock %}
 
 {% block content %}
@@ -19,13 +21,15 @@
 
     <!-- Zadnje meritve po prostorih -->
     <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6" id="latest_measurements">
-        {% for m in latest_measurements %}
+        {% for m in rooms %}
+		{% latest_measurement m.id parameter.id as last_value %}
+		{% if last_value > 0 %}
         <div class="glass rounded-3xl p-6" id="room_{{ m.sensor.room.id }}">
             <div class="flex justify-between">
                 <div>
-			<a href="{% url 'room_detail' m.sensor.room.id %}" class="hover:text-blue-400 transition-colors">
-                    <p class="text-slate-400">{{ m.sensor.room.name }}</p>
-                    <p class="text-3xl font-semibold text-white mt-2"><span class="last_value" id="parameter_{{ parameter.id }}">{{ m.value }}</span> <span class="text-lg">{{ parameter.unit }}</span></p>
+			<a href="{% url 'room_detail' m.id %}" class="hover:text-blue-400 transition-colors">
+                    <p class="text-slate-400">{{ m.name }}</p>
+                    <p class="text-3xl font-semibold text-white mt-2"><span class="last_value" id="parameter_{{ parameter.id }}">{{ last_value|smart_float:parameter.name }}</span> <span class="text-lg">{{ parameter.unit }}</span></p>
 				</a>
                 </div>
                 <div class="text-right text-sm">
@@ -33,10 +37,8 @@
                     <p class="text-slate-500">{{ m.timestamp|date:"d.m" }}</p>
                 </div>
             </div>
-            <div class="mt-4 text-xs text-slate-500">
-                Senzor: {{ m.sensor.get_location_display }}
-            </div>
         </div>
+		{% endif %}
         {% endfor %}
     </div>
 

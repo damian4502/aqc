@@ -890,21 +890,17 @@ def parameter_detail(request, parameter_id):
         request.session['chart_end_date'] = context_end
 
     # Zadnje meritve za ta parameter (po prostorih)
-    latest_measurements = Measurement.objects.filter(
-        parameter=parameter
-    ).select_related('sensor__room', 'sensor')\
-     .order_by('sensor__room_id', '-timestamp')\
-     .distinct('sensor__room')
+        
 
     context = {
         'parameter': parameter,
-        'latest_measurements': latest_measurements,
         'start_date': context_start,
         'end_date': context_end,
         'view_type': view_type,
         'all_data': all_data,
         'start': start_date,
         'end': end_date,
+        'rooms':Room.objects.all()
     }
 
     # === Shranjevanje / branje resampling nastavitev iz session ===
@@ -958,7 +954,7 @@ def parameter_detail(request, parameter_id):
                 parameters=parameter,
                 timestamp__gte=start_date,
                 timestamp__lte=end_date
-            ).distinct()
+            )
 
 
             for event in events:
