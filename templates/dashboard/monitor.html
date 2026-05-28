@@ -84,21 +84,6 @@
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 
 <script>
-let pageVisible = true;
-// Spremljanje vidnosti zavihka
-document.addEventListener('visibilitychange', () => {
-    pageVisible = document.visibilityState === 'visible';
-    
-    if (pageVisible) {
-        console.log('%c✅ Zavihek viden – nadaljujem z live updat-i', 'color: #10b981; font-weight: bold');
-        // Tukaj lahko po želji tudi reconnectaš WebSocket
-		//connectMQTT();
-		publishLiveDataMode();
-    } else {
-        console.log('%c⏸️ Zavihek v ozadju – zaustavljam updat-e', 'color: #f59e0b');
-		//client.end();
-    }
-});
 
 
 	let parameter_map = {};
@@ -114,7 +99,7 @@ document.addEventListener('visibilitychange', () => {
       });
 
       client.on('connect', function () {
-		baseMqttOnConnect();
+		//baseMqttOnConnect();
         client.subscribe('vila/sentjane/#', function (err) {
           if (!err) console.log('Naročen na vse senzorje: vila/sentjane/#');
         });
@@ -124,7 +109,7 @@ document.addEventListener('visibilitychange', () => {
         const time = new Date().toLocaleTimeString('sl-SI', {hour:'2-digit', minute:'2-digit', second:'2-digit'});
         const payload = message.toString();
 		try { jdata = JSON.parse(payload); } catch (e) { console.warn("Received non-JSON message on ${topic}: ${payload}"); return;}
-		console.log(payload);
+		//console.log(payload);
 		
 		
 		for (item in jdata) {

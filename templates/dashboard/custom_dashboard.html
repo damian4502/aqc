@@ -1,5 +1,6 @@
 {% extends 'base.html' %}
 {% load static %}
+{% load smart_filters %}
 
 {% block title %}{{ dashboard.name }}{% endblock %}
 
@@ -7,7 +8,7 @@
 <div class="max-w-screen-2xl mx-auto p-8">
     <h1 class="text-4xl font-bold text-white mb-10">{{ dashboard.name }}</h1>
 
-    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-6">
         {% for widget in widgets %}
             {% if widget.widget_type == 'room_card' %}
                 {% include 'dashboard/widgets/room_card.html' with widget=widget room=widget.config.room %}
@@ -30,30 +31,14 @@
 </div>
 
 <script>
-    let socket;
+	{% all_mqtt_topics as mqtt_topics %}
 
-    function connectWidgetWebSocket() {
-        socket = new WebSocket('ws://' + window.location.host + '/ws/live/');
-        
-        socket.onmessage = function(e) {
-            const response = JSON.parse(e.data);
-            if (response.type === 'live_update') {
-                const data = response.data;
-                
-                // Posodobi room_card widgete
-                const roomWidget = document.getElementById('widget-room-' + data.room_id);
-                if (roomWidget) {
-                    updateRoomCardWidget(roomWidget, data);
-                }
 
-                // Posodobi single_value widgete
-                const singleWidget = document.getElementById('widget-single-' + data.parameter_id);
-                if (singleWidget) {
-                    updateSingleValueWidget(singleWidget, data);
-                }
-            }
-        };
-    }
+	let mqtt_topics = {};
+	{% for t in mqtt_topics %}
+		mqtt_topics["{{t.topic}}"] = {"room_id": {{t.sensor.room.id}}, "sensor_id": {{t.sensor.id}} };
+	{% endfor %}
+
 
     function updateRoomCardWidget(widgetElement, data) {
         const valueEl = widgetElement.querySelector(`[data-param="${data.parameter}"]`);
@@ -76,6 +61,41 @@
         }
     }
 
-    document.addEventListener('DOMContentLoaded', connectWidgetWebSocket);
+    document.addEventListener('DOMContentLoaded', function() {
+	
+	
+      client.on('message', function (topic, message) {
+		if (!pageVisible) return;
+
+		//updateTopBar(topic, message);
+
+
+        const time = new Date().toLocaleTimeString('sl-SI', {hour:'2-digit', minute:'2-digit', second:'2-digit'});
+        const payload = message.toString();
+		try { jdata = JSON.parse(payload); } catch (e) { return true;}
+		
+		for (item in jdata) {
+			document.querySelectorAll(".single-value-widget").forEach(widget => {
+				if (widget.dataset.roomId == mqtt_topics[topic]["room_id"])
+					if (widget.dataset.parameterIdentifier == item) {
+						let el = widget.getElementsByClassName('latest-measurement')[0];
+						el.innerHTML = smartFormatValue(jdata[item], widget.dataset.parameterIdentifier);
+						el.classList.add('!text-emerald-400');
+						setTimeout(() => el.classList.remove('!text-emerald-400'), 300);
+					}
+			});
+		}
+				
+		
+		
+
+		//console.log(payload);
+				
+		
+		
+      });
+	
+		client.subscribe('vila/sentjane/#');
+	});
 </script>
 {% endblock %}

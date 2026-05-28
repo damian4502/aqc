@@ -37,7 +37,7 @@ from django.http import JsonResponse
 
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404
-from rooms.models import Room
+from rooms.models import Room, Event
 
 def room_live_data(request, room_id):
     room = get_object_or_404(Room, id=room_id)
@@ -244,12 +244,6 @@ def custom_dashboard(request):
 
     widgets = dashboard.widgets.all().order_by('row', 'column')
 
-    # Za room_card widgete naložimo zadnje meritve
-    for widget in widgets:
-        if widget.widget_type == 'room_card' and widget.config.get('room_id'):
-            widget.latest_measurements = Measurement.objects.filter(
-                sensor__room_id=widget.config['room_id']
-            ).select_related('parameter').order_by('parameter_id', '-timestamp').distinct('parameter_id')[:8]
 
     context = {
         'dashboard': dashboard,
@@ -393,6 +387,38 @@ def room_detail(request, room_id):
                 if trace.name.lower() not in ['pm10', 'pm1', 'pm2.5']:
                     trace.visible = 'legendonly'
         
+            events = Event.objects.filter(
+                rooms=room,
+                timestamp__gte=start_date,
+                timestamp__lte=end_date
+            ).distinct()
+
+
+            for event in events:
+                event_ts = timezone.localtime(event.timestamp).replace(tzinfo=None)
+                
+                fig.add_vline(
+                    x=event_ts,
+                    line_width=2.5,
+                    line_dash="dashdot",
+                    line_color=event.color,
+                )
+                
+                fig.add_annotation(
+                    x=event_ts,
+                    yref="paper",
+                    y=1.06,
+                    text=event.title,
+                    showarrow=False,
+                    xanchor="center",
+                    yanchor="bottom",
+                    font=dict(size=13, color=event.color),
+                    bgcolor="rgba(15, 23, 42, 0.92)",
+                    bordercolor=event.color,
+                    borderwidth=1,
+                    borderpad=4,
+                )
+
             context['fig'] = fig.to_html(full_html=False, include_plotlyjs='cdn')
 
     elif view_type == 'correlation':
@@ -927,6 +953,39 @@ def parameter_detail(request, parameter_id):
                          title=f'Časovni trend - {parameter.name}',
                          height=700)
             fig = apply_dark_theme(fig)
+
+            events = Event.objects.filter(
+                parameters=parameter,
+                timestamp__gte=start_date,
+                timestamp__lte=end_date
+            ).distinct()
+
+
+            for event in events:
+                event_ts = timezone.localtime(event.timestamp).replace(tzinfo=None)
+                
+                fig.add_vline(
+                    x=event_ts,
+                    line_width=2.5,
+                    line_dash="dashdot",
+                    line_color=event.color,
+                )
+                
+                fig.add_annotation(
+                    x=event_ts,
+                    yref="paper",
+                    y=1.06,
+                    text=event.title,
+                    showarrow=False,
+                    xanchor="center",
+                    yanchor="bottom",
+                    font=dict(size=13, color=event.color),
+                    bgcolor="rgba(15, 23, 42, 0.92)",
+                    bordercolor=event.color,
+                    borderwidth=1,
+                    borderpad=4,
+                )
+
             context['fig'] = fig.to_html(full_html=False, include_plotlyjs='cdn')
 
         elif view_type == 'correlation':

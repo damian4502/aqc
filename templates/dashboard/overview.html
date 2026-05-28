@@ -102,23 +102,6 @@
 
 <script>
 
-let pageVisible = true;
-
-// Spremljanje vidnosti zavihka
-document.addEventListener('visibilitychange', () => {
-    pageVisible = document.visibilityState === 'visible';
-    
-    if (pageVisible) {
-        console.log('%c✅ Zavihek viden – nadaljujem z live updat-i', 'color: #10b981; font-weight: bold');
-        // Tukaj lahko po želji tudi reconnectaš WebSocket
-		//connectMQTT();
-		for (parameter in parameter_map) client.publish("vila/sentjane/asgard/cmd/all", parameter, { qos: 0 });
-    } else {
-        console.log('%c⏸️ Zavihek v ozadju – zaustavljam updat-e', 'color: #f59e0b');
-		//client.end();
-    }
-});
-
 
 	{% all_parameters as parameters %}
 	{% all_mqtt_topics as mqtt_topics %}
@@ -136,6 +119,7 @@ document.addEventListener('visibilitychange', () => {
 	{% endfor %}
 
     function connectMQTTaaa() {
+	
       client = mqtt.connect('ws://192.168.1.95:9001', {
         reconnectPeriod: 3000,
         connectTimeout: 10000
@@ -397,7 +381,7 @@ document.addEventListener('DOMContentLoaded', function() {
       client.on('message', function (topic, message) {
 		if (!pageVisible) return;
 
-		updateTopBar(topic, message);
+		//updateTopBar(topic, message);
 
 
         const time = new Date().toLocaleTimeString('sl-SI', {hour:'2-digit', minute:'2-digit', second:'2-digit'});
@@ -424,11 +408,9 @@ document.addEventListener('DOMContentLoaded', function() {
       });
 	  
 	client.on('connect', function () {
-        client.subscribe('vila/sentjane/#', function (err) {
-          if (!err) console.log('Naročen na vse senzorje: vila/sentjane/#');
-        });
 		
 		for (parameter in parameter_map) client.publish("vila/sentjane/asgard/cmd/all", parameter, { qos: 0 });
+		for (topic in mqtt_topics) client.subscribe(topic);
       });
 
   document.querySelectorAll('.glass.rounded-3xl').forEach(card => {

@@ -1,5 +1,10 @@
-<div class="glass rounded-3xl p-8 text-center" id="widget-single-{{ widget.id }}">
+{% load smart_filters %}
+
+{% latest_measurement widget.config.room_id widget.config.parameter_id as last_value %}
+
+
+<div class="glass rounded-3xl p-8 text-center single-value-widget" data-room-id={{widget.config.room_id}} data-parameter-identifier="{{widget.config.parameter_identifier}}">
     <p class="text-slate-400 text-sm">{{ widget.title }}</p>
-    <p class="text-6xl font-semibold text-white mt-3" id="single-value-display-{{ widget.id }}">—</p>
-    <p class="text-xs text-slate-400 mt-2">{{ widget.config.parameter_name|default:"Parameter" }}</p>
+    <p class="text-6xl font-semibold text-white mt-3 latest-measurement" > {{ last_value|smart_float:widget.config.parameter_identifier }} </p>
+    <p class="text-xs text-slate-400 mt-2">{{ widget.config.subtitle }}</p>
 </div>
