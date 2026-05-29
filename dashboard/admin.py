@@ -8,6 +8,7 @@ class Dashboard(admin.ModelAdmin):
 
 @admin.register(DashboardWidget)
 class DashboardWidget(admin.ModelAdmin):
-    list_display = ['title', 'dashboard']
+    list_display = ['title', 'dashboard', 'row', 'column']
     list_filter = ['dashboard']
+    list_editable = ['row', 'column']
     save_as = True

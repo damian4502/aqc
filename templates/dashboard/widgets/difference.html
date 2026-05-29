@@ -4,7 +4,7 @@
 {% latest_measurement widget.config.room_id_2 widget.config.parameter_id_2 as last_value_2 %}
 
 
-<div class="glass rounded-3xl p-8 text-center difference-widget" data-value={{ last_value_1 }} data-decimals={{widget.config.decimals | default:0}} data-room-id="{{widget.config.room_id_1}}" data-parameter-identifier="{{widget.config.parameter_identifier}}" data-parameter-id={{widget.config.parameter_id_1}} data-updated="1">
+<div class="glass rounded-3xl p-8 text-center difference-widget" data-value={{ last_value_1 }} data-decimals={{widget.config.decimals | default:0}} data-room-id="{{widget.config.room_id_1}}" data-parameter-identifier="{{widget.config.parameter_identifier}}" data-parameter-id={{widget.config.parameter_id_1}} data-abs="{{widget.config.abs}}"  data-updated="1">
     <p class="text-slate-400 text-sm">{{ widget.title }}</p>
     <p class="text-6xl font-semibold text-white mt-3 result" data-value={{ last_value_2 }} data-room-id="{{widget.config.room_id_2}}" data-parameter-identifier="{{widget.config.parameter_identifier}}" data-parameter-id={{widget.config.parameter_id_2}} >  </p>
     <p class="text-xs text-slate-400 mt-2">{{ widget.config.subtitle }}</p>

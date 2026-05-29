@@ -25,6 +25,7 @@ class EventAdmin(admin.ModelAdmin):
     filter_horizontal = ('rooms', 'parameters')     # super uporaben za M2M
     date_hierarchy = 'timestamp'
     ordering = ('-timestamp',)
+    save_as = True
 
     readonly_fields = ('get_rooms_list', 'get_parameters_list')
 

@@ -76,8 +76,11 @@
 
 		display.dataset.updated = 0;
 		let valueEl = display.children.item(1);
-		console.log(valueEl);
-		valueEl.innerHTML = parseFloat(display.dataset.value - valueEl.dataset.value).toFixed(display.dataset.decimals);
+
+		let result = parseFloat(display.dataset.value - valueEl.dataset.value).toFixed(display.dataset.decimals);
+		if (display.dataset.abs) result = Math.abs(result);
+
+		valueEl.innerHTML = result;
 		display.children.item(2).innerHTML = parseFloat(valueEl.dataset.value).toFixed(display.dataset.decimals)
 		
 		valueEl.classList.add('!text-emerald-400');
