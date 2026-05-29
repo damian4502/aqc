@@ -310,28 +310,15 @@ def room_detail(request, room_id):
         request.session['chart_end_date'] = context_end
     
     # Zadnje meritve za vrh kartice
-    latest_measurements = Measurement.objects.filter(
-        sensor__room=room
-    ).select_related('sensor', 'parameter')\
-     .order_by('parameter_id', '-timestamp')\
-     .distinct('parameter_id')
 
-    # AQI Gauge
-    latest_aqi = Measurement.objects.filter(
-        sensor__room=room,
-        parameter__name__iexact="AQI"
-    ).order_by('-timestamp').first()
 
-    aqi_gauge = create_aqi_gauge(latest_aqi.value) if latest_aqi else None
 
     context = {
         'room': room,
-        'latest_measurements': latest_measurements,
         'start_date': context_start,
         'end_date': context_end,
         'view_type': view_type,
         'all_data': all_data,
-        'aqi_gauge': aqi_gauge,
         'start': start_date,
         'end': end_date,
     }

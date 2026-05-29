@@ -16,6 +16,8 @@
                 {% include 'dashboard/widgets/datetime.html' with widget=widget %}
             {% elif widget.widget_type == 'single_value' %}
                 {% include 'dashboard/widgets/single_value.html' with widget=widget %}
+            {% elif widget.widget_type == 'difference' %}
+                {% include 'dashboard/widgets/difference.html' with widget=widget %}
             {% else %}
                 <div class="glass rounded-3xl p-8 text-slate-400">
                     Nepodprt widget: {{ widget.get_widget_type_display }}
@@ -55,7 +57,7 @@
     function updateSingleValueWidget() {
 
         let display = document.querySelector('.single-value-widget[data-updated="1"]');
-		if(!display) { setTimeout(updateSingleValueWidget, 1000); }
+		if(!display) { setTimeout(updateSingleValueWidget, 1000); return;}
 
 		display.dataset.updated = 0;
 		let valueEl = display.children.item(1);
@@ -67,8 +69,26 @@
 		setTimeout(updateSingleValueWidget, 1);
     }
 
+    function updateDifferenceWidget() {
+
+        let display = document.querySelector('.difference-widget[data-updated="1"]');
+		if(!display) { setTimeout(updateDifferenceWidget, 1000); return; }
+
+		display.dataset.updated = 0;
+		let valueEl = display.children.item(1);
+		console.log(valueEl);
+		valueEl.innerHTML = parseFloat(display.dataset.value - valueEl.dataset.value).toFixed(display.dataset.decimals);
+		display.children.item(2).innerHTML = parseFloat(valueEl.dataset.value).toFixed(display.dataset.decimals)
+		
+		valueEl.classList.add('!text-emerald-400');
+		setTimeout(() => valueEl.classList.remove('!text-emerald-400'), 300);
+		
+		setTimeout(updateDifferenceWidget, 1);
+    }
+
     document.addEventListener('DOMContentLoaded', function() {
 		updateSingleValueWidget();
+		updateDifferenceWidget();
 	
 	
       client.on('message', function (topic, message) {

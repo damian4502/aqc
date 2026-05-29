@@ -20,6 +20,7 @@ class DashboardWidget(models.Model):
         ('average', 'Povprečje parametra'),
         ('datetime', 'Trenutni čas in datum'),
         ('single_value', 'Ena vrednost parametra'),
+        ('difference', 'Difference between two measurements.'),
         # Kasneje lahko dodaš: alarm, weather, stats itd.
     ]
 
