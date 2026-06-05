@@ -12,11 +12,19 @@
             <p class="text-slate-400 mt-1">{{ parameter.unit }} • Primerjava po prostorih</p>
         </div>
         
-        <a href="{% url 'dashboard' %}" 
-           class="flex items-center gap-2 px-6 py-3 bg-slate-800 hover:bg-slate-700 rounded-2xl text-slate-300 transition-all">
-            <i class="fas fa-arrow-left"></i>
-            <span>Nazaj na pregled</span>
-        </a>
+<select id="param-switcher" 
+        class="bg-slate-800 border border-slate-700 hover:border-slate-600 text-slate-200 px-5 py-3 rounded-2xl text-sm focus:outline-none focus:border-blue-500 cursor-pointer min-w-[240px] appearance-none"
+        onchange="if (this.value) { window.location.href = this.value; }">
+    <option value="{% url 'dashboard' %}">← Nazaj na pregled</option>
+    <option disabled>────────────────────</option>
+    <option value="" disabled selected>{{ parameter.name }} ({{ parameter.unit }})</option>
+	{% all_parameters as all_parameters %}
+    {% for p in all_parameters %}
+        {% if p.id != parameter.id %}
+        <option value="{% url 'parameter_detail' p.id %}">{{ p.name }} ({{ p.unit }})</option>
+        {% endif %}
+    {% endfor %}
+</select>
     </div>
 
     <!-- Zadnje meritve po prostorih -->
