@@ -138,7 +138,7 @@ class MQTTListener:
             except:
                 time_diff = 999999
             
-            if (time_diff < 1):
+            if (time_diff < 10):
                 print(f"[MQTT] Discard: {param_name} = {value} (topic: {topic}, {time_diff}s < 1)")
                 return
 
