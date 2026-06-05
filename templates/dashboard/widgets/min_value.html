@@ -1,0 +1,10 @@
+{% load smart_filters %}
+
+{% latest_measurement widget.config.room_id widget.config.parameter_id as last_value %}
+
+
+<div class="glass rounded-3xl p-8 text-center min-value-widget" data-value={{ last_value }} data-decimals={{widget.config.decimals | default:0}} data-room-id="{{widget.config.room_id}}" data-parameter-identifier="{{widget.config.parameter_identifier}}" data-parameter-id={{widget.config.parameter_id}} data-updated="1">
+    <p class="text-slate-400 text-sm">{{ widget.title }}</p>
+    <p class="text-6xl font-semibold text-white mt-3 min-measurement"  > {{ last_valuea }} </p>
+    <p class="text-xs text-slate-400 mt-2">{{ widget.config.subtitle }}</p>
+</div>

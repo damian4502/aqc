@@ -20,8 +20,11 @@ class DashboardWidget(models.Model):
         ('average', 'Povprečje parametra'),
         ('datetime', 'Trenutni čas in datum'),
         ('single_value', 'Ena vrednost parametra'),
+        ('min_value', 'Lowest value'),
         ('difference', 'Difference between two measurements.'),
         # Kasneje lahko dodaš: alarm, weather, stats itd.
+
+        ('live_mode', 'Activate live mode for specified sensors and parameters.'),
     ]
 
     dashboard = models.ForeignKey(Dashboard, on_delete=models.CASCADE, related_name='widgets')

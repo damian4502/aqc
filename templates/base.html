@@ -215,7 +215,7 @@
                 <!-- Footer -->
                 <div class="p-6 border-t border-slate-700 text-xs text-slate-500">
                     <div class="flex items-center justify-between">
-                        <span class="text-emerald-400">● Online</span>
+                        <span class="text-red-400" id="conn-status"></span>
                     </div>
                 </div>
                 
@@ -249,7 +249,7 @@
         </div>
     </div>
 
-<script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+<script src="/static/js/mqtt.min.js"></script>
 
 <script>
 let pageVisible = true;
@@ -258,12 +258,13 @@ document.addEventListener('visibilitychange', () => {
     pageVisible = document.visibilityState === 'visible';
     
     if (pageVisible) {
-        console.log('%c✅ Zavihek viden – nadaljujem z live updat-i', 'color: #10b981; font-weight: bold');
+        console.log('%c✅ Page visible', 'color: #10b981; font-weight: bold');
         // Tukaj lahko po želji tudi reconnectaš WebSocket
 		//connectMQTT();
 		//for (parameter in parameter_map) client.publish("vila/sentjane/asgard/cmd/all", parameter, { qos: 0 });
+		//client.connect();
     } else {
-        console.log('%c⏸️ Zavihek v ozadju – zaustavljam updat-e', 'color: #f59e0b');
+        console.log('%c⏸️ Page hidden', 'color: #f59e0b');
 		//client.end();
     }
 });
@@ -276,6 +277,10 @@ document.addEventListener('visibilitychange', () => {
 			connectTimeout: 10000
 		  });
 
+		client.on('close', function() {
+		document.getElementById('conn-status').innerHTML = '● Offline';
+		document.getElementById('conn-status').classList.replace('text-emerald-400', 'text-red-400');
+		});
       client.on('connect', baseMqttOnConnect);
 
 
@@ -416,11 +421,13 @@ document.addEventListener('visibilitychange', () => {
 		
 		
 	  function baseMqttOnConnect() {
+		document.getElementById('conn-status').innerHTML = '● Online';
+		document.getElementById('conn-status').classList.replace('text-red-400', 'text-emerald-400');
 		outdoor_mqtt_topic = document.getElementById('top-bar').dataset.outdoor_mqtt_topic
 		outdoor_room_id = document.getElementById('top-bar').dataset.outdoor_room_id;
         //client.subscribe(outdoor_mqtt_topic);
 		//console.log(outdoor_mqtt_topic);
-		client.subscribe('vila/sentjane/asgard/console/#');
+		client.subscribe('vila/sentjane/asgard/console/#', { qos: 0 });
 	  }
 
 
