@@ -118,6 +118,8 @@
 	parameter_map["{{p.identifier}}"] = {{p.id}};
 	{% endfor %}
 
+{% comment %}
+
     function connectMQTTaaa() {
 	
       client = mqtt.connect('ws://192.168.1.95:9001', {
@@ -165,7 +167,6 @@
     }
 
 
-{% comment %}
     function connectWebSocket() {
         const wsUrl = 'ws://' + window.location.host + '/ws/live/';
         socket = new WebSocket(wsUrl);
@@ -409,7 +410,7 @@ document.addEventListener('DOMContentLoaded', function() {
 	  
 	client.on('connect', function () {
 		
-		for (parameter in parameter_map) client.publish("vila/sentjane/asgard/cmd/all", parameter, { qos: 0 });
+		for (parameter in parameter_map) client.publish("vila/sentjane/asgard/cmd/all", parameter, { qos: 2 });
 		for (topic in mqtt_topics) client.subscribe(topic);
       });
 

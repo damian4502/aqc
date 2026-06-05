@@ -26,11 +26,11 @@
     {% endif %}
     <!-- Zadnje meritve - manjše kartice -->
     <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4" id="latest_measurements">
-        {% for m in latest_measurements %}
+        {% for m in room.latest_measurements %}
         <div class="glass rounded-2xl p-5 text-sm" id="parameter_{{m.parameter.id}}">
-		<a href="{% url 'parameter_detail' m.parameter.id %}" 
+		<a href="{% url 'parameter_detail' m.id %}" 
                            class="hover:text-blue-400 transition-colors block">
-            <p class="text-slate-400 text-xs">{{ m.parameter.name }} ({{ m.parameter.unit }})</p>
+            <p class="text-slate-400 text-xs">{{ m.name }} ({{ m.unit }})</p>
             <p class="text-2xl font-semibold text-white mt-1">{{ m.value }}</p>
             <p class="text-xs text-emerald-400 mt-1">{{ m.timestamp|date:"d.m H:i" }}</p>
             <p class="text-[10px] text-slate-500 mt-3">{{ m.sensor.get_location_display }}</p>
@@ -99,7 +99,18 @@
         <!-- Akcije -->
         <div class="flex gap-3">
             <!-- Hitri gumbi -->
-            <a href="?{% if view_type %}view={{ view_type }}&{% endif %}quick=1" 
+            <a href="?{% if view_type %}viewh={{ view_type }}&{% endif %}quickh=1" 
+               class="quick-btn px-5 py-3 text-sm rounded-2xl transition-all {% if request.GET.quickh == '1' %}bg-blue-600 text-white{% else %}bg-slate-800 hover:bg-slate-700{% endif %}">
+                1h
+            </a>
+            <a href="?{% if view_type %}viewh={{ view_type }}&{% endif %}quickh=4" 
+               class="quick-btn px-5 py-3 text-sm rounded-2xl transition-all {% if request.GET.quickh == '4' %}bg-blue-600 text-white{% else %}bg-slate-800 hover:bg-slate-700{% endif %}">
+                4h
+            </a>
+            <a href="?{% if view_type %}viewh={{ view_type }}&{% endif %}quickh=8" 
+               class="quick-btn px-5 py-3 text-sm rounded-2xl transition-all {% if request.GET.quickh == '8' %}bg-blue-600 text-white{% else %}bg-slate-800 hover:bg-slate-700{% endif %}">
+                8h
+            </a>            <a href="?{% if view_type %}view={{ view_type }}&{% endif %}quick=1" 
                class="quick-btn px-5 py-3 text-sm rounded-2xl transition-all {% if request.GET.quick == '1' %}bg-blue-600 text-white{% else %}bg-slate-800 hover:bg-slate-700{% endif %}">
                 24h
             </a>

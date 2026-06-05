@@ -63,8 +63,11 @@
 </div>
     </div>
 </div>
+
+{% endblock %}
+
+{% block scripts %}
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
-<script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
 <script>
     let socket;
 	{% all_parameters as parameters %}
@@ -85,12 +88,6 @@
 	{% for r in rooms %}
 	room_map["{{r.id}}"] = "{{r.name}}";
 	{% endfor %}
-
-    function connectMQTT() {
-      client = mqtt.connect('ws://192.168.1.95:9001', {
-        reconnectPeriod: 3000,
-        connectTimeout: 10000
-      });
 
       client.on('connect', function () {
         client.subscribe('vila/sentjane/#', function (err) {
@@ -123,13 +120,11 @@
       });
 
 	
-
-    }
-
-	
 	
 	function publishLiveDataMode() {
-		client.publish("vila/sentjane/asgard/live_data", "pressure", { qos: 0 });
+		document.getElementById('delta-table').querySelectorAll('tr').forEach(e => {
+			client.publish("vila/sentjane/asgard/cmd/" + e.dataset.sensorIdentifier, "pressure", { qos: 0 });
+		});
 	}
 
     let chart;
@@ -215,21 +210,23 @@
         let avgDeltaDisplay = '—';
         let deltaNum = null;
 
+		if (base_offset == 0) base_offset = parseFloat(data.value);
+
+		if (!sensorValues[sensorId]) {
+			sensorValues[sensorId] = parseFloat(data.value) -base_offset;
+			sensorValuesIndex[sensorId] = 1;
+		} else {
+			sensorValues[sensorId] += parseFloat(data.value) -base_offset;
+			sensorValuesIndex[sensorId] += 1;
+		}
+
         if (referenceSensorId) {
-			if (base_offset == 0) base_offset = parseFloat(data.value);
             const refVal = latestValues[referenceSensorId] || referenceValue;
             deltaNum = parseFloat(data.value) - refVal - offset;
             delta = deltaNum.toFixed(2);
 
             // Rolling average
             //if (!sensorDeltas[sensorId]) sensorDeltas[sensorId] = [];
-            if (!sensorValues[sensorId]) {
-				sensorValues[sensorId] = parseFloat(data.value) -base_offset;
-				sensorValuesIndex[sensorId] = 1;
-			} else {
-				sensorValues[sensorId] += parseFloat(data.value) -base_offset;
-				sensorValuesIndex[sensorId] += 1;
-			}
             //sensorDeltas[sensorId].push(deltaNum);
 			//sensorValues[sensorId] = parseFloat(data.value);
             //if (sensorDeltas[sensorId].length > MAX_DELTA_HISTORY) sensorDeltas[sensorId].shift();
@@ -253,6 +250,14 @@
         if (!row) {
             row = document.createElement('tr');
             row.id = rowId;
+
+			for (topic in mqtt_topics) if (parseInt(mqtt_topics[topic]['room_id']) == data.room_id) {
+				row.dataset.sensorIdentifier = topic.split('/')[2];
+				row.dataset.topic = topic;
+				//client.subscribe(topic, { qos: 0 });
+			}
+
+
             tableBody.appendChild(row);
 			row.innerHTML = `
 				<td class="py-4 px-4 font-medium ">${location}</td>
@@ -349,12 +354,11 @@
         });
     }
 
-    window.onload = function() {
+    document.addEventListener('DOMContentLoaded', () => {
         loadHiddenSensors();
         initChart();
-        connectMQTT();
-		publishLiveDataMode();
+		client.publish("vila/sentjane/asgard/cmd/all", "pressure", { qos: 0 });
 		setInterval(publishLiveDataMode, 10000);
-    };
+    });
 </script>
 {% endblock %}

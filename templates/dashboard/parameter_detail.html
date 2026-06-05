@@ -103,6 +103,18 @@
         <!-- Akcije -->
         <div class="flex gap-3">
             <!-- Hitri gumbi -->
+            <a href="?{% if view_type %}viewh={{ view_type }}&{% endif %}quickh=1" 
+               class="quick-btn px-5 py-3 text-sm rounded-2xl transition-all {% if request.GET.quickh == '1' %}bg-blue-600 text-white{% else %}bg-slate-800 hover:bg-slate-700{% endif %}">
+                1h
+            </a>
+            <a href="?{% if view_type %}viewh={{ view_type }}&{% endif %}quickh=4" 
+               class="quick-btn px-5 py-3 text-sm rounded-2xl transition-all {% if request.GET.quickh == '4' %}bg-blue-600 text-white{% else %}bg-slate-800 hover:bg-slate-700{% endif %}">
+                4h
+            </a>
+            <a href="?{% if view_type %}viewh={{ view_type }}&{% endif %}quickh=8" 
+               class="quick-btn px-5 py-3 text-sm rounded-2xl transition-all {% if request.GET.quickh == '8' %}bg-blue-600 text-white{% else %}bg-slate-800 hover:bg-slate-700{% endif %}">
+                8h
+            </a>
             <a href="?{% if view_type %}view={{ view_type }}&{% endif %}quick=1" 
                class="quick-btn px-5 py-3 text-sm rounded-2xl transition-all {% if request.GET.quick == '1' %}bg-blue-600 text-white{% else %}bg-slate-800 hover:bg-slate-700{% endif %}">
                 24h

@@ -37,6 +37,23 @@ class Room(models.Model):
     def get_aqi(self):
         index = cache.get_or_set("room_get_aqi_%s" % self.id, randrange(100), 120)
         return randrange(100)
+        
+    def latest_measurements(self):
+        data = []
+        
+        for x in  Parameter.objects.all():
+
+            key = "last_value" + str(self.id) + "_" + str(x.id)
+            
+            
+            try:
+                value = cache.get(key, 0)
+            except:
+                value = 0
+            
+            if value:
+                data.append({'id':x.id, 'name':x.name, 'value':value, 'timestamp':0, 'unit':x.unit})
+        return data
 
 
     def __str__(self):

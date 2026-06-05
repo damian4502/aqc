@@ -79,9 +79,11 @@
     </div>
 </div>
 
+{% endblock %}
 
-<script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+{% block scripts %}
+
+<script src="/static/js/chart.umd.min.js"></script>
 
 <script>
 
@@ -92,24 +94,22 @@
 	parameter_map["{{p.identifier}}"] = {{p.id}};
 	{% endfor %}
 
-    function connectMQTT() {
-      client = mqtt.connect('ws://192.168.1.95:9001', {
-        reconnectPeriod: 3000,
-        connectTimeout: 10000
-      });
-
-      client.on('connect', function () {
-		//baseMqttOnConnect();
-        client.subscribe('vila/sentjane/#', function (err) {
-          if (!err) console.log('Naročen na vse senzorje: vila/sentjane/#');
-        });
-      });
-
       client.on('message', function (topic, message) {
         const time = new Date().toLocaleTimeString('sl-SI', {hour:'2-digit', minute:'2-digit', second:'2-digit'});
         const payload = message.toString();
 		try { jdata = JSON.parse(payload); } catch (e) { console.warn("Received non-JSON message on ${topic}: ${payload}"); return;}
 		//console.log(payload);
+		
+		if (jdata['nonce']) {
+			if (nonce_list[topic]) {
+				if (parseInt(nonce_list[topic]) > parseInt(jdata['nonce'])) {
+					console.log("Old noncem discard data.");
+					return;
+				}
+			}
+		
+			nonce_list[topic] = jdata['nonce'];
+		}
 		
 		
 		for (item in jdata) {
@@ -133,11 +133,17 @@
 		
       });
 
+    function connectMQTT() {
+
+	  
+	  //client.connect();
+
 	
 
     }
 
 	setInterval(publishLiveDataMode, 9000);
+	let nonce_list = {}
 	
 	function publishLiveDataMode() {
 		if (pageVisible)
@@ -151,7 +157,7 @@
 		}
 	}
 	
-	window.onload = connectMQTT;
+	//window.onload = connectMQTT;
 	
     let socket;
     let chart;
@@ -286,6 +292,7 @@ liveRooms["{{p.id}}"] = [];
 					if (nvalue > value) value = nvalue;
 				}
 			}
+			//value = parseFloat(valueStr);
 			//console.log(deltas);
 						
             if (chart.data.datasets[i]) {
@@ -356,7 +363,11 @@ liveRooms["{{p.id}}"] = [];
 			row.classList.add("room-ticker");
             tableBody.appendChild(row);
 			
-			for (topic in mqtt_topics) if (parseInt(mqtt_topics[topic]['room_id']) == row.dataset.room_id) row.dataset.sensor_identifier = topic.split('/')[2];
+			for (topic in mqtt_topics) if (parseInt(mqtt_topics[topic]['room_id']) == row.dataset.room_id) {
+				row.dataset.sensor_identifier = topic.split('/')[2];
+				row.dataset.topic = topic;
+				client.subscribe(topic, { qos: 0 });
+			}
 
             const roomName = option.innerHTML;
             row.innerHTML = `
@@ -440,7 +451,11 @@ liveRooms["{{p.id}}"] = [];
         tableBody.appendChild(row);
 
 		row.dataset.room_id = parseInt(rowId.split('-')[2]);
-		for (topic in mqtt_topics) if (parseInt(mqtt_topics[topic]['room_id']) == row.dataset.room_id) row.dataset.sensor_identifier = topic.split('/')[2];
+			for (topic in mqtt_topics) if (parseInt(mqtt_topics[topic]['room_id']) == row.dataset.room_id) {
+				row.dataset.sensor_identifier = topic.split('/')[2];
+				row.dataset.topic = topic;
+				client.subscribe(topic, { qos: 0 });
+			}
 
 		publishLiveDataMode();
         
@@ -544,12 +559,12 @@ liveRooms["{{p.id}}"] = [];
         });
     }
 
-    window.onload = function() {
+    document.addEventListener('DOMContentLoaded', () => {
         initChart();
         //connectWebSocket();
         setInterval(updateChart, 41);
 		connectMQTT();
-    };
+    });
 
 </script>
 

@@ -283,16 +283,24 @@ def room_detail(request, room_id):
         
         # Hitri gumbi (24h, 7d, 30d)
         quick_days = request.GET.get('quick')
+        quick_hours = request.GET.get('quickh')
         if quick_days:
             try:
                 days = int(quick_days)
                 start_date = timezone.now() - timedelta(days=days)
                 end_date = timezone.now()
             except:
-                start_date = timezone.now() - timedelta(days=14)
+                start_date = timezone.now() - timedelta(days=1)
+                end_date = timezone.now()
+        elif quick_hours:
+            try:
+                hours = int(quick_hours)
+                start_date = timezone.now() - timedelta(hours=hours)
+                end_date = timezone.now()
+            except:
+                start_date = timezone.now() - timedelta(days=1)
                 end_date = timezone.now()
         elif start_date_str and end_date_str:
-
             try:
                 start_date = parse_datetime(start_date_str)
                 end_date = parse_datetime(end_date_str)
@@ -851,20 +859,29 @@ def parameter_detail(request, parameter_id):
         
         # Hitri gumbi (24h, 7d, 30d)
         quick_days = request.GET.get('quick')
+        quick_hours = request.GET.get('quickh')
         if quick_days:
             try:
                 days = int(quick_days)
                 start_date = timezone.now() - timedelta(days=days)
                 end_date = timezone.now()
             except:
-                start_date = timezone.now() - timedelta(days=14)
+                start_date = timezone.now() - timedelta(days=1)
+                end_date = timezone.now()
+        elif quick_hours:
+            try:
+                hours = int(quick_hours)
+                start_date = timezone.now() - timedelta(hours=hours)
+                end_date = timezone.now()
+            except:
+                start_date = timezone.now() - timedelta(days=1)
                 end_date = timezone.now()
         elif start_date_str and end_date_str:
             try:
                 start_date = parse_datetime(start_date_str)
                 end_date = parse_datetime(end_date_str)
             except ValueError:
-                start_date = timezone.now() - timedelta(days=14)
+                start_date = timezone.now() - timedelta(days=1)
                 end_date = timezone.now()
         else:
             # privzeto
@@ -902,6 +919,7 @@ def parameter_detail(request, parameter_id):
     interval_minutes = int(request.GET.get('interval', request.session.get('resample_interval', 15)))
     fill_method = request.GET.get('fill_method', request.session.get('resample_fill_method', 'ffill'))
     ignore_spikes = request.GET.get('ignore_spikes') == 'on' or request.session.get('ignore_spikes', False)
+    ignore_spikes = False
 
     # Shrani v session
     request.session['resample_interval'] = interval_minutes
