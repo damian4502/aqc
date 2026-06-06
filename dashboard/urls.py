@@ -8,6 +8,7 @@ urlpatterns = [
     path('api/voc_states/<str:sensor>/', get_last_voc_states, name='get_last_voc_states'),
     path('parameter/<int:parameter_id>/', parameter_detail, name='parameter_detail'),
     path('room/<int:room_id>/graph/', room_graph_fragment, name='room_graph_fragment'),
+    path('api/chart-data/', chart_data, name='chart_data'),
     path('api/latest-measurements/', latest_measurements_api, name='latest_measurements_api'),
     path('api/room/<int:room_id>/live/', room_live_data, name='room_live_data'),
     path('parameter/<int:parameter_id>/export/', export_parameter_csv, name='export_parameter_csv'),

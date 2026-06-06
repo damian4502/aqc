@@ -330,7 +330,7 @@ def room_detail(request, room_id):
         'start': start_date,
         'end': end_date,
     }
-
+    """
     # === Meritve za grafe ===
     qs = Measurement.objects.filter(sensor__room=room)
     if not all_data and start_date:
@@ -469,7 +469,13 @@ def room_detail(request, room_id):
         )
         fig_heatmap.update_layout(height=600)
         context['fig_heatmap'] = fig_heatmap.to_html(full_html=False, include_plotlyjs='cdn')
-
+    """
+    
+    fig = px.line([],
+                 title=f'Časovni trend - {room.name}',
+                 height=700)
+    fig = apply_dark_theme(fig)
+    context["fig"] = fig
     return render(request, 'dashboard/room_detail.html', context)
     
 import pandas as pd
@@ -521,6 +527,159 @@ def resample_measurements(df, interval_minutes=15, fill_method='ffill', ignore_s
     
     return resampled
 
+import plotly.graph_objects as go
+
+def chart_data(request):
+    from django.utils.dateparse import parse_datetime
+    """Vrača Plotly JSON za dinamično nalaganje v JS."""
+    room = None
+    parameter = None
+
+    room_id = request.GET.get('room_id')
+    if room_id:
+        room = get_object_or_404(Room, pk=room_id)
+
+    parameter_id = request.GET.get('parameter_id')
+    if parameter_id:
+        parameter = get_object_or_404(Parameter, pk=parameter_id)
+
+    # --- Parse parametrov (enako kot sedaj) ---
+    start_str = request.GET.get('start')
+    end_str = request.GET.get('end')
+    interval = int(request.GET.get('interval', 60))  # minute
+    fill_method = request.GET.get('fill', 'ffill')
+    all_data = request.GET.get('all_data') == 'true'
+    show_params = request.GET.get('show_params')
+    context = {}
+    
+    if not show_params:
+        show_params = ['pm10']
+    else:
+        show_params = show_params.split(',')
+
+    # default: zadnjih 24h
+    if not start_str:
+        end = timezone.now()
+        start = end - timedelta(hours=24)
+    else:
+        start = parse_datetime(start_str) or (timezone.now() - timedelta(hours=24))
+        end = parse_datetime(end_str) or timezone.now()
+
+    # === Meritve za grafe ===
+    qs = Measurement.objects.all()
+    if room:
+        qs = qs.filter(sensor__room=room)
+    if parameter:
+        qs = qs.filter(parameter=parameter)
+        
+    if not all_data and start:
+        qs = qs.filter(timestamp__gte=start, timestamp__lte=end)
+
+    measurements = qs.select_related('parameter').order_by('timestamp')
+
+    if not measurements.exists():
+        context['no_data'] = True
+        return render(request, 'dashboard/room_detail.html', context)
+
+    # Priprava DataFrame
+    if room:
+        df = pd.DataFrame(list(measurements.values('timestamp', 'value', 'parameter__name')))
+        df['timestamp'] = pd.to_datetime(df['timestamp'])
+        df = df.rename(columns={'parameter__name': 'parameter'})
+    if parameter:
+        df = pd.DataFrame(list(measurements.values('timestamp', 'value', 'sensor__room__name')))
+        df['timestamp'] = pd.to_datetime(df['timestamp'])
+        df = df.rename(columns={'sensor__room__name': 'parameter'})
+
+    # === Shranjevanje / branje resampling nastavitev iz session ===
+    if request.method == 'GET':
+        # Če uporabnik pošlje nove vrednosti → shrani v session
+        if 'interval' in request.GET:
+            request.session['resample_interval'] = int(request.GET.get('interval'))
+        if 'fill_method' in request.GET:
+            request.session['resample_fill_method'] = request.GET.get('fill_method')
+
+    # Resampling parametri
+    interval_minutes = int(request.GET.get('interval', request.session.get('resample_interval', 15)))
+    fill_method = request.GET.get('fill_method', request.session.get('resample_fill_method', 'ffill'))
+    ignore_spikes = request.GET.get('ignore_spikes') == 'on' or request.session.get('ignore_spikes', False)
+
+    # Shrani v session
+    request.session['resample_interval'] = interval_minutes
+    request.session['resample_fill_method'] = fill_method
+    request.session['ignore_spikes'] = ignore_spikes
+
+    context['interval'] = interval_minutes
+    context['fill_method'] = fill_method
+    context['ignore_spikes'] = ignore_spikes
+
+    resampled = resample_measurements(df, interval_minutes, fill_method, ignore_spikes)
+    if not resampled.empty:
+        fig = px.line(resampled, x=resampled.index, y=resampled.columns,
+                     title=f'Časovni trend',
+                     height=700)
+
+        for trace in fig.data:
+            if trace.name.lower() not in show_params:
+                trace.visible = 'legendonly'
+
+        #context['fig'] = fig.to_html(full_html=False, include_plotlyjs='cdn')
+
+    qs = Measurement.objects.filter(
+        sensor__room=room,
+        timestamp__gte=start,
+        timestamp__lte=end
+    ).select_related('parameter').order_by('timestamp')
+
+    # ... tvoja koda za df in traces ...
+
+    #fig = go.Figure()
+    # ... dodaj traces z visible='legendonly' kjer hočeš ...
+
+    # --- Dogodki (events) kot vlines + annotations ---
+    events = Event.objects.filter(
+        timestamp__gte=start,
+        timestamp__lte=end
+    ).distinct()
+    
+    if room:
+        events = events.filter(rooms=room)
+    if parameter:
+        events = events.filter(parameters=parameter)
+
+    for event in events:
+        event_ts = timezone.localtime(event.timestamp).replace(tzinfo=None)
+        fig.add_vline(
+            x=event_ts,
+            line_width=2.5,
+            line_dash="dashdot",
+            line_color=event.color,
+        )
+        fig.add_annotation(
+            x=event_ts,
+            yref="paper",
+            y=1.06,
+            text=event.title,
+            showarrow=False,
+            xanchor="center",
+            yanchor="bottom",
+            font=dict(size=13, color=event.color),
+            bgcolor="rgba(15, 23, 42, 0.92)",
+            bordercolor=event.color,
+            borderwidth=1,
+            borderpad=4,
+        )
+
+    # --- Ključno: vrni čisti Plotly JSON ---
+    fig = apply_dark_theme(fig)
+    import plotly.io as pio
+    return HttpResponse(
+            pio.to_json(fig, validate=False, engine='json'),
+            content_type='application/json'
+        )
+    return JsonResponse(fig.to_dict(), safe=False)
+    
+    
 def room_graph_fragment(request, room_id):
     """Vrača SAMO graf za HTMX (fragment)"""
     room = get_object_or_404(Room, id=room_id)
