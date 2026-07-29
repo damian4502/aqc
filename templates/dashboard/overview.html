@@ -210,6 +210,7 @@
     }
 {% endcomment %}
 
+
     function updateTicker(ticker) {
         if (!ticker || ticker.length === 0) return;
         const tickerEl = document.getElementById('ticker-content');
@@ -413,6 +414,13 @@ document.addEventListener('DOMContentLoaded', function() {
 		for (parameter in parameter_map) client.publish("vila/sentjane/asgard/cmd/all", parameter, { qos: 2 });
 		for (topic in mqtt_topics) client.subscribe(topic);
       });
+
+document.addEventListener('visibilitychange', () => {
+pageVisible = document.visibilityState === 'visible';
+    if (pageVisible) {
+		for (parameter in parameter_map) client.publish("vila/sentjane/asgard/cmd/all", parameter, { qos: 0 });
+    }
+});
 
   document.querySelectorAll('.glass.rounded-3xl').forEach(card => {
     updateAQIProgressBar(card);

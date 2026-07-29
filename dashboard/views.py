@@ -319,8 +319,6 @@ def room_detail(request, room_id):
     
     # Zadnje meritve za vrh kartice
 
-
-
     context = {
         'room': room,
         'start_date': context_start,
@@ -330,6 +328,15 @@ def room_detail(request, room_id):
         'start': start_date,
         'end': end_date,
     }
+
+    interval_minutes = int(request.GET.get('interval', request.session.get('resample_interval', 15)))
+    fill_method = request.GET.get('fill_method', request.session.get('resample_fill_method', 'ffill'))
+    ignore_spikes = request.GET.get('ignore_spikes') == 'on' or request.session.get('ignore_spikes', False)
+
+    context['interval'] = interval_minutes
+    context['fill_method'] = fill_method
+    context['ignore_spikes'] = ignore_spikes
+
     """
     # === Meritve za grafe ===
     qs = Measurement.objects.filter(sensor__room=room)
@@ -477,6 +484,93 @@ def room_detail(request, room_id):
     fig = apply_dark_theme(fig)
     context["fig"] = fig
     return render(request, 'dashboard/room_detail.html', context)
+
+def pressure_calibration_view(request):
+    """Stran za kalibracijo senzorjev tlaka (primerjava 2 senzorjev + MQTT offset)."""
+    pressure_param = Parameter.objects.filter(id=11).first()
+
+    sensors = Sensor.objects.filter(
+        parameter=pressure_param
+    ).select_related('room') if pressure_param else Sensor.objects.none()
+
+    context = {
+        'sensors': sensors,
+        'pressure_parameter': pressure_param,
+    }
+    return render(request, 'dashboard/pressure_calibration_v2.html', context)
+    
+import json
+from pathlib import Path
+from django.conf import settings
+from django.http import JsonResponse
+from django.views.decorators.http import require_POST
+from django.views.decorators.csrf import csrf_exempt
+from django.shortcuts import get_object_or_404
+@require_POST
+@csrf_exempt
+def set_pressure_offset_api(request):
+    """
+    Posodobi pressure_offsets v offsets.json.
+    Novo izmerjeno delta PRISTEJE k obstoječemu offsetu v JSONu,
+    ker senzor že objavlja vrednost Z upoštevanim trenutnim offsetom.
+    """
+    try:
+        payload = json.loads(request.body)
+        sensor_id = int(payload.get("sensor_id"))
+        delta = float(payload.get("offset"))          # to je avgDelta iz kalibracije (ref - cal)
+    except (ValueError, TypeError, json.JSONDecodeError):
+        return JsonResponse({"success": False, "error": "Neveljaven vhod"}, status=400)
+
+    # Poišči senzor
+    try:
+        from sensors.models import Sensor
+        sensor = get_object_or_404(Sensor, id=sensor_id)
+    except Exception:
+        from django.apps import apps
+        Sensor = apps.get_model('sensors', 'Sensor')
+        sensor = get_object_or_404(Sensor, id=sensor_id)
+
+    room = sensor.room
+
+    # Ključ v JSON datoteki
+    key = room.name.lower()
+    key = (key.replace("č", "c")
+              .replace("š", "s")
+              .replace("ž", "z")
+              .replace("ć", "c")
+              .replace(" ", "_")
+              .replace("đ", "d"))
+
+    offsets_path = Path(settings.BASE_DIR) / "static" / "offsets.json"
+    if not offsets_path.exists():
+        return JsonResponse({"success": False, "error": f"offsets.json ni najden: {offsets_path}"}, status=500)
+
+    with open(offsets_path, "r", encoding="utf-8") as f:
+        config = json.load(f)
+
+    if "pressure_offsets" not in config:
+        config["pressure_offsets"] = {}
+
+    current_offset = config["pressure_offsets"].get(key, 0.0)
+
+    # === KLJUČNO: seštejemo obstoječi offset + novo izmerjeno delta ===
+    new_total_offset = current_offset + delta
+
+    config["pressure_offsets"][key] = round(new_total_offset, 2)
+
+    with open(offsets_path, "w", encoding="utf-8") as f:
+        json.dump(config, f, indent=2, ensure_ascii=False)
+
+    return JsonResponse({
+        "success": True,
+        "room": room.name,
+        "json_key": key,
+        "previous_total_offset": round(current_offset, 2),
+        "delta_applied": round(delta, 2),
+        "new_total_offset": round(new_total_offset, 2),
+        "message": f"Za '{key}': {current_offset:.2f} + {delta:.2f} = {new_total_offset:.2f} Pa"
+    })
+    
     
 import pandas as pd
 from django.utils import timezone
@@ -552,8 +646,10 @@ def chart_data(request):
     show_params = request.GET.get('show_params')
     context = {}
     
-    if not show_params:
-        show_params = ['pm10']
+    if not show_params and parameter:
+        show_params = ['*']
+    elif not show_params:
+        show_params = ['pm10', 'pm size']
     else:
         show_params = show_params.split(',')
 
@@ -620,7 +716,7 @@ def chart_data(request):
                      height=700)
 
         for trace in fig.data:
-            if trace.name.lower() not in show_params:
+            if trace.name.lower() not in show_params and '*' not in show_params:
                 trace.visible = 'legendonly'
 
         #context['fig'] = fig.to_html(full_html=False, include_plotlyjs='cdn')
@@ -887,7 +983,7 @@ def dashboard_overview(request):
     rooms = Room.objects.all().order_by('order')
     
     room_data = []
-    
+    from django.core.cache import cache
     for room in rooms:
         # Zadnje meritve (vse parametre še vedno prikažemo v tabeli)
         #latest = Measurement.objects.filter(sensor__room=room)\
@@ -895,7 +991,8 @@ def dashboard_overview(request):
         #    .order_by('parameter__order', '-timestamp')\
         #    .distinct('parameter__order')[:8]
         
-        params = Parameter.objects.all().order_by('order')
+        tparams = Parameter.objects.all().order_by('order')
+        params = [{'name':x.name, 'id':x.id, 'unit':x.unit} for x in tparams if cache.get("last_value" + str(room.id) + "_" + str(x.id), 0)]
         
         """
         # Mini graf - samo AQI za zadnjih 24 ur
@@ -1340,6 +1437,7 @@ def differential_pressure_view(request):
 
 def get_last_voc_states(request, sensor):
     data = {}
+    return JsonResponse(data)
 
     
 

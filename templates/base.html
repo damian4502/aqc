@@ -6,7 +6,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}Air Quality Control{% endblock %}</title>
-
+<link rel="manifest" href="/static/manifest.json">
+<meta name="theme-color" content="#0f172a">
 <style>
         #console .console-line {
         padding-left: 0 !important;
@@ -166,6 +167,26 @@
                             </div>
                         </div>
 
+                        <!-- DROPDOWN GRUPA -->
+                        <div class="menu-group mt-6">
+                            <button onclick="toggleSubmenu(this)" 
+                                    class="w-full flex items-center justify-between px-6 py-4 text-slate-200 hover:bg-slate-800 rounded-2xl transition-all sidebar-link">
+                                <div class="flex items-center gap-4">
+                                    <i class="fas fa-chart-line w-5"></i>
+                                    <span class="font-medium">Senzorji</span>
+                                </div>
+                                <i class="fas fa-chevron-down text-xs transition-transform"></i>
+                            </button>
+                            <div class="submenu hidden pl-12 pr-4 space-y-1 mt-1">
+                                <a href="#" class="flex items-center gap-3 px-6 py-3 text-slate-300 hover:text-white hover:bg-slate-800 rounded-2xl sidebar-link">
+                                    Kontrola meritev
+                                </a>
+                                <a href="{% url 'pressure_calibration' %}" class="flex items-center gap-3 px-6 py-3 text-slate-300 hover:text-white hover:bg-slate-800 rounded-2xl sidebar-link">
+                                    Kalibracija tlakov
+                                </a>
+                            </div>
+                        </div>
+
                         <a href="/import/import/" 
                            class="flex items-center gap-4 px-6 py-4 text-slate-200 hover:bg-slate-800 rounded-2xl transition-all sidebar-link">
                             <i class="fas fa-upload w-5"></i>
@@ -280,6 +301,7 @@ document.addEventListener('visibilitychange', () => {
 		client.on('close', function() {
 		document.getElementById('conn-status').innerHTML = '● Offline';
 		document.getElementById('conn-status').classList.replace('text-emerald-400', 'text-red-400');
+		//client.connect();
 		});
       client.on('connect', baseMqttOnConnect);
 
@@ -555,7 +577,11 @@ document.addEventListener('visibilitychange', () => {
         }
     });
 </script>
-
+<script>
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('/static/js/sw.js');
+}
+</script>
     {% block scripts %}{% endblock %}
 </body>
 </html>

@@ -11,7 +11,7 @@
     <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-6">
         {% for widget in widgets %}
             {% if widget.widget_type == 'room_card' %}
-                {% include 'dashboard/widgets/room_card.html' with widget=widget room=widget.config.room %}
+                {% include 'dashboard/widgets/room_card.html' with widget=widget %}
             {% elif widget.widget_type == 'datetime' %}
                 {% include 'dashboard/widgets/datetime.html' with widget=widget %}
             {% elif widget.widget_type == 'single_value' %}

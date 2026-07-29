@@ -1,0 +1,656 @@
+{% extends 'base.html' %}
+{% load static %}
+{% load smart_filters %}
+
+{% block title %}Kalibracija tlaka - Air Quality Control{% endblock %}
+
+{% block content %}
+<div class="max-w-5xl mx-auto px-8 py-8">
+    <div class="flex justify-between items-center mb-8">
+        <div>
+            <h1 class="text-4xl font-bold text-white">Kalibracija senzorjev tlaka</h1>
+            <p class="text-slate-400 mt-1">Primerjava dveh senzorjev in nastavitev offseta preko MQTT</p>
+        </div>
+        <a href="/differential-pressure/" class="text-blue-400 hover:text-blue-300 flex items-center gap-2">
+            ← Nazaj na diferencialni tlak
+        </a>
+    </div>
+
+    <!-- Izbira senzorjev -->
+    <div class="glass rounded-3xl p-6 mb-8">
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <!-- Referenčni senzor -->
+            <div>
+                <label class="block text-sm text-slate-400 mb-2 font-medium">Referenčni senzor (P_ref) — velja za pravega</label>
+                <select id="ref-sensor" class="w-full bg-slate-900 border border-slate-700 rounded-2xl px-5 py-3 text-lg focus:border-blue-500">
+                    <option value="">-- Izberi referenčnega senzorja --</option>
+                    {% for s in sensors %}
+                    <option value="{{ s.id }}">{{ s.room.name }} — {{ s.get_location_display }} ({{ s.name|default:"Brez imena" }})</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <!-- Senzor za kalibracijo -->
+            <div>
+                <label class="block text-sm text-slate-400 mb-2 font-medium">Senzor za kalibracijo (P_cal) — ta bo popravljen</label>
+                <select id="cal-sensor" class="w-full bg-slate-900 border border-slate-700 rounded-2xl px-5 py-3 text-lg focus:border-emerald-500">
+                    <option value="">-- Izberi senzor za kalibracijo --</option>
+                    {% for s in sensors %}
+                    <option value="{{ s.id }}">{{ s.room.name }} — {{ s.get_location_display }} ({{ s.name|default:"Brez imena" }})</option>
+                    {% endfor %}
+                </select>
+            </div>
+        </div>
+        <div class="mt-4 text-xs text-slate-500">
+            Izberi dva različna senzorja. Razlika = Referenca − Kalibrirani senzor. Pozitivna vrednost pomeni, da je kalibrirani senzor podcenjeval.
+        </div>
+    </div>
+
+
+    <!-- Prikaz vrednosti in razlike -->
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
+        <!-- Referenčni -->
+        <div class="glass rounded-3xl p-6">
+            <div class="flex items-center justify-between mb-3">
+                <div class="text-sm font-medium text-slate-400">REFERENČNI SENZOR</div>
+                <i class="fas fa-check-circle text-emerald-500"></i>
+            </div>
+            <div id="ref-name" class="font-semibold text-xl text-white mb-1">—</div>
+            <div id="ref-value" class="font-mono text-5xl font-bold text-white tracking-tighter">—</div>
+            <div class="text-xs text-slate-500 mt-2" id="ref-time">Čakam na podatke...</div>
+        </div>
+
+        <!-- Kalibrirani -->
+        <div class="glass rounded-3xl p-6">
+            <div class="flex items-center justify-between mb-3">
+                <div class="text-sm font-medium text-slate-400">SENZOR ZA KALIBRACIJO</div>
+                <i class="fas fa-microchip text-amber-500"></i>
+            </div>
+            <div id="cal-name" class="font-semibold text-xl text-white mb-1">—</div>
+            <div id="cal-value" class="font-mono text-5xl font-bold text-white tracking-tighter">—</div>
+            <div class="text-xs text-slate-500 mt-2" id="cal-time">Čakam na podatke...</div>
+        </div>
+
+        <!-- Delta / Avg -->
+        <div class="glass rounded-3xl p-6 flex flex-col">
+            <div class="text-sm font-medium text-slate-400 mb-1">TRENUTNA RAZLIKA (Δ)</div>
+            <div id="current-delta" class="font-mono text-6xl font-bold tracking-tighter text-center my-auto text-white">— Pa</div>
+            
+            <div class="mt-auto pt-4 border-t border-slate-700">
+                <div class="flex justify-between items-end">
+                    <div>
+                        <div class="text-xs text-slate-400">POVPREČNA RAZLIKA</div>
+                        <div id="avg-delta" class="font-mono text-3xl font-semibold text-emerald-400">— Pa</div>
+                    </div>
+                    <div class="text-right">
+                        <div id="avg-count" class="text-xs text-slate-500">0 meritev</div>
+                        <div id="avg-duration" class="text-[10px] text-slate-600">—</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+<div class="glass rounded-3xl p-6 mb-8">
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <!-- obstoječa dva selecta za senzorja -->
+
+        <!-- NOVO: Višina referenčnega senzorja -->
+        <div class="md:col-span-2">
+            <label class="block text-sm text-slate-400 mb-2 font-medium">
+                Višina referenčnega senzorja (za korekcijo tlaka)
+            </label>
+            <div class="flex items-center gap-3">
+                <input type="number" id="ref-height-cm" value="0" step="1"
+                       class="bg-slate-900 border border-slate-700 rounded-2xl px-4 py-2 w-28 text-lg font-mono">
+                <span class="text-slate-400">cm</span>
+                <span id="height-correction-value" class="text-xs text-emerald-400 ml-4"></span>
+            </div>
+            <p class="text-[10px] text-slate-500 mt-1">
+                Vrednost referenčnega senzorja bo popravljena za: višina × height_conversion_factor
+            </p>
+        </div>
+    </div>
+</div>
+    <!-- Graf in kontrola -->
+    <div class="glass rounded-3xl p-5 mb-6">
+        <div class="flex flex-wrap items-center justify-between gap-x-8 gap-y-3">
+            <div class="flex items-center gap-3">
+                <label class="flex items-center gap-2 cursor-pointer">
+                    <input type="checkbox" id="auto-save-enabled" class="w-4 h-4 accent-emerald-600">
+                    <span class="font-medium text-sm">Auto Save</span>
+                </label>
+                
+                <div class="flex items-center gap-2">
+                    <input type="number" id="auto-save-interval" value="10" min="1" max="120" step="1"
+                           class="bg-slate-900 border border-slate-700 rounded-xl px-3 py-1 w-16 text-sm text-center">
+                    <span class="text-xs text-slate-400">min</span>
+                </div>
+            </div>
+
+            <label class="flex items-center gap-2 text-sm cursor-pointer">
+                <input type="checkbox" id="auto-save-reset" class="w-4 h-4 accent-emerald-600" checked>
+                <span class="text-slate-300">Resetiraj povprečje po shranjevanju</span>
+            </label>
+
+            <div class="flex items-center gap-2 text-xs">
+                <span class="text-slate-500">Zadnji auto-save:</span>
+                <span id="last-auto-save" class="font-mono text-emerald-400">—</span>
+            </div>
+        </div>
+    </div>
+    <div class="glass rounded-3xl p-6">
+        <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-4">
+            <div>
+                <h2 class="text-lg font-semibold">Graf razlike skozi čas</h2>
+                <p class="text-xs text-slate-500">Prikazuje trenutno razliko (ref − cal). Idealno blizu 0 po kalibraciji.</p>
+            </div>
+            <div class="flex flex-wrap gap-2">
+                <button onclick="resetAveraging()" 
+                        class="px-4 py-2 bg-slate-700 hover:bg-slate-600 rounded-2xl text-sm flex items-center gap-2">
+                    <i class="fas fa-undo"></i> Ponastavi povprečje
+                </button>
+                <button onclick="setOffsetAndPublish()" 
+                        class="px-6 py-2 bg-emerald-600 hover:bg-emerald-500 rounded-2xl text-sm font-medium flex items-center gap-2 text-white">
+                    <i class="fas fa-paper-plane"></i> Nastavi offset &amp; Pošlji MQTT
+                </button>
+            </div>
+        </div>
+
+        <div style="height: 340px;">
+            <canvas id="calibChart"></canvas>
+        </div>
+        
+        <div class="mt-4 text-[11px] text-slate-500 flex items-center gap-2">
+            <i class="fas fa-info-circle"></i>
+            <span>Ko klikneš "Nastavi offset", se povprečna razlika pošlje na MQTT topic senzorja za kalibracijo (JSON: {"offset": &lt;value&gt;, "param": "pressure"}). Povprečenje se nato začne znova od začetka.</span>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script>
+let refHeightCm = 0;
+let heightConversionFactor = 0.119;   // privzeto iz tvojega offsets.json
+
+// Poslušalec za spremembo višine
+document.getElementById('ref-height-cm').addEventListener('input', function() {
+    refHeightCm = parseFloat(this.value) || 0;
+    recalculateCurrentDelta();
+});
+
+// Funkcija, ki preračuna delto z višinsko korekcijo
+function recalculateCurrentDelta() {
+    if (!referenceSensorId || !calibrateSensorId) return;
+
+    const refVal = latestValues[referenceSensorId];
+    const calVal = latestValues[calibrateSensorId];
+    if (refVal === undefined || calVal === undefined) return;
+
+    const heightCorrection = refHeightCm * heightConversionFactor;
+    const effectiveRef = refVal + heightCorrection;
+    const currentDelta = effectiveRef - calVal;
+
+    // Posodobi prikaz (uporabi obstoječo funkcijo ali direktno)
+    const curEl = document.getElementById('current-delta');
+    if (curEl) {
+        curEl.innerHTML = currentDelta.toFixed(2) + ' <span class="text-base font-normal text-slate-400">Pa</span>';
+    }
+
+    // Posodobi info o korekciji
+    const infoEl = document.getElementById('height-correction-value');
+    if (infoEl) {
+        infoEl.innerHTML = `+${heightCorrection.toFixed(2)} Pa (višinska korekcija)`;
+    }
+}
+    let socket;
+    {% all_parameters as parameters %}
+    {% all_mqtt_topics as mqtt_topics %}
+    {% all_rooms as rooms %}
+
+    let mqtt_topics = {};
+    {% for t in mqtt_topics %}
+        mqtt_topics["{{t.topic}}"] = {"room_id": {{t.sensor.room.id}}, "sensor_id": {{t.sensor.id}} };
+    {% endfor %}
+
+    let parameter_map = {};
+    {% for p in parameters %}
+        parameter_map["{{p.identifier}}"] = {{p.id}};
+    {% endfor %}
+    
+    let room_map = {};
+    {% for r in rooms %}
+        room_map["{{r.id}}"] = "{{r.name}}";
+    {% endfor %}
+
+    // Mapa sensor_id -> mqtt topic (za iskanje identifierja)
+    let sensor_to_mqtt_topic = {};
+    {% for t in mqtt_topics %}
+        sensor_to_mqtt_topic[{{t.sensor.id}}] = "{{t.topic}}";
+    {% endfor %}
+
+    // MQTT client naj bi bil že inicializiran v base.html (Paho MQTT)
+    client.on('connect', function () {
+        client.subscribe('vila/sentjane/#', function (err) {
+            if (!err) console.log('Naročen na vse senzorje: vila/sentjane/# (kalibracija)');
+        });
+    });
+
+    client.on('message', function (topic, message) {
+        const payload = message.toString();
+        let jdata;
+        try { 
+            jdata = JSON.parse(payload); 
+        } catch (e) { 
+            return; 
+        }
+        
+        for (let item in jdata) {
+            if (!mqtt_topics[topic]) continue;
+            let data = {
+                'parameter_id': parameter_map[item],
+                "room_id": mqtt_topics[topic].room_id,
+                "sensor_id": mqtt_topics[topic].sensor_id,
+                "value": jdata[item],
+                "time": new Date().toLocaleTimeString('sl-SI', {hour:'2-digit', minute:'2-digit', second:'2-digit'})
+            };
+            // Majhen timeout za bolj tekoče UI
+            setTimeout(() => { updateLiveData(data); }, Math.floor(Math.random() * 800));
+        }
+    });
+
+    function publishLiveDataMode() {
+            let identifier = null;
+            const calTopic = sensor_to_mqtt_topic[calibrateSensorId];
+            if (calTopic) {
+                const parts = calTopic.split('/');
+                if (parts.length >= 3) identifier = parts[2];
+            }
+            if (!identifier) identifier = "sensor_" + calibrateSensorId;
+
+            const cmdTopic = `vila/sentjane/asgard/cmd/${identifier}`;
+
+        client.publish(cmdTopic, "pressure", { qos: 0 });
+    }
+
+    // === State za kalibracijo ===
+    let chart;
+    let referenceSensorId = null;
+    let calibrateSensorId = null;
+    let latestValues = {};           // sensor_id -> zadnja vrednost tlaka
+    let sumDelta = 0;
+    let countDelta = 0;
+    let startTime = null;            // čas začetka trenutnega povprečja
+    const MAX_POINTS = 60;           // max točk na grafu
+
+    function updateSensorDisplay(sensorId, value, timeStr) {
+        const valEl = document.getElementById(sensorId === referenceSensorId ? 'ref-value' : 'cal-value');
+        const timeEl = document.getElementById(sensorId === referenceSensorId ? 'ref-time' : 'cal-time');
+        const nameEl = document.getElementById(sensorId === referenceSensorId ? 'ref-name' : 'cal-name');
+
+        if (valEl) valEl.innerHTML = parseFloat(value).toFixed(2) + ' <span class="text-base font-normal text-slate-400">Pa</span>';
+        if (timeEl) timeEl.innerHTML = timeStr || new Date().toLocaleTimeString('sl-SI', {hour:'2-digit', minute:'2-digit', second:'2-digit'});
+        
+        // Posodobi ime samo prvič
+        if (nameEl && nameEl.innerHTML === '—') {
+            // Poišči ime iz selecta
+            const select = document.getElementById(sensorId === referenceSensorId ? 'ref-sensor' : 'cal-sensor');
+            const opt = select.options[select.selectedIndex];
+            if (opt) nameEl.innerHTML = opt.textContent;
+        }
+    }
+
+    function updateDeltaDisplays(currentDelta, avgDelta) {
+        const curEl = document.getElementById('current-delta');
+        const avgEl = document.getElementById('avg-delta');
+        const cntEl = document.getElementById('avg-count');
+        const durEl = document.getElementById('avg-duration');
+
+        if (curEl) {
+            curEl.innerHTML = currentDelta.toFixed(2) + ' <span class="text-base font-normal text-slate-400">Pa</span>';
+            curEl.style.color = currentDelta < 0 ? '#f87171' : '#4ade80';
+        }
+        if (avgEl) {
+            avgEl.innerHTML = avgDelta.toFixed(2) + ' <span class="text-base font-normal text-slate-400">Pa</span>';
+            avgEl.style.color = avgDelta < 0 ? '#f87171' : '#4ade80';
+        }
+        if (cntEl) cntEl.innerHTML = countDelta + ' meritev';
+        if (durEl && startTime) {
+            const mins = Math.floor((Date.now() - startTime) / 60000);
+            durEl.innerHTML = mins > 0 ? `${mins} min` : 'pravkar začeto';
+        }
+    }
+
+    function updateLiveData(data) {
+        if (data.parameter_id != parameter_map["pressure"]) return;
+        if (!data.sensor_id) return;
+		if (pause_updates) return;
+		
+
+        const sid = data.sensor_id.toString();
+        latestValues[sid] = parseFloat(data.value);
+
+        // Posodobi prikaz za ref ali cal
+        if (referenceSensorId && sid === referenceSensorId.toString()) {
+            updateSensorDisplay(referenceSensorId, data.value, data.time);
+        }
+        if (calibrateSensorId && sid === calibrateSensorId.toString()) {
+            updateSensorDisplay(calibrateSensorId, data.value, data.time);
+        }
+
+        // Če imamo oba senzorja, izračunaj delta in povprečje
+        if (referenceSensorId && calibrateSensorId) {
+            const refVal = latestValues[referenceSensorId];
+            const calVal = latestValues[calibrateSensorId];
+            
+            if (refVal !== undefined && calVal !== undefined) {
+				const heightCorrection = refHeightCm * heightConversionFactor;
+				const effectiveRef = refVal + heightCorrection;
+				const currentDelta = effectiveRef - calVal;
+
+                // Dodaj v tekoče povprečje (samo če je aktivno)
+                if (countDelta === 0 && startTime === null) {
+                    startTime = Date.now();
+                }
+                sumDelta += currentDelta;
+                countDelta += 1;
+                const avgDelta = sumDelta / countDelta;
+
+                updateDeltaDisplays(currentDelta, avgDelta);
+
+                // Dodaj točko na graf
+                if (chart) {
+                    const t = new Date().toLocaleTimeString('sl-SI', {hour:'2-digit', minute:'2-digit', second:'2-digit'});
+                    chart.data.labels.push(t);
+                    chart.data.datasets[0].data.push(parseFloat(currentDelta.toFixed(2)));
+
+                    if (chart.data.labels.length > MAX_POINTS) {
+                        chart.data.labels.shift();
+                        chart.data.datasets[0].data.shift();
+                    }
+                    chart.update('none');
+                }
+            }
+        }
+    }
+
+    // Izbira referenčnega senzorja
+    document.getElementById('ref-sensor').addEventListener('change', function() {
+        referenceSensorId = this.value ? parseInt(this.value) : null;
+        resetAveraging(true); // resetiraj povprečje ob menjavi
+        updateNames();
+		publishLiveDataMode();
+    });
+
+    // Izbira senzorja za kalibracijo
+    document.getElementById('cal-sensor').addEventListener('change', function() {
+        calibrateSensorId = this.value ? parseInt(this.value) : null;
+        if (referenceSensorId && calibrateSensorId && referenceSensorId === calibrateSensorId) {
+            alert("Referenčni in kalibrirani senzor ne moreta biti enaka!");
+            this.value = "";
+            calibrateSensorId = null;
+        }
+        resetAveraging(true);
+        updateNames();
+		publishLiveDataMode();
+    });
+
+    function updateNames() {
+        // Po potrebi osveži imena (če se spremenita)
+        const refNameEl = document.getElementById('ref-name');
+        const calNameEl = document.getElementById('cal-name');
+        
+        if (referenceSensorId) {
+            const sel = document.getElementById('ref-sensor');
+            const opt = sel.options[sel.selectedIndex];
+            if (opt && refNameEl) refNameEl.innerHTML = opt.textContent;
+        } else if (refNameEl) refNameEl.innerHTML = '—';
+        
+        if (calibrateSensorId) {
+            const sel = document.getElementById('cal-sensor');
+            const opt = sel.options[sel.selectedIndex];
+            if (opt && calNameEl) calNameEl.innerHTML = opt.textContent;
+        } else if (calNameEl) calNameEl.innerHTML = '—';
+    }
+
+    function resetAveraging(keepChart = false) {
+        sumDelta = 0;
+        countDelta = 0;
+        startTime = Date.now();
+        
+        const avgEl = document.getElementById('avg-delta');
+        const cntEl = document.getElementById('avg-count');
+        const durEl = document.getElementById('avg-duration');
+        const curEl = document.getElementById('current-delta');
+
+        if (avgEl) avgEl.innerHTML = '— Pa';
+        if (cntEl) cntEl.innerHTML = '0 meritev';
+        if (durEl) durEl.innerHTML = '—';
+        if (curEl) curEl.innerHTML = '— Pa';
+
+        if (!keepChart && chart) {
+            chart.data.labels = [];
+            chart.data.datasets[0].data = [];
+            chart.update();
+        }
+    }
+	
+	let pause_updates = false;
+
+    async function setOffsetAndPublish(isAutoSave = false) {
+        if (!referenceSensorId || !calibrateSensorId) {
+            if (!isAutoSave) alert("Najprej izberi referenčni senzor in senzor za kalibracijo.");
+            return;
+        }
+        if (countDelta < 5 && !isAutoSave) {
+            if (!confirm("Imamo manj kot 5 meritev. Ali vseeno pošljem trenutno povprečje?")) return;
+        }
+		
+		pause_updates = true;
+
+        const avgDelta = countDelta > 0 ? (sumDelta / countDelta) : 0;
+        const btns = document.querySelectorAll('button');
+        if (!isAutoSave) btns.forEach(b => b.disabled = true);
+
+        try {
+            // 1. Posodobi offsets.json preko Django API-ja (takojšen učinek za trenutne firmware)
+            const apiResponse = await fetch("/api/set-pressure-offset/", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    sensor_id: calibrateSensorId,
+                    offset: avgDelta
+                })
+            });
+
+            const apiResult = await apiResponse.json();
+
+            if (!apiResult.success) {
+                throw new Error(apiResult.error || "Napaka pri posodabljanju JSON datoteke");
+            }
+
+            console.log("offsets.json updated:", apiResult);
+
+            // 2. Pošlji "reload offsets" preko MQTT (senzorji bodo takoj prebrali novo datoteko)
+            let identifier = null;
+            const calTopic = sensor_to_mqtt_topic[calibrateSensorId];
+            if (calTopic) {
+                const parts = calTopic.split('/');
+                if (parts.length >= 3) identifier = parts[2];
+            }
+            if (!identifier) identifier = "sensor_" + calibrateSensorId;
+
+            const cmdTopic = `vila/sentjane/asgard/cmd/${identifier}`;
+            
+            // Pošlji reload ukaz (to že podpira trenutni firmware)
+            client.publish(cmdTopic, "reload offsets", { qos: 1 });
+            client.publish("vila/sentjane/asgard/cmd/all", "reload offsets", { qos: 1 });
+
+            // 3. Pošlji tudi novi strukturirani ukaz (za prihodnje firmware različice)
+            const structuredPayload = JSON.stringify({
+                command: "set_pressure_offset",
+                value: parseFloat(avgDelta.toFixed(2)),
+                parameter: "pressure",
+                ref_sensor_id: referenceSensorId,
+                json_key: apiResult.json_key,
+                timestamp: new Date().toISOString()
+            });
+            client.publish(cmdTopic, structuredPayload, { qos: 1 });
+
+            // Uspeh
+            const successMessage = isAutoSave 
+                ? `Auto-save uspešen: ${apiResult.new_total_offset} Pa (${apiResult.json_key})`
+                : `✅ Offset uspešno nastavljen!\n\n` +
+                  `Soba: ${apiResult.room}   (ključ: ${apiResult.json_key})\n\n` +
+                  `Prejšnji total offset v JSON: ${apiResult.previous_total_offset} Pa\n` +
+                  `Izmerjena delta (dodatek):     ${apiResult.delta_applied} Pa\n` +
+                  `════════════════════════════════════\n` +
+                  `NOVI TOTAL OFFSET v JSON:      ${apiResult.new_total_offset} Pa\n\n` +
+                  `• offsets.json posodobljen (seštevanje)\n` +
+                  `• MQTT "reload offsets" poslan\n` +
+                  `• Novo povprečenje se začenja...`;
+
+            if (isAutoSave) {
+                // Tiho obvestilo za auto-save
+                const lastEl = document.getElementById('last-auto-save');
+                if (lastEl) lastEl.textContent = new Date().toLocaleTimeString('sl-SI', {hour:'2-digit', minute:'2-digit'});
+                console.log('%c[AutoSave] ' + successMessage, 'color:#4ade80');
+            } else {
+				alert(successMessage);
+				btns.forEach(b => b.disabled = false);
+            }
+
+        } catch (err) {
+            console.error(err);
+            alert("Napaka: " + (err.message || err));
+            btns.forEach(b => b.disabled = false);
+        }
+
+        // Ponastavi povprečje za merjenje stabilnosti po nastavitvi
+        if (isAutoSave == false)  resetAveraging();
+		setTimeout(function() { pause_updates = false; }, 3000);
+    }
+    function initChart() {
+        const ctx = document.getElementById('calibChart').getContext('2d');
+        chart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: [],
+                datasets: [{
+                    label: 'ΔP (ref − cal) [Pa]',
+                    data: [],
+                    borderColor: '#34d399',
+                    backgroundColor: 'rgba(52, 211, 153, 0.1)',
+                    borderWidth: 2.5,
+                    tension: 0.25,
+                    pointRadius: 0,
+                    fill: true
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                animation: { duration: 0 },
+                scales: {
+                    y: {
+                        beginAtZero: false,
+                        grid: { color: 'rgba(148,163,184,0.15)' },
+                        title: { display: true, text: 'Razlika (Pa)', color: '#94a3b8', font: { size: 11 } }
+                    },
+                    x: {
+                        grid: { color: 'rgba(148,163,184,0.1)' },
+                        ticks: { maxRotation: 0, color: '#64748b', font: { size: 10 } }
+                    }
+                },
+                plugins: {
+                    legend: { display: false },
+                    tooltip: { mode: 'index', intersect: false }
+                }
+            }
+        });
+    }
+
+    function saveAutoSaveSettings() {
+        const enabled = document.getElementById('auto-save-enabled').checked;
+        const interval = parseInt(document.getElementById('auto-save-interval').value) || 10;
+        const resetAfter = document.getElementById('auto-save-reset').checked;
+
+        localStorage.setItem('calib_autoSaveEnabled', enabled);
+        localStorage.setItem('calib_autoSaveInterval', interval);
+        localStorage.setItem('calib_autoSaveResetAfter', resetAfter);
+    }
+
+    function loadAutoSaveSettings() {
+        const enabled = localStorage.getItem('calib_autoSaveEnabled') === 'true';
+        const interval = parseInt(localStorage.getItem('calib_autoSaveInterval')) || 10;
+        const resetAfter = localStorage.getItem('calib_autoSaveResetAfter') !== 'false'; // default true
+
+        document.getElementById('auto-save-enabled').checked = enabled;
+        document.getElementById('auto-save-interval').value = interval;
+        document.getElementById('auto-save-reset').checked = resetAfter;
+
+        return { enabled, interval, resetAfter };
+    }
+
+    function startAutoSaveTimer() {
+        if (autoSaveTimer) clearInterval(autoSaveTimer);
+
+        const settings = loadAutoSaveSettings();
+        if (!settings.enabled) return;
+
+        const intervalMs = settings.interval * 60 * 1000;
+
+        autoSaveTimer = setInterval(async () => {
+            if (!referenceSensorId || !calibrateSensorId || countDelta < 3) {
+                console.log('[AutoSave] Preskočen – premalo podatkov ali nista izbrana senzorja');
+                return;
+            }
+
+            console.log('[AutoSave] Izvajam avtomatsko shranjevanje...');
+            await setOffsetAndPublish(true);   // true = auto save mode (tiho)
+
+            // Po potrebi resetiraj povprečje
+            if (document.getElementById('auto-save-reset').checked) {
+                resetAveraging(true); // keep chart
+            }
+        }, intervalMs);
+
+        console.log(`[AutoSave] Timer zagnan: vsakih ${settings.interval} min`);
+    }
+    let autoSaveTimer = null;
+    function setupAutoSaveListeners() {
+        const enabledEl = document.getElementById('auto-save-enabled');
+        const intervalEl = document.getElementById('auto-save-interval');
+        const resetEl = document.getElementById('auto-save-reset');
+
+        const handler = () => {
+            saveAutoSaveSettings();
+            startAutoSaveTimer(); // restart timer z novimi nastavitvami
+        };
+
+        enabledEl.addEventListener('change', handler);
+        intervalEl.addEventListener('change', handler);
+        resetEl.addEventListener('change', saveAutoSaveSettings);
+    }
+    document.addEventListener('DOMContentLoaded', () => {
+        initChart();
+        
+        // Zaženi periodično zahtevanje podatkov o tlaku
+        //client.publish("vila/sentjane/asgard/cmd/all", "pressure", { qos: 0 });
+        setInterval(publishLiveDataMode, 8000);
+        
+        // === Auto Save inicializacija ===
+        loadAutoSaveSettings();
+        setupAutoSaveListeners();
+        startAutoSaveTimer();           // zaženi timer če je omogočen
+		
+        // Če imaš že izbrane vrednosti v URL (opcijsko)
+        // document.getElementById('ref-sensor').value = ... 
+    });
+
+    // Pomožna funkcija za morebitno zunanjo uporabo
+    window.forcePublishPressure = () => client.publish("vila/sentjane/asgard/cmd/all", "pressure", { qos: 0 });
+</script>
+{% endblock %}
