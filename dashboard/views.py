@@ -907,7 +907,7 @@ def room_graph_fragment(request, room_id):
         hourly = df.groupby(['hour', 'parameter'])['value'].mean().reset_index()
         fig = px.line(hourly, x='hour', y='value', color='parameter',
                      title='Dnevni vzorec (povprečje po uri)', markers=True)
-        fig.update_layout(xaxis=dict(tickmode='linear', dtick=1)
+        fig.update_layout(xaxis=dict(tickmode='linear', dtick=1))
 
     elif view_type == 'weekly':
         df['dayofweek'] = df['timestamp'].dt.day_name()
@@ -1199,7 +1199,7 @@ def parameter_detail(request, parameter_id):
             'timestamp', 
             'value', 
             'sensor__room__name'
-        ))
+        )))
         df['timestamp'] = pd.to_datetime(df['timestamp'])
         df = df.rename(columns={'sensor__room__name': 'room'})
 
