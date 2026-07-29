@@ -1,0 +1,163 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}MQTT Debug - Air Quality Control{% endblock %}
+
+{% block content %}
+<div class="max-w-7xl mx-auto">
+    <div class="flex justify-between items-center mb-6">
+        <h1 class="text-3xl font-bold text-white">MQTT Debug – Vsi senzorji</h1>
+        <div id="status" class="text-sm text-slate-400">Povezujem se na Mosquitto...</div>
+    </div>
+
+    <div class="glass rounded-3xl p-6 mb-6">
+        <div class="flex flex-wrap gap-4 items-end">
+            <!-- Subscribe topic -->
+            <div class="flex-1 min-w-[200px]">
+                <label class="block text-xs text-slate-400 mb-1">Subscribe topic</label>
+                <input type="text" id="subscribe-topic" value="vila/sentjane/#"
+                       class="w-full bg-slate-900 border border-slate-700 rounded-2xl px-4 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-blue-500">
+            </div>
+            <button onclick="changeSubscription()"
+                    class="bg-emerald-600 hover:bg-emerald-500 text-white font-medium px-5 py-2.5 rounded-2xl transition-all active:scale-95">
+                Naroči se na topic
+            </button>
+
+            <!-- Publish -->
+            <div class="flex-1 min-w-[180px]">
+                <label class="block text-xs text-slate-400 mb-1">Publish Topic</label>
+                <input type="text" id="pub-topic" value="vila/sentjane/test"
+                       class="w-full bg-slate-900 border border-slate-700 rounded-2xl px-4 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-blue-500">
+            </div>
+            <div class="flex-[2] min-w-[220px]">
+                <label class="block text-xs text-slate-400 mb-1">Message / Payload</label>
+                <input type="text" id="pub-message" value='{"test": 123}'
+                       class="w-full bg-slate-900 border border-slate-700 rounded-2xl px-4 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-blue-500 font-mono">
+            </div>
+            <button onclick="publishMessage()"
+                    class="bg-blue-600 hover:bg-blue-500 text-white font-medium px-5 py-2.5 rounded-2xl transition-all active:scale-95">
+                Pošlji
+            </button>
+
+            <button onclick="clearTable()"
+                    class="bg-red-600 hover:bg-red-500 text-white font-medium px-5 py-2.5 rounded-2xl transition-all active:scale-95">
+                Počisti tabelo
+            </button>
+        </div>
+    </div>
+
+    <div class="glass rounded-3xl overflow-hidden">
+        <div class="overflow-x-auto max-h-[65vh]">
+            <table class="w-full text-sm">
+                <thead class="sticky top-0 bg-slate-900/95 backdrop-blur z-10">
+                    <tr class="border-b border-slate-700">
+                        <th class="text-left py-3 px-4 text-slate-400 font-medium w-32">Čas</th>
+                        <th class="text-left py-3 px-4 text-slate-400 font-medium">Topic</th>
+                        <th class="text-left py-3 px-4 text-slate-400 font-medium">Sporočilo (Payload)</th>
+                    </tr>
+                </thead>
+                <tbody id="log-table" class="divide-y divide-slate-800"></tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    let debugClient;
+    let currentSubscription = "vila/sentjane/#";
+
+    function connectMQTT() {
+        // Uporabimo isti broker kot v base.html (lahko spremeniš v ws://localhost:9001)
+        debugClient = mqtt.connect('ws://192.168.1.95:9001', {
+            reconnectPeriod: 3000,
+            connectTimeout: 10000
+        });
+
+        debugClient.on('connect', function () {
+            document.getElementById('status').innerHTML =
+                '<span class="text-emerald-400">✅ Povezan na Mosquitto (ws://192.168.1.95:9001)</span>';
+            subscribeToTopic(currentSubscription);
+        });
+
+        debugClient.on('close', function () {
+            document.getElementById('status').innerHTML =
+                '<span class="text-red-400">● Offline – poskušam znova...</span>';
+        });
+
+        debugClient.on('error', function (err) {
+            console.error('MQTT napaka:', err);
+            document.getElementById('status').innerHTML =
+                '<span class="text-red-400">Napaka povezave</span>';
+        });
+
+        debugClient.on('message', function (topic, message) {
+            const time = new Date().toLocaleTimeString('sl-SI', {
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit'
+            });
+            const payload = message.toString();
+
+            const row = document.createElement('tr');
+            row.className = 'hover:bg-slate-800/60 transition-colors';
+            row.innerHTML = `
+                <td class="py-2.5 px-4 text-slate-400 font-mono text-xs whitespace-nowrap">${time}</td>
+                <td class="py-2.5 px-4 text-blue-400 font-mono text-xs break-all">${topic}</td>
+                <td class="py-2.5 px-4 font-mono text-xs break-all text-slate-200">${payload.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</td>
+            `;
+
+            const tableBody = document.getElementById('log-table');
+            tableBody.insertBefore(row, tableBody.firstChild);
+
+            // Avtomatsko čiščenje
+            const max = 300;
+            if (tableBody.children.length > max) {
+                tableBody.removeChild(tableBody.lastChild);
+            }
+        });
+    }
+
+    function subscribeToTopic(topic) {
+        if (debugClient) {
+            debugClient.unsubscribe(currentSubscription);
+            debugClient.subscribe(topic, function (err) {
+                if (!err) {
+                    currentSubscription = topic;
+                    console.log(`Naročen na: ${topic}`);
+                } else {
+                    console.error('Napaka pri naročanju:', err);
+                }
+            });
+        }
+    }
+
+    function changeSubscription() {
+        const newTopic = document.getElementById('subscribe-topic').value.trim();
+        if (newTopic) {
+            subscribeToTopic(newTopic);
+        }
+    }
+
+    function publishMessage() {
+        const topic = document.getElementById('pub-topic').value.trim();
+        const message = document.getElementById('pub-message').value.trim();
+        if (!topic || !debugClient) {
+            alert("Topic ne sme biti prazen!");
+            return;
+        }
+
+        debugClient.publish(topic, message, { qos: 0 }, function (err) {
+            if (err) console.error("Napaka pri pošiljanju:", err);
+            else console.log(`📤 Poslano → ${topic}: ${message}`);
+        });
+    }
+
+    function clearTable() {
+        document.getElementById('log-table').innerHTML = '';
+    }
+
+    document.addEventListener('DOMContentLoaded', connectMQTT);
+</script>
+{% endblock %}

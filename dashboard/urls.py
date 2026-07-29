@@ -18,4 +18,5 @@ urlpatterns = [
     path('custom/<int:dashboard_id>/', custom_dashboard, name='custom_dashboard'),
     path('pressure-calibration/', pressure_calibration_view, name='pressure_calibration'),
     path('api/set-pressure-offset/', set_pressure_offset_api, name='set_pressure_offset_api'),
+    path('debug-mqtt/', debug_mqtt, name='debug_mqtt'),
 ]
