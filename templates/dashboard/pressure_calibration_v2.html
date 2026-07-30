@@ -9,7 +9,7 @@
     <div class="flex justify-between items-center mb-8">
         <div>
             <h1 class="text-4xl font-bold text-white">Kalibracija senzorjev tlaka</h1>
-            <p class="text-slate-400 mt-1">Primerjava dveh senzorjev + višinska korekcija + std. odklon</p>
+            <p class="text-slate-400 mt-1">Primerjava dveh senzorjev + višinska korekcija + std. odklon (razlika in vsak senzor)</p>
         </div>
         <a href="/differential-pressure/" class="text-blue-400 hover:text-blue-300 flex items-center gap-2">
             ← Nazaj na diferencialni tlak
@@ -128,17 +128,25 @@
             </div>
         </div>
 
-        <!-- Standardni odklon -->
-        <div class="mt-4 pt-4 border-t border-slate-700 grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
+        <!-- Standardni odklon: razlika + vsak senzor posebej -->
+        <div class="mt-4 pt-4 border-t border-slate-700 grid grid-cols-2 md:grid-cols-5 gap-4 text-sm">
             <div>
-                <div class="text-slate-400 text-xs">Trenutni std. odklon</div>
+                <div class="text-slate-400 text-xs">Std. odklon P_ref</div>
+                <div id="ref-stddev" class="font-mono text-xl font-semibold">— Pa</div>
+            </div>
+            <div>
+                <div class="text-slate-400 text-xs">Std. odklon P_cal</div>
+                <div id="cal-stddev" class="font-mono text-xl font-semibold">— Pa</div>
+            </div>
+            <div>
+                <div class="text-slate-400 text-xs">Trenutni std. odklon Δ</div>
                 <div id="current-stddev" class="font-mono text-xl font-semibold">— Pa</div>
             </div>
             <div>
-                <div class="text-slate-400 text-xs">Zgodovinsko povpr. std. odklon</div>
+                <div class="text-slate-400 text-xs">Zgodovinsko povpr. std. Δ</div>
                 <div id="historical-stddev" class="font-mono text-xl font-semibold">— Pa</div>
             </div>
-            <div class="flex items-end justify-end">
+            <div class="flex items-end justify-end col-span-2 md:col-span-1">
                 <button onclick="resetStatisticalHistory()" 
                         class="px-3 py-1.5 text-xs bg-slate-700 hover:bg-red-900/60 rounded-xl flex items-center gap-1.5">
                     <i class="fas fa-trash-alt"></i> 
@@ -146,6 +154,9 @@
                 </button>
             </div>
         </div>
+        <p class="text-[10px] text-slate-500 mt-2">
+            Visok std. odklon posameznega senzorja lahko pomeni problematične (šumeče) meritve. Primerjaj z std. odklonom razlike.
+        </p>
     </div>
 
     <!-- Graf -->
@@ -159,7 +170,7 @@
                     <i class="fas fa-undo"></i> Ponastavi povprečje
                 </button>
                 <button onclick="setOffsetAndPublish()" class="px-6 py-2 bg-emerald-600 hover:bg-emerald-500 rounded-2xl text-sm font-medium flex items-center gap-2 text-white">
-                    <i class="fas fa-paper-plane"></i> Nastavi offset &amp; Pošlji MQTT
+                    <i class="fas fa-paper-plane"></i> Nastavi offset & Pošlji MQTT
                 </button>
             </div>
         </div>
@@ -174,7 +185,7 @@
 {% block scripts %}
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script>
-// ======================== GLOBALNE SPREMENLJIVKE ========================
+// ======================== GLOBAL VARIABLES ========================
 let refHeightCm = 0;
 let heightConversionFactor = 0.119;
 
@@ -188,6 +199,8 @@ let sumCal = 0, countCal = 0;
 let startTime = null;
 
 let recentDeltas = [];
+let recentRefValues = [];
+let recentCalValues = [];
 const MAX_RECENT_DELTAS = 120;
 
 let historicalStdSum = 0;
@@ -258,7 +271,7 @@ client.on('message', function (topic, message) {
         client.publish(cmdTopic, "pressure", { qos: 0 });
     }
 
-// ======================== VIŠINA ========================
+// ======================== HEIGHT ========================
 function updateHeightCorrection() {
     const infoEl = document.getElementById('height-correction-value');
     if (infoEl) {
@@ -274,7 +287,7 @@ document.getElementById('ref-height-cm').addEventListener('input', function() {
     recalculateCurrentDelta();
 });
 
-// ======================== STD. ODKLON ========================
+// ======================== STD. DEVIATION ========================
 function calculateStdDev(arr) {
     if (arr.length < 5) return 0;
     const mean = arr.reduce((a, b) => a + b) / arr.length;
@@ -282,11 +295,15 @@ function calculateStdDev(arr) {
     return Math.sqrt(variance);
 }
 
-function updateStdDevDisplay(currentStd) {
+function updateStdDevDisplay(currentStd, stdRef, stdCal) {
     const currentEl = document.getElementById('current-stddev');
     const histEl = document.getElementById('historical-stddev');
+    const refStdEl = document.getElementById('ref-stddev');
+    const calStdEl = document.getElementById('cal-stddev');
 
     if (currentEl) currentEl.textContent = currentStd.toFixed(2) + ' Pa';
+    if (refStdEl) refStdEl.textContent = (stdRef || 0).toFixed(2) + ' Pa';
+    if (calStdEl) calStdEl.textContent = (stdCal || 0).toFixed(2) + ' Pa';
 
     if (historicalStdCount > 2 && currentEl) {
         const histAvg = historicalStdSum / historicalStdCount;
@@ -305,12 +322,26 @@ function updateStdDevDisplay(currentStd) {
         }
     }
 
+    // Simple color hint for per-sensor std (high noise)
+    if (refStdEl && stdRef > 0) {
+        refStdEl.classList.remove('text-white', 'text-yellow-400', 'text-red-400');
+        if (stdRef > 2.0) refStdEl.classList.add('text-red-400');
+        else if (stdRef > 1.0) refStdEl.classList.add('text-yellow-400');
+        else refStdEl.classList.add('text-white');
+    }
+    if (calStdEl && stdCal > 0) {
+        calStdEl.classList.remove('text-white', 'text-yellow-400', 'text-red-400');
+        if (stdCal > 2.0) calStdEl.classList.add('text-red-400');
+        else if (stdCal > 1.0) calStdEl.classList.add('text-yellow-400');
+        else calStdEl.classList.add('text-white');
+    }
+
     if (histEl && historicalStdCount > 0) {
         histEl.textContent = (historicalStdSum / historicalStdCount).toFixed(2) + ' Pa';
     }
 }
 
-// ======================== GLAVNA LOGIKA ========================
+// ======================== MAIN LOGIC ========================
 function updateLiveData(data) {
     if (data.parameter_id != parameter_map["pressure"] || pause_updates) return;
     if (!data.sensor_id) return;
@@ -325,15 +356,19 @@ function updateLiveData(data) {
     if (isRef) {
         sumRef += value;
         countRef++;
+        recentRefValues.push(value);
+        if (recentRefValues.length > MAX_RECENT_DELTAS) recentRefValues.shift();
         updateSensorDisplay(referenceSensorId, value, data.time);
     }
     if (isCal) {
         sumCal += value;
         countCal++;
+        recentCalValues.push(value);
+        if (recentCalValues.length > MAX_RECENT_DELTAS) recentCalValues.shift();
         updateSensorDisplay(calibrateSensorId, value, data.time);
     }
 
-    // Vedno posodobi števec (tudi če imamo samo enega senzorja)
+    // Always update counter (even if only one sensor)
     const cntEl = document.getElementById('avg-count');
     if (cntEl) {
         cntEl.textContent = `${countRef + countCal} meritev`;
@@ -341,25 +376,27 @@ function updateLiveData(data) {
 
 if (referenceSensorId && calibrateSensorId && countRef > 0 && countCal > 0) {
 
-    // === TRENUTNA RAZLIKA (iz zadnjih vrednosti) ===
+    // === CURRENT DIFFERENCE (from latest values) ===
     const latestRef = latestValues[referenceSensorId];
     const latestCal = latestValues[calibrateSensorId];
     const heightCorrection = refHeightCm * heightConversionFactor;
     const currentDelta = (latestRef + heightCorrection) - latestCal;
 
-    // === POVPREČNA RAZLIKA (iz povprečij) ===
+    // === AVERAGE DIFFERENCE (from averages) ===
     const avgRef = sumRef / countRef;
     const avgCal = sumCal / countCal;
     const avgDelta = (avgRef + heightCorrection) - avgCal;
 
     updateDeltaDisplays(currentDelta, avgDelta);
 
-    // Std. odklon in graf (uporabi currentDelta ali avgDelta – priporočam currentDelta)
+    // Std. deviation of delta and of each sensor
     recentDeltas.push(currentDelta);
     if (recentDeltas.length > MAX_RECENT_DELTAS) recentDeltas.shift();
 
     const currentStd = calculateStdDev(recentDeltas);
-    updateStdDevDisplay(currentStd);
+    const stdRef = calculateStdDev(recentRefValues);
+    const stdCal = calculateStdDev(recentCalValues);
+    updateStdDevDisplay(currentStd, stdRef, stdCal);
 
         if (chart) {
             const t = new Date().toLocaleTimeString('sl-SI', {hour:'2-digit', minute:'2-digit', second:'2-digit'});
@@ -402,7 +439,7 @@ function updateDeltaDisplays(currentDelta, avgDelta) {
         avgEl.style.color = avgDelta < 0 ? '#f87171' : '#4ade80';
     }
 
-    // števec in čas
+    // counter and duration
     const cntEl = document.getElementById('avg-count');
     const durEl = document.getElementById('avg-duration');
 
@@ -433,16 +470,24 @@ function resetAveraging(keepChart = false) {
     sumCal = 0; countCal = 0;
     startTime = Date.now();
     recentDeltas = [];
+    recentRefValues = [];
+    recentCalValues = [];
 
     const avgEl = document.getElementById('avg-delta');
     const cntEl = document.getElementById('avg-count');
     const durEl = document.getElementById('avg-duration');
     const curEl = document.getElementById('current-delta');
+    const refStdEl = document.getElementById('ref-stddev');
+    const calStdEl = document.getElementById('cal-stddev');
+    const currentStdEl = document.getElementById('current-stddev');
 
     if (avgEl) avgEl.innerHTML = '— Pa';
     if (cntEl) cntEl.textContent = '0 meritev';
     if (durEl) durEl.textContent = '—';
     if (curEl) curEl.innerHTML = '— Pa';
+    if (refStdEl) refStdEl.textContent = '— Pa';
+    if (calStdEl) calStdEl.textContent = '— Pa';
+    if (currentStdEl) currentStdEl.textContent = '— Pa';
 
     if (!keepChart && chart) {
         chart.data.labels = [];
@@ -463,7 +508,7 @@ function resetStatisticalHistory() {
     console.log('%c[Stats] Zgodovina std. odklona resetirana', 'color:#f59e0b');
 }
 
-// ======================== SHRANEvanje ========================
+// ======================== SAVE ========================
 async function setOffsetAndPublish(isAutoSave = false) {
     if (!referenceSensorId || !calibrateSensorId) {
         if (!isAutoSave) alert("Izberi oba senzorja.");
@@ -498,7 +543,7 @@ async function setOffsetAndPublish(isAutoSave = false) {
         const result = await apiRes.json();
         if (!result.success) throw new Error(result.error || "Napaka pri shranjevanju");
 
-        // Pošlji MQTT
+        // Publish MQTT
         let identifier = "sensor_" + calibrateSensorId;
         const calTopic = sensor_to_mqtt_topic[calibrateSensorId];
         if (calTopic) {
@@ -509,7 +554,7 @@ async function setOffsetAndPublish(isAutoSave = false) {
         client.publish(cmdTopic, "reload offsets", { qos: 1 });
         //client.publish("vila/sentjane/asgard/cmd/all", "reload offsets", { qos: 1 });
 
-        // Shrani std. odklon v zgodovino
+        // Save std. deviation of delta to history
         if (recentDeltas.length >= 8) {
             const std = calculateStdDev(recentDeltas);
             historicalStdSum += std;
@@ -570,15 +615,15 @@ function startAutoSaveTimer() {
     }, minutes * 60 * 1000);
 }
 
-    // Izbira referenčnega senzorja
+    // Reference sensor selection
     document.getElementById('ref-sensor').addEventListener('change', function() {
         referenceSensorId = this.value ? parseInt(this.value) : null;
-        resetAveraging(true); // resetiraj povprečje ob menjavi
+        resetAveraging(true); // reset average on change
         //updateNames();
 		publishLiveDataMode();
     });
 
-    // Izbira senzorja za kalibracijo
+    // Calibration sensor selection
     document.getElementById('cal-sensor').addEventListener('change', function() {
         calibrateSensorId = this.value ? parseInt(this.value) : null;
         if (referenceSensorId && calibrateSensorId && referenceSensorId === calibrateSensorId) {
@@ -600,7 +645,7 @@ function setupAutoSaveListeners() {
     });
 }
 
-// ======================== INICIALIZACIJA ========================
+// ======================== INITIALIZATION ========================
 function initChart() {
     const ctx = document.getElementById('calibChart').getContext('2d');
     chart = new Chart(ctx, {
@@ -618,7 +663,7 @@ function initChart() {
 document.addEventListener('DOMContentLoaded', () => {
     initChart();
 
-    // Naloži shranjeno višino
+    // Load saved height
     const savedHeight = localStorage.getItem('calib_refHeightCm');
     if (savedHeight) {
         refHeightCm = parseFloat(savedHeight);
@@ -626,7 +671,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     updateHeightCorrection();
 
-    // Naloži zgodovino std. odklona
+    // Load historical std. deviation
     historicalStdSum = parseFloat(localStorage.getItem('calib_historicalStdSum')) || 0;
     historicalStdCount = parseInt(localStorage.getItem('calib_historicalStdCount')) || 0;
 
@@ -635,7 +680,7 @@ document.addEventListener('DOMContentLoaded', () => {
     setupAutoSaveListeners();
     startAutoSaveTimer();
 
-    // Zaženi MQTT
+    // Start MQTT pressure requests
     //client.publish("vila/sentjane/asgard/cmd/all", "pressure", { qos: 0 });
     setInterval(publishLiveDataMode, 8000);
 });
