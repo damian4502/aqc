@@ -163,30 +163,39 @@
 </style>
 <script>
 (function () {
-    const LS_KEYS = {
+    'use strict';
+
+    var LS_KEYS = {
         baud: 'serial_monitor_baud',
         maxMsg: 'serial_monitor_max',
         lineEnding: 'serial_monitor_ending',
         autoScroll: 'serial_monitor_autoscroll',
         timestamps: 'serial_monitor_timestamps',
-        hex: 'serial_monitor_hex',
+        hex: 'serial_monitor_hex'
     };
 
-    const ENDINGS = {
+    var ENDINGS = {
         lf: String.fromCharCode(10),
         crlf: String.fromCharCode(13, 10),
         cr: String.fromCharCode(13),
         none: ''
     };
 
-    let port = null;
-    let reader = null;
-    let keepReading = false;
-    let paused = false;
-    let lineBuffer = '';
-    let readPromise = null;
-    const textEncoder = new TextEncoder();
-    const textDecoder = new TextDecoder();
+    var port = null;
+    var reader = null;
+    var writer = null;
+    var keepReading = false;
+    var paused = false;
+    var lineBuffer = '';
+    var textEncoder = new TextEncoder();
+    var textDecoder = new TextDecoder();
+    var closing = false;
+
+    // Batch DOM updates so high-rate serial traffic cannot freeze the tab
+    var pendingRows = [];
+    var flushScheduled = false;
+    var FLUSH_MS = 50;
+    var MAX_PENDING = 200;
 
     function setStatus(html) {
         document.getElementById('status').innerHTML = html;
@@ -203,12 +212,12 @@
     }
 
     function getMaxMessages() {
-        const n = parseInt(document.getElementById('max-messages').value, 10);
+        var n = parseInt(document.getElementById('max-messages').value, 10);
         return (isNaN(n) || n < 10) ? 500 : Math.min(n, 5000);
     }
 
     function getLineEnding() {
-        const key = document.getElementById('line-ending').value;
+        var key = document.getElementById('line-ending').value;
         return ENDINGS[key] !== undefined ? ENDINGS[key] : String.fromCharCode(10);
     }
 
@@ -221,15 +230,17 @@
     }
 
     function toHex(str) {
-        return Array.from(str).map(function (ch) {
-            return ch.charCodeAt(0).toString(16).padStart(2, '0').toUpperCase();
-        }).join(' ');
+        var out = [];
+        for (var i = 0; i < str.length; i++) {
+            out.push(str.charCodeAt(i).toString(16).padStart(2, '0').toUpperCase());
+        }
+        return out.join(' ');
     }
 
     function formatPortInfo(p) {
         try {
-            const info = p.getInfo ? p.getInfo() : {};
-            const parts = [];
+            var info = p.getInfo ? p.getInfo() : {};
+            var parts = [];
             if (info.usbVendorId != null) {
                 parts.push('VID 0x' + info.usbVendorId.toString(16).padStart(4, '0'));
             }
@@ -242,41 +253,68 @@
         }
     }
 
-    function appendLog(direction, message) {
+    function queueLog(direction, message) {
         if (paused && direction === 'rx') return;
+        pendingRows.push({ direction: direction, message: message, ts: Date.now() });
+        if (pendingRows.length > MAX_PENDING) {
+            pendingRows = pendingRows.slice(pendingRows.length - MAX_PENDING);
+        }
+        scheduleFlush();
+    }
 
-        const empty = document.getElementById('empty-state');
+    function scheduleFlush() {
+        if (flushScheduled) return;
+        flushScheduled = true;
+        setTimeout(flushLogs, FLUSH_MS);
+    }
+
+    function flushLogs() {
+        flushScheduled = false;
+        if (!pendingRows.length) return;
+
+        var batch = pendingRows;
+        pendingRows = [];
+
+        var empty = document.getElementById('empty-state');
         if (empty) empty.classList.add('hidden');
 
-        const showTs = document.getElementById('show-timestamps').checked;
-        const showHex = document.getElementById('show-hex').checked;
-        const now = new Date();
-        const time = now.toLocaleTimeString('sl-SI', {
-            hour: '2-digit',
-            minute: '2-digit',
-            second: '2-digit'
-        }) + '.' + String(now.getMilliseconds()).padStart(3, '0');
+        var showTs = document.getElementById('show-timestamps').checked;
+        var showHex = document.getElementById('show-hex').checked;
+        var tableBody = document.getElementById('log-table');
+        var frag = document.createDocumentFragment();
 
-        let displayMsg = message;
-        if (showHex && direction !== 'sys') {
-            displayMsg = toHex(message) + (message.length ? '  |  ' + message : '');
+        for (var i = 0; i < batch.length; i++) {
+            var item = batch[i];
+            var direction = item.direction;
+            var message = item.message;
+            var d = new Date(item.ts);
+            var time = d.toLocaleTimeString('sl-SI', {
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit'
+            }) + '.' + String(d.getMilliseconds()).padStart(3, '0');
+
+            var displayMsg = message;
+            if (showHex && direction !== 'sys') {
+                displayMsg = toHex(message) + (message.length ? '  |  ' + message : '');
+            }
+
+            var dirLabel = direction === 'rx' ? 'RX' : direction === 'tx' ? 'TX' : 'SYS';
+            var dirClass = direction === 'rx' ? 'dir-rx' : direction === 'tx' ? 'dir-tx' : 'dir-sys';
+            var msgClass = direction === 'rx' ? 'msg-rx' : direction === 'tx' ? 'msg-tx' : 'msg-sys';
+
+            var row = document.createElement('tr');
+            row.className = 'hover:bg-slate-800/60 transition-colors';
+            row.innerHTML =
+                '<td class="py-2 px-4 text-slate-500 font-mono text-xs whitespace-nowrap">' + (showTs ? escapeHtml(time) : '') + '</td>' +
+                '<td class="py-2 px-4 font-mono text-xs font-semibold ' + dirClass + '">' + dirLabel + '</td>' +
+                '<td class="py-2 px-4 font-mono text-xs break-all whitespace-pre-wrap ' + msgClass + '">' + escapeHtml(displayMsg) + '</td>';
+            frag.appendChild(row);
         }
 
-        const dirLabel = direction === 'rx' ? 'RX' : direction === 'tx' ? 'TX' : 'SYS';
-        const dirClass = direction === 'rx' ? 'dir-rx' : direction === 'tx' ? 'dir-tx' : 'dir-sys';
-        const msgClass = direction === 'rx' ? 'msg-rx' : direction === 'tx' ? 'msg-tx' : 'msg-sys';
+        tableBody.appendChild(frag);
 
-        const row = document.createElement('tr');
-        row.className = 'hover:bg-slate-800/60 transition-colors';
-        row.innerHTML =
-            '<td class="py-2 px-4 text-slate-500 font-mono text-xs whitespace-nowrap">' + (showTs ? escapeHtml(time) : '') + '</td>' +
-            '<td class="py-2 px-4 font-mono text-xs font-semibold ' + dirClass + '">' + dirLabel + '</td>' +
-            '<td class="py-2 px-4 font-mono text-xs break-all whitespace-pre-wrap ' + msgClass + '">' + escapeHtml(displayMsg) + '</td>';
-
-        const tableBody = document.getElementById('log-table');
-        tableBody.appendChild(row);
-
-        const max = getMaxMessages();
+        var max = getMaxMessages();
         while (tableBody.children.length > max) {
             tableBody.removeChild(tableBody.firstChild);
         }
@@ -284,57 +322,81 @@
         document.getElementById('line-count').textContent = tableBody.children.length + ' vrstic';
 
         if (document.getElementById('auto-scroll').checked) {
-            const scroller = document.getElementById('log-scroll');
+            var scroller = document.getElementById('log-scroll');
             scroller.scrollTop = scroller.scrollHeight;
         }
     }
 
     function splitLines(text) {
-        // Normalize CRLF / CR / LF without fragile regex literals
-        const lf = String.fromCharCode(10);
-        const cr = String.fromCharCode(13);
-        const normalized = text.split(cr + lf).join(lf).split(cr).join(lf);
-        return normalized.split(lf);
+        var lf = String.fromCharCode(10);
+        var cr = String.fromCharCode(13);
+        return text.split(cr + lf).join(lf).split(cr).join(lf).split(lf);
     }
 
     function processIncomingText(text) {
         lineBuffer += text;
-        const parts = splitLines(lineBuffer);
+        // Cap buffer if device floods binary noise without newlines
+        if (lineBuffer.length > 65536) {
+            queueLog('sys', 'Buffer prevelik – flush ' + lineBuffer.length + ' znakov');
+            queueLog('rx', lineBuffer.slice(0, 4096) + '…');
+            lineBuffer = '';
+            return;
+        }
+        var parts = splitLines(lineBuffer);
         lineBuffer = parts.pop() || '';
-        for (let i = 0; i < parts.length; i++) {
-            appendLog('rx', parts[i]);
+        for (var i = 0; i < parts.length; i++) {
+            queueLog('rx', parts[i]);
         }
     }
 
+    /**
+     * Single-pass read loop. Do NOT re-acquire the reader in a tight outer
+     * loop — that freezes the browser when the stream ends or errors.
+     */
     async function readLoop() {
-        while (port && port.readable && keepReading) {
-            reader = port.readable.getReader();
-            try {
-                while (keepReading) {
-                    const result = await reader.read();
-                    if (result.done) break;
-                    if (result.value && result.value.byteLength) {
-                        processIncomingText(textDecoder.decode(result.value, { stream: true }));
-                    }
-                }
-            } catch (err) {
-                if (keepReading) {
-                    appendLog('sys', 'Napaka branja: ' + (err.message || err));
-                    setStatus('<span class="text-red-400">Napaka branja</span>');
-                }
-            } finally {
-                try { reader.releaseLock(); } catch (e) {}
-                reader = null;
-            }
-        }
+        if (!port || !port.readable) return;
+
+        reader = port.readable.getReader();
         try {
-            const rest = textDecoder.decode();
-            if (rest) processIncomingText(rest);
+            while (keepReading) {
+                var result = await reader.read();
+                if (result.done) {
+                    break;
+                }
+                if (result.value && result.value.byteLength) {
+                    processIncomingText(textDecoder.decode(result.value, { stream: true }));
+                }
+            }
+        } catch (err) {
+            if (keepReading && !closing) {
+                queueLog('sys', 'Napaka branja: ' + (err && err.message ? err.message : err));
+                setStatus('<span class="text-red-400">Napaka branja</span>');
+            }
+        } finally {
+            try {
+                var rest = textDecoder.decode();
+                if (rest) processIncomingText(rest);
+            } catch (e) {}
             if (lineBuffer) {
-                appendLog('rx', lineBuffer);
+                queueLog('rx', lineBuffer);
                 lineBuffer = '';
             }
-        } catch (e) {}
+            try { reader.releaseLock(); } catch (e) {}
+            reader = null;
+
+            // Stream ended unexpectedly while still supposed to be connected
+            if (keepReading && !closing) {
+                keepReading = false;
+                setConnectedUI(false);
+                setStatus('<span class="text-amber-400">Povezava prekinjena (stream)</span>');
+                queueLog('sys', 'Serijski stream se je zaprl');
+                try {
+                    if (port) await port.close();
+                } catch (e) {}
+                port = null;
+                document.getElementById('port-info').textContent = 'Port: —';
+            }
+        }
     }
 
     async function connectSerial() {
@@ -344,63 +406,72 @@
             return;
         }
 
-        try {
-            port = await navigator.serial.requestPort();
-            const baudRate = parseInt(document.getElementById('baud-rate').value, 10) || 115200;
-            const dataBits = parseInt(document.getElementById('data-bits').value, 10) || 8;
-            const stopBits = parseInt(document.getElementById('stop-bits').value, 10) || 1;
-            const parity = document.getElementById('parity').value || 'none';
+        if (port) {
+            await disconnectSerial();
+        }
 
-            await port.open({
+        closing = false;
+
+        try {
+            var selected = await navigator.serial.requestPort();
+            var baudRate = parseInt(document.getElementById('baud-rate').value, 10) || 115200;
+            var dataBits = parseInt(document.getElementById('data-bits').value, 10) || 8;
+            var stopBits = parseInt(document.getElementById('stop-bits').value, 10) || 1;
+            var parity = document.getElementById('parity').value || 'none';
+
+            setStatus('<span class="text-slate-300">Odpiram port…</span>');
+
+            await selected.open({
                 baudRate: baudRate,
                 dataBits: dataBits,
                 stopBits: stopBits,
                 parity: parity,
-                bufferSize: 4096
+                bufferSize: 8192,
+                flowControl: 'none'
             });
 
+            port = selected;
             keepReading = true;
             setConnectedUI(true);
             document.getElementById('port-info').textContent = 'Port: ' + formatPortInfo(port);
             setStatus('<span class="text-emerald-400">Povezano · ' + baudRate + ' baud</span>');
-            appendLog('sys', 'Povezava odprta @ ' + baudRate + ' baud');
+            queueLog('sys', 'Povezava odprta @ ' + baudRate + ' baud');
             localStorage.setItem(LS_KEYS.baud, String(baudRate));
 
-            port.addEventListener('disconnect', onPortDisconnect);
-            readPromise = readLoop();
+            // Fire-and-forget; errors are handled inside readLoop
+            readLoop().catch(function (err) {
+                console.error('readLoop', err);
+            });
         } catch (err) {
             if (err && err.name === 'NotFoundError') {
                 setStatus('<span class="text-slate-400">Izbor porta preklican</span>');
                 return;
             }
             console.error(err);
-            setStatus('<span class="text-red-400">Napaka: ' + escapeHtml(err.message || String(err)) + '</span>');
-            appendLog('sys', 'Napaka povezave: ' + (err.message || err));
+            setStatus('<span class="text-red-400">Napaka: ' + escapeHtml(err && err.message ? err.message : String(err)) + '</span>');
+            queueLog('sys', 'Napaka povezave: ' + (err && err.message ? err.message : err));
             await cleanupConnection(false);
         }
     }
 
-    function onPortDisconnect() {
-        appendLog('sys', 'Naprava odklopljena');
-        cleanupConnection(false);
-    }
-
     async function cleanupConnection(manual) {
+        if (closing) return;
+        closing = true;
         keepReading = false;
 
+        // Cancel reader first so read() unblocks (do not await the whole readLoop)
         if (reader) {
             try { await reader.cancel(); } catch (e) {}
             try { reader.releaseLock(); } catch (e) {}
             reader = null;
         }
 
-        if (readPromise) {
-            try { await readPromise; } catch (e) {}
-            readPromise = null;
+        if (writer) {
+            try { writer.releaseLock(); } catch (e) {}
+            writer = null;
         }
 
         if (port) {
-            try { port.removeEventListener('disconnect', onPortDisconnect); } catch (e) {}
             try { await port.close(); } catch (e) {}
             port = null;
         }
@@ -408,12 +479,15 @@
         lineBuffer = '';
         setConnectedUI(false);
         document.getElementById('port-info').textContent = 'Port: —';
+
         if (manual) {
             setStatus('<span class="text-slate-400">Povezava prekinjena</span>');
-            appendLog('sys', 'Povezava ročno prekinjena');
-        } else {
+            queueLog('sys', 'Povezava ročno prekinjena');
+        } else if (document.getElementById('status').textContent.indexOf('Napaka') === -1) {
             setStatus('<span class="text-slate-400">Ni povezave</span>');
         }
+
+        closing = false;
     }
 
     async function disconnectSerial() {
@@ -425,25 +499,26 @@
             setStatus('<span class="text-red-400">Ni odprtega porta</span>');
             return;
         }
-        const input = document.getElementById('send-message');
-        const msg = input.value;
-        const ending = getLineEnding();
-        const payload = msg + ending;
+        var input = document.getElementById('send-message');
+        var msg = input.value;
+        var ending = getLineEnding();
+        var payload = msg + ending;
 
         try {
-            const w = port.writable.getWriter();
+            var w = port.writable.getWriter();
             await w.write(textEncoder.encode(payload));
             w.releaseLock();
-            const endingKey = document.getElementById('line-ending').value;
-            const marker = endingKey === 'crlf' ? ' [CRLF]' : endingKey === 'lf' ? ' [LF]' : endingKey === 'cr' ? ' [CR]' : '';
-            appendLog('tx', msg + marker);
+            var endingKey = document.getElementById('line-ending').value;
+            var marker = endingKey === 'crlf' ? ' [CRLF]' : endingKey === 'lf' ? ' [LF]' : endingKey === 'cr' ? ' [CR]' : '';
+            queueLog('tx', msg + marker);
             input.select();
         } catch (err) {
-            appendLog('sys', 'Napaka pošiljanja: ' + (err.message || err));
+            queueLog('sys', 'Napaka pošiljanja: ' + (err && err.message ? err.message : err));
         }
     }
 
     function clearTable() {
+        pendingRows = [];
         document.getElementById('log-table').innerHTML = '';
         document.getElementById('line-count').textContent = '0 vrstic';
         document.getElementById('empty-state').classList.remove('hidden');
@@ -451,32 +526,32 @@
 
     function togglePause() {
         paused = !paused;
-        const btn = document.getElementById('btn-pause');
+        var btn = document.getElementById('btn-pause');
         if (paused) {
             btn.textContent = 'Nadaljuj';
             btn.classList.remove('bg-amber-600', 'hover:bg-amber-500');
             btn.classList.add('bg-emerald-700', 'hover:bg-emerald-600');
-            appendLog('sys', 'Premor vklopljen – RX se ne prikazuje');
+            queueLog('sys', 'Premor vklopljen – RX se ne prikazuje');
         } else {
             btn.textContent = 'Premor';
             btn.classList.remove('bg-emerald-700', 'hover:bg-emerald-600');
             btn.classList.add('bg-amber-600', 'hover:bg-amber-500');
-            appendLog('sys', 'Premor izklopljen');
+            queueLog('sys', 'Premor izklopljen');
         }
     }
 
     function loadSettings() {
-        const baud = localStorage.getItem(LS_KEYS.baud);
-        const max = localStorage.getItem(LS_KEYS.maxMsg);
-        const ending = localStorage.getItem(LS_KEYS.lineEnding);
+        var baud = localStorage.getItem(LS_KEYS.baud);
+        var max = localStorage.getItem(LS_KEYS.maxMsg);
+        var ending = localStorage.getItem(LS_KEYS.lineEnding);
         if (baud) document.getElementById('baud-rate').value = baud;
         if (max) document.getElementById('max-messages').value = max;
         if (ending && ENDINGS[ending] !== undefined) {
             document.getElementById('line-ending').value = ending;
         }
-        const as = localStorage.getItem(LS_KEYS.autoScroll);
-        const ts = localStorage.getItem(LS_KEYS.timestamps);
-        const hx = localStorage.getItem(LS_KEYS.hex);
+        var as = localStorage.getItem(LS_KEYS.autoScroll);
+        var ts = localStorage.getItem(LS_KEYS.timestamps);
+        var hx = localStorage.getItem(LS_KEYS.hex);
         if (as !== null) document.getElementById('auto-scroll').checked = as === '1';
         if (ts !== null) document.getElementById('show-timestamps').checked = ts === '1';
         if (hx !== null) document.getElementById('show-hex').checked = hx === '1';
@@ -504,7 +579,7 @@
         });
 
         document.getElementById('max-messages').addEventListener('change', function (e) {
-            let n = parseInt(e.target.value, 10);
+            var n = parseInt(e.target.value, 10);
             if (isNaN(n) || n < 10) n = 500;
             if (n > 5000) n = 5000;
             e.target.value = n;
@@ -531,6 +606,10 @@
 
         window.addEventListener('beforeunload', function () {
             keepReading = false;
+            closing = true;
+            if (reader) {
+                try { reader.cancel(); } catch (e) {}
+            }
             if (port) {
                 try { port.close(); } catch (e) {}
             }
