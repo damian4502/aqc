@@ -1455,3 +1455,8 @@ def get_last_voc_states(request, sensor):
 def debug_mqtt(request):
     """Debug stran za MQTT – naročanje na topice in pošiljanje sporočil."""
     return render(request, 'dashboard/debug_mqtt.html')
+
+
+def serial_monitor(request):
+    """ESP32 serial monitor – Web Serial API COM port message log."""
+    return render(request, 'dashboard/serial_monitor.html')
