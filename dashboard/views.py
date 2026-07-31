@@ -1288,26 +1288,45 @@ def parameter_detail(request, parameter_id):
     return render(request, 'dashboard/parameter_detail.html', context)
 
 def export_parameter_csv(request, parameter_id):
+    from django.utils.dateparse import parse_datetime
+
     parameter = get_object_or_404(Parameter, id=parameter_id)
 
     # Datumski filter
+    # Form from parameter_detail sends start/end (datetime-local);
+    # older clients may still send start_date/end_date (date-only).
     all_data = request.GET.get('all') == 'true'
     if all_data:
         start_date = None
         end_date = timezone.now()
     else:
-        start_date_str = request.GET.get('start_date')
-        end_date_str = request.GET.get('end_date')
+        start_date_str = request.GET.get('start') or request.GET.get('start_date')
+        end_date_str = request.GET.get('end') or request.GET.get('end_date')
         if start_date_str and end_date_str:
-            start_date = datetime.strptime(start_date_str, '%Y-%m-%d')
-            end_date = datetime.strptime(end_date_str, '%Y-%m-%d').replace(hour=23, minute=59, second=59)
+            try:
+                start_date = parse_datetime(start_date_str)
+                if start_date is None:
+                    start_date = datetime.strptime(start_date_str[:10], '%Y-%m-%d')
+                end_date = parse_datetime(end_date_str)
+                if end_date is None:
+                    end_date = datetime.strptime(end_date_str[:10], '%Y-%m-%d').replace(
+                        hour=23, minute=59, second=59
+                    )
+                if timezone.is_naive(start_date):
+                    start_date = timezone.make_aware(start_date)
+                if timezone.is_naive(end_date):
+                    end_date = timezone.make_aware(end_date)
+            except (ValueError, TypeError):
+                start_date = timezone.now() - timedelta(days=30)
+                end_date = timezone.now()
         else:
             start_date = timezone.now() - timedelta(days=30)
             end_date = timezone.now()
 
     # Resampling parametri
     interval_minutes = int(request.GET.get('interval', 15))
-    fill_method = request.GET.get('fill_method', 'ffill')
+    fill_method = request.GET.get('fill_method') or request.GET.get('fill', 'ffill')
+    ignore_spikes = request.GET.get('ignore_spikes') == 'on'
 
     # Pridobi meritve
     qs = Measurement.objects.filter(parameter=parameter).select_related('sensor__room')
@@ -1328,12 +1347,15 @@ def export_parameter_csv(request, parameter_id):
     df['timestamp'] = pd.to_datetime(df['timestamp'])
     df = df.rename(columns={'sensor__room__name': 'room'})
 
-    # Resampling
-    resampled = resample_measurements(df, interval_minutes, fill_method, column_name='room')
+    # Resampling — pivot column is auto-detected (parameter vs room)
+    resampled = resample_measurements(
+        df, interval_minutes, fill_method, ignore_spikes=ignore_spikes
+    )
 
     # Priprava za CSV
     resampled = resampled.reset_index()
-    resampled['timestamp'] = resampled['timestamp'].dt.strftime('%Y-%m-%d %H:%M:%S')
+    if 'timestamp' in resampled.columns:
+        resampled['timestamp'] = pd.to_datetime(resampled['timestamp']).dt.strftime('%Y-%m-%d %H:%M:%S')
 
     # Ime datoteke
     filename = f"{parameter.name.replace(' ', '_')}_{interval_minutes}min.csv"
