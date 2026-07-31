@@ -1,0 +1,524 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}ESP32 Serial Monitor - Air Quality Control{% endblock %}
+
+{% block content %}
+<div class="max-w-7xl mx-auto">
+    <div class="flex flex-wrap justify-between items-center gap-3 mb-6">
+        <div>
+            <h1 class="text-3xl font-bold text-white">ESP32 Serial Monitor</h1>
+            <p class="text-sm text-slate-400 mt-1">Testiranje senzorjev preko COM / USB serijskega porta</p>
+        </div>
+        <div id="status" class="text-sm text-slate-400">Ni povezave</div>
+    </div>
+
+    <div class="glass rounded-3xl p-6 mb-6 space-y-4">
+        <!-- Connection row -->
+        <div class="flex flex-wrap gap-4 items-end">
+            <div class="w-40">
+                <label class="block text-xs text-slate-400 mb-1">Baud rate</label>
+                <select id="baud-rate"
+                        class="w-full bg-slate-900 border border-slate-700 rounded-2xl px-4 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-blue-500">
+                    <option value="9600">9600</option>
+                    <option value="19200">19200</option>
+                    <option value="38400">38400</option>
+                    <option value="57600">57600</option>
+                    <option value="115200" selected>115200</option>
+                    <option value="230400">230400</option>
+                    <option value="460800">460800</option>
+                    <option value="921600">921600</option>
+                </select>
+            </div>
+            <div class="w-36">
+                <label class="block text-xs text-slate-400 mb-1">Data bits</label>
+                <select id="data-bits"
+                        class="w-full bg-slate-900 border border-slate-700 rounded-2xl px-4 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-blue-500">
+                    <option value="8" selected>8</option>
+                    <option value="7">7</option>
+                </select>
+            </div>
+            <div class="w-36">
+                <label class="block text-xs text-slate-400 mb-1">Parity</label>
+                <select id="parity"
+                        class="w-full bg-slate-900 border border-slate-700 rounded-2xl px-4 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-blue-500">
+                    <option value="none" selected>None</option>
+                    <option value="even">Even</option>
+                    <option value="odd">Odd</option>
+                </select>
+            </div>
+            <div class="w-36">
+                <label class="block text-xs text-slate-400 mb-1">Stop bits</label>
+                <select id="stop-bits"
+                        class="w-full bg-slate-900 border border-slate-700 rounded-2xl px-4 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-blue-500">
+                    <option value="1" selected>1</option>
+                    <option value="2">2</option>
+                </select>
+            </div>
+            <div class="w-28">
+                <label class="block text-xs text-slate-400 mb-1">Max lines</label>
+                <input type="number" id="max-messages" min="10" max="5000" value="500"
+                       class="w-full bg-slate-900 border border-slate-700 rounded-2xl px-4 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-blue-500">
+            </div>
+            <button id="btn-connect" type="button" onclick="connectSerial()"
+                    class="bg-emerald-600 hover:bg-emerald-500 text-white font-medium px-5 py-2.5 rounded-2xl transition-all active:scale-95">
+                <i class="fas fa-plug mr-2"></i>Poveži COM
+            </button>
+            <button id="btn-disconnect" type="button" onclick="disconnectSerial()" disabled
+                    class="bg-slate-700 hover:bg-slate-600 text-white font-medium px-5 py-2.5 rounded-2xl transition-all active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed">
+                Prekini
+            </button>
+            <button type="button" onclick="clearTable()"
+                    class="bg-red-600 hover:bg-red-500 text-white font-medium px-5 py-2.5 rounded-2xl transition-all active:scale-95">
+                Počisti
+            </button>
+            <button id="btn-pause" type="button" onclick="togglePause()"
+                    class="bg-amber-600 hover:bg-amber-500 text-white font-medium px-5 py-2.5 rounded-2xl transition-all active:scale-95">
+                Premor
+            </button>
+        </div>
+
+        <!-- Port info + options -->
+        <div class="flex flex-wrap gap-4 items-center pt-2 border-t border-slate-700/60 text-sm">
+            <div id="port-info" class="text-slate-400 font-mono text-xs">Port: —</div>
+            <label class="flex items-center gap-2 text-slate-300 cursor-pointer select-none">
+                <input type="checkbox" id="auto-scroll" checked
+                       class="rounded border-slate-600 bg-slate-900 text-blue-500 focus:ring-blue-500">
+                Samodejno drsenje
+            </label>
+            <label class="flex items-center gap-2 text-slate-300 cursor-pointer select-none">
+                <input type="checkbox" id="show-timestamps" checked
+                       class="rounded border-slate-600 bg-slate-900 text-blue-500 focus:ring-blue-500">
+                Časovni žig
+            </label>
+            <label class="flex items-center gap-2 text-slate-300 cursor-pointer select-none">
+                <input type="checkbox" id="show-hex"
+                       class="rounded border-slate-600 bg-slate-900 text-blue-500 focus:ring-blue-500">
+                Hex prikaz
+            </label>
+            <span id="line-count" class="text-slate-500 text-xs ml-auto">0 vrstic</span>
+        </div>
+
+        <!-- Send row -->
+        <div class="flex flex-wrap gap-4 items-end pt-2 border-t border-slate-700/60">
+            <div class="flex-[3] min-w-[220px]">
+                <label class="block text-xs text-slate-400 mb-1">Pošlji ukaz / sporočilo</label>
+                <input type="text" id="send-message" placeholder="npr. status, AT, read..."
+                       class="w-full bg-slate-900 border border-slate-700 rounded-2xl px-4 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-blue-500 font-mono"
+                       autocomplete="off">
+            </div>
+            <div class="w-36">
+                <label class="block text-xs text-slate-400 mb-1">Zaključek vrstice</label>
+                <select id="line-ending"
+                        class="w-full bg-slate-900 border border-slate-700 rounded-2xl px-4 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-blue-500">
+                    <option value="lf" selected>LF (\n)</option>
+                    <option value="crlf">CRLF (\r\n)</option>
+                    <option value="cr">CR (\r)</option>
+                    <option value="none">Brez</option>
+                </select>
+            </div>
+            <button id="btn-send" type="button" onclick="sendSerial()" disabled
+                    class="bg-blue-600 hover:bg-blue-500 text-white font-medium px-5 py-2.5 rounded-2xl transition-all active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed">
+                <i class="fas fa-paper-plane mr-2"></i>Pošlji
+            </button>
+        </div>
+    </div>
+
+    <div id="browser-warning" class="hidden glass rounded-3xl p-4 mb-6 border border-amber-500/30">
+        <div class="flex items-start gap-3 text-amber-300 text-sm">
+            <i class="fas fa-exclamation-triangle mt-0.5"></i>
+            <div>
+                <p class="font-medium">Web Serial API ni na voljo v tem brskalniku.</p>
+                <p class="text-amber-200/70 mt-1">Uporabite Chrome, Edge ali drug Chromium brskalnik na <strong>localhost</strong> ali preko HTTPS. Povežite ESP32 preko USB na ta računalnik, nato kliknite »Poveži COM«.</p>
+            </div>
+        </div>
+    </div>
+
+    <div class="glass rounded-3xl overflow-hidden">
+        <div id="log-scroll" class="overflow-x-auto max-h-[65vh]">
+            <table class="w-full text-sm">
+                <thead class="sticky top-0 bg-slate-900/95 backdrop-blur z-10">
+                    <tr class="border-b border-slate-700">
+                        <th class="text-left py-3 px-4 text-slate-400 font-medium w-28">Čas</th>
+                        <th class="text-left py-3 px-4 text-slate-400 font-medium w-20">Smer</th>
+                        <th class="text-left py-3 px-4 text-slate-400 font-medium">Sporočilo</th>
+                    </tr>
+                </thead>
+                <tbody id="log-table" class="divide-y divide-slate-800"></tbody>
+            </table>
+            <div id="empty-state" class="px-6 py-16 text-center text-slate-500 text-sm">
+                <i class="fas fa-microchip text-3xl mb-3 text-slate-600"></i>
+                <p>Ni še sporočil. Povežite ESP32 in kliknite »Poveži COM«.</p>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<style>
+    .dir-rx { color: #67e8f9; }
+    .dir-tx { color: #a78bfa; }
+    .dir-sys { color: #94a3b8; }
+    .msg-rx { color: #e2e8f0; }
+    .msg-tx { color: #c4b5fd; }
+    .msg-sys { color: #94a3b8; font-style: italic; }
+</style>
+<script>
+(function () {
+    const LS_KEYS = {
+        baud: 'serial_monitor_baud',
+        maxMsg: 'serial_monitor_max',
+        lineEnding: 'serial_monitor_ending',
+        autoScroll: 'serial_monitor_autoscroll',
+        timestamps: 'serial_monitor_timestamps',
+        hex: 'serial_monitor_hex',
+    };
+
+    const ENDINGS = { lf: '\n', crlf: '\r\n', cr: '\r', none: '' };
+
+    let port = null;
+    let reader = null;
+    let keepReading = false;
+    let paused = false;
+    let lineBuffer = '';
+    let readPromise = null;
+    const textEncoder = new TextEncoder();
+    const textDecoder = new TextDecoder();
+
+    function setStatus(html) {
+        document.getElementById('status').innerHTML = html;
+    }
+
+    function setConnectedUI(connected) {
+        document.getElementById('btn-connect').disabled = connected;
+        document.getElementById('btn-disconnect').disabled = !connected;
+        document.getElementById('btn-send').disabled = !connected;
+        document.getElementById('baud-rate').disabled = connected;
+        document.getElementById('data-bits').disabled = connected;
+        document.getElementById('parity').disabled = connected;
+        document.getElementById('stop-bits').disabled = connected;
+    }
+
+    function getMaxMessages() {
+        const n = parseInt(document.getElementById('max-messages').value, 10);
+        return (isNaN(n) || n < 10) ? 500 : Math.min(n, 5000);
+    }
+
+    function getLineEnding() {
+        const key = document.getElementById('line-ending').value;
+        return ENDINGS[key] !== undefined ? ENDINGS[key] : '\n';
+    }
+
+    function escapeHtml(s) {
+        return String(s)
+            .replace(/&/g, '&')
+            .replace(/</g, '<')
+            .replace(/>/g, '>')
+            .replace(/"/g, '"');
+    }
+
+    function toHex(str) {
+        return Array.from(str).map(ch => ch.charCodeAt(0).toString(16).padStart(2, '0').toUpperCase()).join(' ');
+    }
+
+    function formatPortInfo(p) {
+        try {
+            const info = p.getInfo ? p.getInfo() : {};
+            const parts = [];
+            if (info.usbVendorId != null) {
+                parts.push('VID 0x' + info.usbVendorId.toString(16).padStart(4, '0'));
+            }
+            if (info.usbProductId != null) {
+                parts.push('PID 0x' + info.usbProductId.toString(16).padStart(4, '0'));
+            }
+            return parts.length ? parts.join(' · ') : 'USB serijski port';
+        } catch {
+            return 'USB serijski port';
+        }
+    }
+
+    function appendLog(direction, message) {
+        if (paused && direction === 'rx') return;
+
+        const empty = document.getElementById('empty-state');
+        if (empty) empty.classList.add('hidden');
+
+        const showTs = document.getElementById('show-timestamps').checked;
+        const showHex = document.getElementById('show-hex').checked;
+        const time = new Date().toLocaleTimeString('sl-SI', {
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit',
+            fractionalSecondDigits: 3,
+        });
+
+        let displayMsg = message;
+        if (showHex && direction !== 'sys') {
+            displayMsg = toHex(message) + (message.length ? '  │  ' + message : '');
+        }
+
+        const dirLabel = direction === 'rx' ? 'RX' : direction === 'tx' ? 'TX' : 'SYS';
+        const dirClass = direction === 'rx' ? 'dir-rx' : direction === 'tx' ? 'dir-tx' : 'dir-sys';
+        const msgClass = direction === 'rx' ? 'msg-rx' : direction === 'tx' ? 'msg-tx' : 'msg-sys';
+
+        const row = document.createElement('tr');
+        row.className = 'hover:bg-slate-800/60 transition-colors';
+        row.innerHTML =
+            '<td class="py-2 px-4 text-slate-500 font-mono text-xs whitespace-nowrap">' + (showTs ? escapeHtml(time) : '') + '</td>' +
+            '<td class="py-2 px-4 font-mono text-xs font-semibold ' + dirClass + '">' + dirLabel + '</td>' +
+            '<td class="py-2 px-4 font-mono text-xs break-all whitespace-pre-wrap ' + msgClass + '">' + escapeHtml(displayMsg) + '</td>';
+
+        const tableBody = document.getElementById('log-table');
+        tableBody.appendChild(row);
+
+        const max = getMaxMessages();
+        while (tableBody.children.length > max) {
+            tableBody.removeChild(tableBody.firstChild);
+        }
+
+        document.getElementById('line-count').textContent = tableBody.children.length + ' vrstic';
+
+        if (document.getElementById('auto-scroll').checked) {
+            const scroller = document.getElementById('log-scroll');
+            scroller.scrollTop = scroller.scrollHeight;
+        }
+    }
+
+    function processIncomingText(text) {
+        lineBuffer += text;
+        const parts = lineBuffer.split(/\r\n|\n|\r/);
+        lineBuffer = parts.pop() ?? '';
+        for (const line of parts) {
+            appendLog('rx', line);
+        }
+    }
+
+    async function readLoop() {
+        while (port && port.readable && keepReading) {
+            reader = port.readable.getReader();
+            try {
+                while (keepReading) {
+                    const { value, done } = await reader.read();
+                    if (done) break;
+                    if (value && value.byteLength) {
+                        processIncomingText(textDecoder.decode(value, { stream: true }));
+                    }
+                }
+            } catch (err) {
+                if (keepReading) {
+                    appendLog('sys', 'Napaka branja: ' + (err.message || err));
+                    setStatus('<span class="text-red-400">Napaka branja</span>');
+                }
+            } finally {
+                try { reader.releaseLock(); } catch (_) {}
+                reader = null;
+            }
+        }
+        // Flush remaining decoder state
+        try {
+            const rest = textDecoder.decode();
+            if (rest) processIncomingText(rest);
+            if (lineBuffer) {
+                appendLog('rx', lineBuffer);
+                lineBuffer = '';
+            }
+        } catch (_) {}
+    }
+
+    async function connectSerial() {
+        if (!('serial' in navigator)) {
+            document.getElementById('browser-warning').classList.remove('hidden');
+            setStatus('<span class="text-amber-400">Web Serial ni podprt</span>');
+            return;
+        }
+
+        try {
+            port = await navigator.serial.requestPort();
+            const baudRate = parseInt(document.getElementById('baud-rate').value, 10) || 115200;
+            const dataBits = parseInt(document.getElementById('data-bits').value, 10) || 8;
+            const stopBits = parseInt(document.getElementById('stop-bits').value, 10) || 1;
+            const parity = document.getElementById('parity').value || 'none';
+
+            await port.open({ baudRate: baudRate, dataBits: dataBits, stopBits: stopBits, parity: parity, bufferSize: 4096 });
+
+            keepReading = true;
+            setConnectedUI(true);
+            document.getElementById('port-info').textContent = 'Port: ' + formatPortInfo(port);
+            setStatus('<span class="text-emerald-400">Povezano · ' + baudRate + ' baud</span>');
+            appendLog('sys', 'Povezava odprta @ ' + baudRate + ' baud');
+            localStorage.setItem(LS_KEYS.baud, String(baudRate));
+
+            port.addEventListener('disconnect', onPortDisconnect);
+
+            readPromise = readLoop();
+        } catch (err) {
+            if (err && err.name === 'NotFoundError') {
+                setStatus('<span class="text-slate-400">Izbor porta preklican</span>');
+                return;
+            }
+            console.error(err);
+            setStatus('<span class="text-red-400">Napaka: ' + escapeHtml(err.message || String(err)) + '</span>');
+            appendLog('sys', 'Napaka povezave: ' + (err.message || err));
+            await cleanupConnection(false);
+        }
+    }
+
+    function onPortDisconnect() {
+        appendLog('sys', 'Naprava odklopljena');
+        cleanupConnection(false);
+    }
+
+    async function cleanupConnection(manual) {
+        keepReading = false;
+
+        if (reader) {
+            try { await reader.cancel(); } catch (_) {}
+            try { reader.releaseLock(); } catch (_) {}
+            reader = null;
+        }
+
+        if (readPromise) {
+            try { await readPromise; } catch (_) {}
+            readPromise = null;
+        }
+
+        if (port) {
+            try { port.removeEventListener('disconnect', onPortDisconnect); } catch (_) {}
+            try { await port.close(); } catch (_) {}
+            port = null;
+        }
+
+        lineBuffer = '';
+        setConnectedUI(false);
+        document.getElementById('port-info').textContent = 'Port: —';
+        if (manual) {
+            setStatus('<span class="text-slate-400">Povezava prekinjena</span>');
+            appendLog('sys', 'Povezava ročno prekinjena');
+        } else {
+            setStatus('<span class="text-slate-400">Ni povezave</span>');
+        }
+    }
+
+    async function disconnectSerial() {
+        await cleanupConnection(true);
+    }
+
+    async function sendSerial() {
+        if (!port || !port.writable) {
+            setStatus('<span class="text-red-400">Ni odprtega porta</span>');
+            return;
+        }
+        const input = document.getElementById('send-message');
+        const msg = input.value;
+        const ending = getLineEnding();
+        const payload = msg + ending;
+
+        try {
+            const w = port.writable.getWriter();
+            await w.write(textEncoder.encode(payload));
+            w.releaseLock();
+            const marker = ending === '\r\n' ? '↵' : ending === '\n' ? '↓' : ending === '\r' ? '←' : '';
+            appendLog('tx', msg + marker);
+            input.select();
+        } catch (err) {
+            appendLog('sys', 'Napaka pošiljanja: ' + (err.message || err));
+        }
+    }
+
+    function clearTable() {
+        document.getElementById('log-table').innerHTML = '';
+        document.getElementById('line-count').textContent = '0 vrstic';
+        document.getElementById('empty-state').classList.remove('hidden');
+    }
+
+    function togglePause() {
+        paused = !paused;
+        const btn = document.getElementById('btn-pause');
+        if (paused) {
+            btn.textContent = 'Nadaljuj';
+            btn.classList.remove('bg-amber-600', 'hover:bg-amber-500');
+            btn.classList.add('bg-emerald-700', 'hover:bg-emerald-600');
+            appendLog('sys', 'Premor vklopljen – RX se ne prikazuje');
+        } else {
+            btn.textContent = 'Premor';
+            btn.classList.remove('bg-emerald-700', 'hover:bg-emerald-600');
+            btn.classList.add('bg-amber-600', 'hover:bg-amber-500');
+            appendLog('sys', 'Premor izklopljen');
+        }
+    }
+
+    function loadSettings() {
+        const baud = localStorage.getItem(LS_KEYS.baud);
+        const max = localStorage.getItem(LS_KEYS.maxMsg);
+        const ending = localStorage.getItem(LS_KEYS.lineEnding);
+        if (baud) document.getElementById('baud-rate').value = baud;
+        if (max) document.getElementById('max-messages').value = max;
+        if (ending && ENDINGS[ending] !== undefined) {
+            document.getElementById('line-ending').value = ending;
+        }
+        const as = localStorage.getItem(LS_KEYS.autoScroll);
+        const ts = localStorage.getItem(LS_KEYS.timestamps);
+        const hx = localStorage.getItem(LS_KEYS.hex);
+        if (as !== null) document.getElementById('auto-scroll').checked = as === '1';
+        if (ts !== null) document.getElementById('show-timestamps').checked = ts === '1';
+        if (hx !== null) document.getElementById('show-hex').checked = hx === '1';
+    }
+
+    window.connectSerial = connectSerial;
+    window.disconnectSerial = disconnectSerial;
+    window.sendSerial = sendSerial;
+    window.clearTable = clearTable;
+    window.togglePause = togglePause;
+
+    document.addEventListener('DOMContentLoaded', function () {
+        loadSettings();
+
+        if (!('serial' in navigator)) {
+            document.getElementById('browser-warning').classList.remove('hidden');
+            setStatus('<span class="text-amber-400">Web Serial ni podprt</span>');
+        }
+
+        document.getElementById('send-message').addEventListener('keydown', function (e) {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                sendSerial();
+            }
+        });
+
+        document.getElementById('max-messages').addEventListener('change', function (e) {
+            var n = parseInt(e.target.value, 10);
+            if (isNaN(n) || n < 10) n = 500;
+            if (n > 5000) n = 5000;
+            e.target.value = n;
+            localStorage.setItem(LS_KEYS.maxMsg, String(n));
+        });
+
+        document.getElementById('baud-rate').addEventListener('change', function (e) {
+            localStorage.setItem(LS_KEYS.baud, e.target.value);
+        });
+
+        document.getElementById('line-ending').addEventListener('change', function (e) {
+            localStorage.setItem(LS_KEYS.lineEnding, e.target.value);
+        });
+
+        document.getElementById('auto-scroll').addEventListener('change', function (e) {
+            localStorage.setItem(LS_KEYS.autoScroll, e.target.checked ? '1' : '0');
+        });
+        document.getElementById('show-timestamps').addEventListener('change', function (e) {
+            localStorage.setItem(LS_KEYS.timestamps, e.target.checked ? '1' : '0');
+        });
+        document.getElementById('show-hex').addEventListener('change', function (e) {
+            localStorage.setItem(LS_KEYS.hex, e.target.checked ? '1' : '0');
+        });
+
+        window.addEventListener('beforeunload', function () {
+            keepReading = false;
+            if (port) {
+                try { port.close(); } catch (_) {}
+            }
+        });
+    });
+})();
+</script>
+{% endblock %}
