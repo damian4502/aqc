@@ -14,7 +14,6 @@
     </div>
 
     <div class="glass rounded-3xl p-6 mb-6 space-y-4">
-        <!-- Connection row -->
         <div class="flex flex-wrap gap-4 items-end">
             <div class="w-40">
                 <label class="block text-xs text-slate-400 mb-1">Baud rate</label>
@@ -78,7 +77,6 @@
             </button>
         </div>
 
-        <!-- Port info + options -->
         <div class="flex flex-wrap gap-4 items-center pt-2 border-t border-slate-700/60 text-sm">
             <div id="port-info" class="text-slate-400 font-mono text-xs">Port: —</div>
             <label class="flex items-center gap-2 text-slate-300 cursor-pointer select-none">
@@ -99,7 +97,6 @@
             <span id="line-count" class="text-slate-500 text-xs ml-auto">0 vrstic</span>
         </div>
 
-        <!-- Send row -->
         <div class="flex flex-wrap gap-4 items-end pt-2 border-t border-slate-700/60">
             <div class="flex-[3] min-w-[220px]">
                 <label class="block text-xs text-slate-400 mb-1">Pošlji ukaz / sporočilo</label>
@@ -111,9 +108,9 @@
                 <label class="block text-xs text-slate-400 mb-1">Zaključek vrstice</label>
                 <select id="line-ending"
                         class="w-full bg-slate-900 border border-slate-700 rounded-2xl px-4 py-2.5 text-sm text-slate-200 focus:outline-none focus:border-blue-500">
-                    <option value="lf" selected>LF (\n)</option>
-                    <option value="crlf">CRLF (\r\n)</option>
-                    <option value="cr">CR (\r)</option>
+                    <option value="lf" selected>LF</option>
+                    <option value="crlf">CRLF</option>
+                    <option value="cr">CR</option>
                     <option value="none">Brez</option>
                 </select>
             </div>
@@ -175,7 +172,12 @@
         hex: 'serial_monitor_hex',
     };
 
-    const ENDINGS = { lf: String.fromCharCode(10), crlf: String.fromCharCode(13,10), cr: String.fromCharCode(13), none: '' };;
+    const ENDINGS = {
+        lf: String.fromCharCode(10),
+        crlf: String.fromCharCode(13, 10),
+        cr: String.fromCharCode(13),
+        none: ''
+    };
 
     let port = null;
     let reader = null;
@@ -212,14 +214,16 @@
 
     function escapeHtml(s) {
         return String(s)
-            .replace(/&/g, '&')
-            .replace(/</g, '<')
-            .replace(/>/g, '>')
-            .replace(/"/g, '"');
+            .replace(/&/g, String.fromCharCode(38) + 'amp;')
+            .replace(/</g, String.fromCharCode(38) + 'lt;')
+            .replace(/>/g, String.fromCharCode(38) + 'gt;')
+            .replace(/"/g, String.fromCharCode(38) + 'quot;');
     }
 
     function toHex(str) {
-        return Array.from(str).map(ch => ch.charCodeAt(0).toString(16).padStart(2, '0').toUpperCase()).join(' ');
+        return Array.from(str).map(function (ch) {
+            return ch.charCodeAt(0).toString(16).padStart(2, '0').toUpperCase();
+        }).join(' ');
     }
 
     function formatPortInfo(p) {
@@ -233,7 +237,7 @@
                 parts.push('PID 0x' + info.usbProductId.toString(16).padStart(4, '0'));
             }
             return parts.length ? parts.join(' · ') : 'USB serijski port';
-        } catch {
+        } catch (e) {
             return 'USB serijski port';
         }
     }
@@ -246,16 +250,16 @@
 
         const showTs = document.getElementById('show-timestamps').checked;
         const showHex = document.getElementById('show-hex').checked;
-        const time = new Date().toLocaleTimeString('sl-SI', {
+        const now = new Date();
+        const time = now.toLocaleTimeString('sl-SI', {
             hour: '2-digit',
             minute: '2-digit',
-            second: '2-digit',
-            fractionalSecondDigits: 3,
-        });
+            second: '2-digit'
+        }) + '.' + String(now.getMilliseconds()).padStart(3, '0');
 
         let displayMsg = message;
         if (showHex && direction !== 'sys') {
-            displayMsg = toHex(message) + (message.length ? '  │  ' + message : '');
+            displayMsg = toHex(message) + (message.length ? '  |  ' + message : '');
         }
 
         const dirLabel = direction === 'rx' ? 'RX' : direction === 'tx' ? 'TX' : 'SYS';
@@ -285,12 +289,20 @@
         }
     }
 
+    function splitLines(text) {
+        // Normalize CRLF / CR / LF without fragile regex literals
+        const lf = String.fromCharCode(10);
+        const cr = String.fromCharCode(13);
+        const normalized = text.split(cr + lf).join(lf).split(cr).join(lf);
+        return normalized.split(lf);
+    }
+
     function processIncomingText(text) {
         lineBuffer += text;
-        const parts = lineBuffer.split(/\r\n|\n|\r/);
-        lineBuffer = parts.pop() ?? '';
-        for (const line of parts) {
-            appendLog('rx', line);
+        const parts = splitLines(lineBuffer);
+        lineBuffer = parts.pop() || '';
+        for (let i = 0; i < parts.length; i++) {
+            appendLog('rx', parts[i]);
         }
     }
 
@@ -299,10 +311,10 @@
             reader = port.readable.getReader();
             try {
                 while (keepReading) {
-                    const { value, done } = await reader.read();
-                    if (done) break;
-                    if (value && value.byteLength) {
-                        processIncomingText(textDecoder.decode(value, { stream: true }));
+                    const result = await reader.read();
+                    if (result.done) break;
+                    if (result.value && result.value.byteLength) {
+                        processIncomingText(textDecoder.decode(result.value, { stream: true }));
                     }
                 }
             } catch (err) {
@@ -311,11 +323,10 @@
                     setStatus('<span class="text-red-400">Napaka branja</span>');
                 }
             } finally {
-                try { reader.releaseLock(); } catch (_) {}
+                try { reader.releaseLock(); } catch (e) {}
                 reader = null;
             }
         }
-        // Flush remaining decoder state
         try {
             const rest = textDecoder.decode();
             if (rest) processIncomingText(rest);
@@ -323,7 +334,7 @@
                 appendLog('rx', lineBuffer);
                 lineBuffer = '';
             }
-        } catch (_) {}
+        } catch (e) {}
     }
 
     async function connectSerial() {
@@ -340,7 +351,13 @@
             const stopBits = parseInt(document.getElementById('stop-bits').value, 10) || 1;
             const parity = document.getElementById('parity').value || 'none';
 
-            await port.open({ baudRate: baudRate, dataBits: dataBits, stopBits: stopBits, parity: parity, bufferSize: 4096 });
+            await port.open({
+                baudRate: baudRate,
+                dataBits: dataBits,
+                stopBits: stopBits,
+                parity: parity,
+                bufferSize: 4096
+            });
 
             keepReading = true;
             setConnectedUI(true);
@@ -350,7 +367,6 @@
             localStorage.setItem(LS_KEYS.baud, String(baudRate));
 
             port.addEventListener('disconnect', onPortDisconnect);
-
             readPromise = readLoop();
         } catch (err) {
             if (err && err.name === 'NotFoundError') {
@@ -373,19 +389,19 @@
         keepReading = false;
 
         if (reader) {
-            try { await reader.cancel(); } catch (_) {}
-            try { reader.releaseLock(); } catch (_) {}
+            try { await reader.cancel(); } catch (e) {}
+            try { reader.releaseLock(); } catch (e) {}
             reader = null;
         }
 
         if (readPromise) {
-            try { await readPromise; } catch (_) {}
+            try { await readPromise; } catch (e) {}
             readPromise = null;
         }
 
         if (port) {
-            try { port.removeEventListener('disconnect', onPortDisconnect); } catch (_) {}
-            try { await port.close(); } catch (_) {}
+            try { port.removeEventListener('disconnect', onPortDisconnect); } catch (e) {}
+            try { await port.close(); } catch (e) {}
             port = null;
         }
 
@@ -418,7 +434,8 @@
             const w = port.writable.getWriter();
             await w.write(textEncoder.encode(payload));
             w.releaseLock();
-            const marker = ending === '\r\n' ? '↵' : ending === '\n' ? '↓' : ending === '\r' ? '←' : '';
+            const endingKey = document.getElementById('line-ending').value;
+            const marker = endingKey === 'crlf' ? ' [CRLF]' : endingKey === 'lf' ? ' [LF]' : endingKey === 'cr' ? ' [CR]' : '';
             appendLog('tx', msg + marker);
             input.select();
         } catch (err) {
@@ -487,7 +504,7 @@
         });
 
         document.getElementById('max-messages').addEventListener('change', function (e) {
-            var n = parseInt(e.target.value, 10);
+            let n = parseInt(e.target.value, 10);
             if (isNaN(n) || n < 10) n = 500;
             if (n > 5000) n = 5000;
             e.target.value = n;
@@ -515,7 +532,7 @@
         window.addEventListener('beforeunload', function () {
             keepReading = false;
             if (port) {
-                try { port.close(); } catch (_) {}
+                try { port.close(); } catch (e) {}
             }
         });
     });
