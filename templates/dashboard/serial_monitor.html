@@ -175,7 +175,7 @@
         hex: 'serial_monitor_hex',
     };
 
-    const ENDINGS = { lf: '\n', crlf: '\r\n', cr: '\r', none: '' };
+    const ENDINGS = { lf: String.fromCharCode(10), crlf: String.fromCharCode(13,10), cr: String.fromCharCode(13), none: '' };;
 
     let port = null;
     let reader = null;
@@ -207,7 +207,7 @@
 
     function getLineEnding() {
         const key = document.getElementById('line-ending').value;
-        return ENDINGS[key] !== undefined ? ENDINGS[key] : '\n';
+        return ENDINGS[key] !== undefined ? ENDINGS[key] : String.fromCharCode(10);
     }
 
     function escapeHtml(s) {
