@@ -1,0 +1,364 @@
+{% extends "base.html" %}
+{% block title %}Dodaj dogodek - Air Quality Control{% endblock %}
+
+{% block content %}
+<div class="max-w-xl mx-auto w-full">
+
+    <!-- Header -->
+    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
+        <div>
+            <h1 class="text-2xl sm:text-3xl font-bold text-white tracking-tight">Dodaj dogodek</h1>
+            <p class="text-slate-400 text-sm mt-1">Hitri vnos za mobilne naprave ali polni obrazec</p>
+        </div>
+        <a href="{% url 'dashboard' %}"
+           class="inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-slate-800 hover:bg-slate-700 rounded-2xl text-slate-300 text-sm transition-all">
+            <i class="fas fa-arrow-left"></i>
+            <span>Nazaj</span>
+        </a>
+    </div>
+
+    <!-- Messages -->
+    {% if messages %}
+    <div class="mb-5 space-y-3">
+        {% for message in messages %}
+        <div class="glass rounded-2xl p-4 flex items-start gap-3 text-sm
+                    {% if message.tags == 'success' %}border-l-4 border-emerald-500{% endif %}
+                    {% if message.tags == 'error' %}border-l-4 border-red-500{% endif %}">
+            {% if message.tags == 'success' %}
+                <i class="fas fa-check-circle text-xl text-emerald-400 mt-0.5"></i>
+            {% elif message.tags == 'error' %}
+                <i class="fas fa-exclamation-triangle text-xl text-red-400 mt-0.5"></i>
+            {% endif %}
+            <div>{{ message }}</div>
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
+
+    <!-- Mode toggle -->
+    <div class="glass rounded-2xl p-1.5 flex mb-5" role="tablist">
+        <button type="button" id="mode-quick"
+                class="mode-btn flex-1 py-3 rounded-xl text-sm font-semibold transition-all bg-blue-600 text-white shadow-lg"
+                onclick="setMode('quick')">
+            <i class="fas fa-bolt mr-1.5"></i> Hitro
+        </button>
+        <button type="button" id="mode-full"
+                class="mode-btn flex-1 py-3 rounded-xl text-sm font-semibold transition-all text-slate-400 hover:text-white"
+                onclick="setMode('full')">
+            <i class="fas fa-sliders-h mr-1.5"></i> Vsa polja
+        </button>
+    </div>
+
+    <!-- Form -->
+    <form method="post" id="event-form" class="glass rounded-3xl p-5 sm:p-8 space-y-5" autocomplete="off">
+        {% csrf_token %}
+        <input type="hidden" name="mode" id="form-mode" value="quick">
+
+        <!-- Title -->
+        <div>
+            <label for="title" class="block text-sm font-medium text-slate-300 mb-2">
+                <i class="fas fa-tag mr-1.5 text-blue-400"></i> Naziv dogodka
+            </label>
+            <input type="text" name="title" id="title" required maxlength="200"
+                   autofocus
+                   placeholder="npr. Odprto okno, Kuhanje, Čiščenje..."
+                   class="w-full bg-slate-900 border border-slate-700 rounded-2xl px-4 py-3.5 text-white text-base
+                          focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30
+                          placeholder:text-slate-600">
+        </div>
+
+        <!-- Timestamp -->
+        <div>
+            <label for="timestamp" class="block text-sm font-medium text-slate-300 mb-2">
+                <i class="fas fa-clock mr-1.5 text-blue-400"></i> Datum in čas
+            </label>
+            <div class="flex gap-2">
+                <input type="datetime-local" name="timestamp" id="timestamp" required
+                       value="{{ default_timestamp }}"
+                       class="flex-1 min-w-0 bg-slate-900 border border-slate-700 rounded-2xl px-4 py-3.5 text-white text-base
+                              focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30">
+                <button type="button" onclick="setNow()"
+                        class="flex-shrink-0 px-4 py-3.5 bg-slate-800 hover:bg-slate-700 active:scale-95
+                               border border-slate-700 rounded-2xl text-emerald-400 text-sm font-medium transition-all"
+                        title="Nastavi na trenutni čas">
+                    Zdaj
+                </button>
+            </div>
+
+            <!-- Quick time chips -->
+            <p class="text-xs text-slate-500 mt-3 mb-2">Hitri gumbi (nazaj v času)</p>
+            <div class="flex flex-wrap gap-2" id="quick-time-chips">
+                <button type="button" class="time-chip" data-mins="1" onclick="setMinutesAgo(1)">pred 1 min</button>
+                <button type="button" class="time-chip" data-mins="5" onclick="setMinutesAgo(5)">pred 5 min</button>
+                <button type="button" class="time-chip" data-mins="15" onclick="setMinutesAgo(15)">pred 15 min</button>
+                <button type="button" class="time-chip" data-mins="30" onclick="setMinutesAgo(30)">pred 30 min</button>
+                <button type="button" class="time-chip" data-mins="60" onclick="setMinutesAgo(60)">pred 1 uro</button>
+            </div>
+        </div>
+
+        <!-- Full-mode fields -->
+        <div id="full-fields" class="hidden space-y-5">
+
+            <!-- Description -->
+            <div>
+                <label for="description" class="block text-sm font-medium text-slate-300 mb-2">
+                    <i class="fas fa-align-left mr-1.5 text-blue-400"></i> Opis / opomba
+                </label>
+                <textarea name="description" id="description" rows="3"
+                          placeholder="Neobvezna opomba k dogodku..."
+                          class="w-full bg-slate-900 border border-slate-700 rounded-2xl px-4 py-3.5 text-white text-base
+                                 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30
+                                 placeholder:text-slate-600 resize-y"></textarea>
+            </div>
+
+            <!-- Color -->
+            <div>
+                <label class="block text-sm font-medium text-slate-300 mb-2">
+                    <i class="fas fa-palette mr-1.5 text-blue-400"></i> Barva na grafu
+                </label>
+                <div class="flex flex-wrap items-center gap-3">
+                    <input type="color" name="color" id="color" value="#10b981"
+                           class="w-12 h-12 rounded-xl border border-slate-700 bg-slate-900 cursor-pointer p-1">
+                    <div class="flex flex-wrap gap-2">
+                        {% for hex, label in color_presets %}
+                        <button type="button" title="{{ label }}"
+                                onclick="setColor('{{ hex }}')"
+                                class="w-9 h-9 rounded-xl border-2 border-slate-700 hover:scale-110 active:scale-95 transition-transform"
+                                style="background: {{ hex }}"></button>
+                        {% endfor %}
+                    </div>
+                </div>
+            </div>
+
+            <!-- Rooms -->
+            <div>
+                <div class="flex items-center justify-between mb-2">
+                    <label class="block text-sm font-medium text-slate-300">
+                        <i class="fas fa-door-open mr-1.5 text-blue-400"></i> Prostori
+                    </label>
+                    <div class="flex gap-2 text-xs">
+                        <button type="button" onclick="toggleAll('rooms', true)" class="text-blue-400 hover:underline">Vsi</button>
+                        <span class="text-slate-600">|</span>
+                        <button type="button" onclick="toggleAll('rooms', false)" class="text-slate-400 hover:underline">Nobeden</button>
+                    </div>
+                </div>
+                <div class="bg-slate-900/70 border border-slate-700 rounded-2xl p-3 max-h-48 overflow-y-auto space-y-1">
+                    {% for room in rooms %}
+                    <label class="flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-slate-800/80 cursor-pointer active:bg-slate-800 transition-colors">
+                        <input type="checkbox" name="rooms" value="{{ room.id }}"
+                               class="w-5 h-5 rounded border-slate-600 bg-slate-800 text-blue-500 focus:ring-blue-500 focus:ring-offset-0">
+                        <span class="text-sm text-slate-200">{{ room.name }}</span>
+                    </label>
+                    {% empty %}
+                    <p class="text-sm text-slate-500 px-3 py-2">Ni definiranih prostorov.</p>
+                    {% endfor %}
+                </div>
+                <p class="text-xs text-slate-500 mt-1.5">Če ne izbereš nobenega, dogodek ni vezan na prostor.</p>
+            </div>
+
+            <!-- Parameters -->
+            <div>
+                <div class="flex items-center justify-between mb-2">
+                    <label class="block text-sm font-medium text-slate-300">
+                        <i class="fas fa-flask mr-1.5 text-blue-400"></i> Parametri
+                    </label>
+                    <div class="flex gap-2 text-xs">
+                        <button type="button" onclick="toggleAll('parameters', true)" class="text-blue-400 hover:underline">Vsi</button>
+                        <span class="text-slate-600">|</span>
+                        <button type="button" onclick="toggleAll('parameters', false)" class="text-slate-400 hover:underline">Nobeden</button>
+                    </div>
+                </div>
+                <div class="bg-slate-900/70 border border-slate-700 rounded-2xl p-3 max-h-48 overflow-y-auto space-y-1">
+                    {% for param in parameters %}
+                    <label class="flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-slate-800/80 cursor-pointer active:bg-slate-800 transition-colors">
+                        <input type="checkbox" name="parameters" value="{{ param.id }}"
+                               class="w-5 h-5 rounded border-slate-600 bg-slate-800 text-blue-500 focus:ring-blue-500 focus:ring-offset-0">
+                        <span class="text-sm text-slate-200">
+                            {{ param.name }}
+                            {% if param.unit %}<span class="text-slate-500">({{ param.unit }})</span>{% endif %}
+                        </span>
+                    </label>
+                    {% empty %}
+                    <p class="text-sm text-slate-500 px-3 py-2">Ni definiranih parametrov.</p>
+                    {% endfor %}
+                </div>
+                <p class="text-xs text-slate-500 mt-1.5">Neobvezno — za označevanje na grafih parametrov.</p>
+            </div>
+        </div>
+
+        <!-- Submit -->
+        <button type="submit" id="submit-btn"
+                class="w-full bg-gradient-to-r from-blue-600 to-cyan-500 hover:from-blue-500 hover:to-cyan-400
+                       active:scale-[0.98] py-4 sm:py-5 rounded-2xl font-semibold text-base sm:text-lg
+                       transition-all shadow-lg shadow-blue-900/30 flex items-center justify-center gap-2">
+            <i class="fas fa-plus-circle"></i>
+            <span>Shrani dogodek</span>
+        </button>
+    </form>
+
+    <!-- Recent events -->
+    {% if recent_events %}
+    <div class="mt-8">
+        <h2 class="text-lg font-semibold text-white mb-3 flex items-center gap-2">
+            <i class="fas fa-history text-slate-400"></i> Zadnji dogodki
+        </h2>
+        <div class="space-y-2">
+            {% for event in recent_events %}
+            <div class="glass rounded-2xl px-4 py-3 flex items-start gap-3">
+                <div class="w-1.5 self-stretch rounded-full flex-shrink-0" style="background: {{ event.color }}"></div>
+                <div class="min-w-0 flex-1">
+                    <div class="flex items-start justify-between gap-2">
+                        <p class="font-medium text-white text-sm truncate">{{ event.title }}</p>
+                        <time class="text-xs text-slate-500 whitespace-nowrap flex-shrink-0">
+                            {{ event.timestamp|date:"d.m.Y H:i" }}
+                        </time>
+                    </div>
+                    {% if event.description %}
+                    <p class="text-xs text-slate-400 mt-0.5 line-clamp-2">{{ event.description }}</p>
+                    {% endif %}
+                    {% with rooms_list=event.rooms.all %}
+                    {% if rooms_list %}
+                    <p class="text-[11px] text-slate-500 mt-1">
+                        <i class="fas fa-door-open mr-1"></i>
+                        {% for r in rooms_list %}{{ r.name }}{% if not forloop.last %}, {% endif %}{% endfor %}
+                    </p>
+                    {% endif %}
+                    {% endwith %}
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+    {% endif %}
+
+</div>
+
+<style>
+    .time-chip {
+        padding: 0.5rem 0.85rem;
+        font-size: 0.8125rem;
+        font-weight: 500;
+        border-radius: 9999px;
+        background: rgba(30, 41, 59, 0.9);
+        border: 1px solid rgb(51, 65, 85);
+        color: rgb(203, 213, 225);
+        transition: all 0.15s ease;
+        -webkit-tap-highlight-color: transparent;
+    }
+    .time-chip:hover {
+        background: rgba(51, 65, 85, 0.9);
+        color: white;
+    }
+    .time-chip:active {
+        transform: scale(0.95);
+    }
+    .time-chip.active {
+        background: rgba(59, 130, 246, 0.25);
+        border-color: rgb(59, 130, 246);
+        color: rgb(147, 197, 253);
+    }
+    /* Larger touch targets on narrow screens */
+    @media (max-width: 640px) {
+        .time-chip {
+            padding: 0.625rem 0.9rem;
+            font-size: 0.875rem;
+        }
+        /* Reduce main content padding on mobile for this page feel */
+        .flex-1.overflow-auto.p-8 {
+            padding: 1rem !important;
+        }
+    }
+    /* Hide sidebar by default feel on this page is handled by existing toggle;
+       ensure form inputs are at least 16px to avoid iOS zoom */
+    #event-form input,
+    #event-form textarea,
+    #event-form select {
+        font-size: 16px;
+    }
+</style>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+    const tsInput = document.getElementById('timestamp');
+    const modeInput = document.getElementById('form-mode');
+    const fullFields = document.getElementById('full-fields');
+    const btnQuick = document.getElementById('mode-quick');
+    const btnFull = document.getElementById('mode-full');
+    const titleInput = document.getElementById('title');
+
+    function pad(n) { return String(n).padStart(2, '0'); }
+
+    function toLocalDatetimeValue(date) {
+        return date.getFullYear() + '-' +
+            pad(date.getMonth() + 1) + '-' +
+            pad(date.getDate()) + 'T' +
+            pad(date.getHours()) + ':' +
+            pad(date.getMinutes());
+    }
+
+    window.setNow = function () {
+        tsInput.value = toLocalDatetimeValue(new Date());
+        clearChipActive();
+    };
+
+    window.setMinutesAgo = function (mins) {
+        const d = new Date(Date.now() - mins * 60 * 1000);
+        tsInput.value = toLocalDatetimeValue(d);
+        document.querySelectorAll('.time-chip').forEach(el => {
+            el.classList.toggle('active', Number(el.dataset.mins) === mins);
+        });
+    };
+
+    function clearChipActive() {
+        document.querySelectorAll('.time-chip').forEach(el => el.classList.remove('active'));
+    }
+
+    tsInput.addEventListener('input', clearChipActive);
+
+    window.setColor = function (hex) {
+        document.getElementById('color').value = hex;
+    };
+
+    window.toggleAll = function (name, checked) {
+        document.querySelectorAll('input[name="' + name + '"]').forEach(el => {
+            el.checked = checked;
+        });
+    };
+
+    window.setMode = function (mode) {
+        modeInput.value = mode;
+        const isFull = mode === 'full';
+        fullFields.classList.toggle('hidden', !isFull);
+
+        btnQuick.className = 'mode-btn flex-1 py-3 rounded-xl text-sm font-semibold transition-all ' +
+            (isFull
+                ? 'text-slate-400 hover:text-white'
+                : 'bg-blue-600 text-white shadow-lg');
+        btnFull.className = 'mode-btn flex-1 py-3 rounded-xl text-sm font-semibold transition-all ' +
+            (isFull
+                ? 'bg-blue-600 text-white shadow-lg'
+                : 'text-slate-400 hover:text-white');
+
+        try { localStorage.setItem('eventFormMode', mode); } catch (e) {}
+    };
+
+    // Restore last mode (desktop users often want full form)
+    try {
+        const saved = localStorage.getItem('eventFormMode');
+        // On narrow screens default to quick
+        const preferQuick = window.matchMedia('(max-width: 640px)').matches;
+        setMode(saved || (preferQuick ? 'quick' : 'full'));
+    } catch (e) {
+        setMode('quick');
+    }
+
+    // After successful save, focus title for next quick entry
+    {% if messages %}
+    titleInput.focus();
+    titleInput.select && titleInput.select();
+    {% endif %}
+})();
+</script>
+{% endblock %}

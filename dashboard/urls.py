@@ -20,4 +20,5 @@ urlpatterns = [
     path('api/set-pressure-offset/', set_pressure_offset_api, name='set_pressure_offset_api'),
     path('debug-mqtt/', debug_mqtt, name='debug_mqtt'),
     path('serial-monitor/', serial_monitor, name='serial_monitor'),
+    path('events/new/', event_create, name='event_create'),
 ]

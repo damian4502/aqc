@@ -1482,3 +1482,92 @@ def debug_mqtt(request):
 def serial_monitor(request):
     """ESP32 serial monitor – Web Serial API COM port message log."""
     return render(request, 'dashboard/serial_monitor.html')
+
+
+def event_create(request):
+    """Add a new Event (Dogodek). Supports quick (title + time) and full form modes."""
+    from django.contrib import messages
+    from django.shortcuts import redirect
+    from parameters.models import Parameter
+    from django.utils.dateparse import parse_datetime
+    from datetime import datetime as dt
+
+    rooms = Room.objects.all().order_by('order', 'name')
+    parameters = Parameter.objects.all().order_by('order', 'name')
+    recent_events = Event.objects.prefetch_related('rooms', 'parameters').order_by('-timestamp')[:15]
+
+    # Default timestamp: now in local timezone, formatted for datetime-local input
+    now_local = timezone.localtime(timezone.now())
+    default_timestamp = now_local.strftime('%Y-%m-%dT%H:%M')
+
+    if request.method == 'POST':
+        title = (request.POST.get('title') or '').strip()
+        timestamp_raw = (request.POST.get('timestamp') or '').strip()
+        description = (request.POST.get('description') or '').strip()
+        color = (request.POST.get('color') or '#10b981').strip()
+        room_ids = request.POST.getlist('rooms')
+        parameter_ids = request.POST.getlist('parameters')
+        mode = request.POST.get('mode', 'quick')
+
+        errors = []
+        if not title:
+            errors.append('Naziv dogodka je obvezen.')
+        if not timestamp_raw:
+            errors.append('Datum in čas sta obvezna.')
+
+        event_ts = None
+        if timestamp_raw:
+            # datetime-local yields "YYYY-MM-DDTHH:MM" (no timezone)
+            try:
+                if 'T' in timestamp_raw:
+                    naive = dt.strptime(timestamp_raw[:16], '%Y-%m-%dT%H:%M')
+                else:
+                    naive = dt.strptime(timestamp_raw[:16], '%Y-%m-%d %H:%M')
+                event_ts = timezone.make_aware(naive, timezone.get_current_timezone())
+            except (ValueError, TypeError):
+                errors.append('Neveljaven format datuma in časa.')
+
+        # Validate color as simple hex
+        if color and not (color.startswith('#') and len(color) in (4, 7)):
+            color = '#10b981'
+
+        if errors:
+            for err in errors:
+                messages.error(request, err)
+        else:
+            event = Event.objects.create(
+                title=title,
+                timestamp=event_ts,
+                description=description,
+                color=color or '#10b981',
+            )
+            if room_ids:
+                event.rooms.set(Room.objects.filter(id__in=room_ids))
+            if parameter_ids:
+                event.parameters.set(Parameter.objects.filter(id__in=parameter_ids))
+
+            messages.success(
+                request,
+                f'Dogodek „{event.title}“ shranjen '
+                f'({timezone.localtime(event.timestamp).strftime("%d.%m.%Y %H:%M")}).'
+            )
+            # Stay on page for quick successive adds (esp. mobile)
+            return redirect('event_create')
+
+    context = {
+        'rooms': rooms,
+        'parameters': parameters,
+        'recent_events': recent_events,
+        'default_timestamp': default_timestamp,
+        'color_presets': [
+            ('#10b981', 'Zelena'),
+            ('#3b82f6', 'Modra'),
+            ('#f59e0b', 'Oranžna'),
+            ('#ef4444', 'Rdeča'),
+            ('#a855f7', 'Vijolična'),
+            ('#06b6d4', 'Cian'),
+            ('#eab308', 'Rumena'),
+            ('#f43f5e', 'Roza'),
+        ],
+    }
+    return render(request, 'dashboard/event_form.html', context)
