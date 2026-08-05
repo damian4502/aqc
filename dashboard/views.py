@@ -331,7 +331,10 @@ def room_detail(request, room_id):
 
     interval_minutes = int(request.GET.get('interval', request.session.get('resample_interval', 15)))
     fill_method = request.GET.get('fill_method', request.session.get('resample_fill_method', 'ffill'))
-    ignore_spikes = request.GET.get('ignore_spikes') == 'on' or request.session.get('ignore_spikes', False)
+    if 'ignore_spikes' in request.GET:
+        ignore_spikes = parse_bool_flag(request.GET.get('ignore_spikes'), default=False)
+    else:
+        ignore_spikes = bool(request.session.get('ignore_spikes', False))
 
     context['interval'] = interval_minutes
     context['fill_method'] = fill_method
@@ -365,7 +368,10 @@ def room_detail(request, room_id):
     # Resampling parametri
     interval_minutes = int(request.GET.get('interval', request.session.get('resample_interval', 15)))
     fill_method = request.GET.get('fill_method', request.session.get('resample_fill_method', 'ffill'))
-    ignore_spikes = request.GET.get('ignore_spikes') == 'on' or request.session.get('ignore_spikes', False)
+    if 'ignore_spikes' in request.GET:
+        ignore_spikes = parse_bool_flag(request.GET.get('ignore_spikes'), default=False)
+    else:
+        ignore_spikes = bool(request.session.get('ignore_spikes', False))
 
     # Shrani v session
     request.session['resample_interval'] = interval_minutes
@@ -623,6 +629,13 @@ def resample_measurements(df, interval_minutes=15, fill_method='ffill', ignore_s
 
 import plotly.graph_objects as go
 
+
+def parse_bool_flag(value, default=False):
+    """Parse common truthy/falsey query values (on/off, 1/0, true/false)."""
+    if value is None:
+        return default
+    return str(value).strip().lower() in ('1', 'true', 'yes', 'on', 'y')
+
 def chart_data(request):
     from django.utils.dateparse import parse_datetime
     """Vrača Plotly JSON za dinamično nalaganje v JS."""
@@ -695,12 +708,19 @@ def chart_data(request):
         if 'fill_method' in request.GET:
             request.session['resample_fill_method'] = request.GET.get('fill_method')
 
-    # Resampling parametri
+    # Resampling parameters
     interval_minutes = int(request.GET.get('interval', request.session.get('resample_interval', 15)))
-    fill_method = request.GET.get('fill_method', request.session.get('resample_fill_method', 'ffill'))
-    ignore_spikes = request.GET.get('ignore_spikes') == 'on' or request.session.get('ignore_spikes', False)
+    fill_method = (
+        request.GET.get('fill_method')
+        or request.GET.get('fill')
+        or request.session.get('resample_fill_method', 'ffill')
+    )
+    if 'ignore_spikes' in request.GET:
+        ignore_spikes = parse_bool_flag(request.GET.get('ignore_spikes'), default=False)
+    else:
+        ignore_spikes = bool(request.session.get('ignore_spikes', False))
 
-    # Shrani v session
+    # Persist in session
     request.session['resample_interval'] = interval_minutes
     request.session['resample_fill_method'] = fill_method
     request.session['ignore_spikes'] = ignore_spikes
@@ -1174,8 +1194,10 @@ def parameter_detail(request, parameter_id):
     # Resampling parametri
     interval_minutes = int(request.GET.get('interval', request.session.get('resample_interval', 15)))
     fill_method = request.GET.get('fill_method', request.session.get('resample_fill_method', 'ffill'))
-    ignore_spikes = request.GET.get('ignore_spikes') == 'on' or request.session.get('ignore_spikes', False)
-    ignore_spikes = False
+    if 'ignore_spikes' in request.GET:
+        ignore_spikes = parse_bool_flag(request.GET.get('ignore_spikes'), default=False)
+    else:
+        ignore_spikes = bool(request.session.get('ignore_spikes', False))
 
     # Shrani v session
     request.session['resample_interval'] = interval_minutes
@@ -1326,7 +1348,7 @@ def export_parameter_csv(request, parameter_id):
     # Resampling parametri
     interval_minutes = int(request.GET.get('interval', 15))
     fill_method = request.GET.get('fill_method') or request.GET.get('fill', 'ffill')
-    ignore_spikes = request.GET.get('ignore_spikes') == 'on'
+    ignore_spikes = parse_bool_flag(request.GET.get('ignore_spikes'), default=False)
 
     # Pridobi meritve
     qs = Measurement.objects.filter(parameter=parameter).select_related('sensor__room')

@@ -9,13 +9,13 @@
     <div class="flex justify-between items-end">
         <div>
             <h1 class="text-5xl font-bold text-white tracking-tighter">{{ parameter.name }}</h1>
-            <p class="text-slate-400 mt-1">{{ parameter.unit }} • Primerjava po prostorih</p>
+            <p class="text-slate-400 mt-1">{{ parameter.unit }} • Room comparison</p>
         </div>
         
 <select id="param-switcher" 
         class="bg-slate-800 border border-slate-700 hover:border-slate-600 text-slate-200 px-5 py-3 rounded-2xl text-sm focus:outline-none focus:border-blue-500 cursor-pointer min-w-[240px] appearance-none"
         onchange="if (this.value) { window.location.href = this.value; }">
-    <option value="{% url 'dashboard' %}">← Nazaj na pregled</option>
+    <option value="{% url 'dashboard' %}">← Back to overview</option>
     <option disabled>────────────────────</option>
     <option value="" disabled selected>{{ parameter.name }} ({{ parameter.unit }})</option>
 	{% all_parameters as all_parameters %}
@@ -27,7 +27,7 @@
 </select>
     </div>
 
-    <!-- Zadnje meritve po prostorih -->
+    <!-- Latest measurements by room -->
     <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6" id="latest_measurements">
         {% for m in rooms %}
 		{% latest_measurement m.id parameter.id as last_value %}
@@ -50,25 +50,25 @@
         {% endfor %}
     </div>
 
-    <!-- Preklopni gumbi -->
+    <!-- View tabs -->
     <div class="flex flex-wrap gap-3">
-        <a href="?view=trend" class="tab-btn {% if view_type == 'trend' %}active{% endif %}">Časovni trend</a>
-        <a href="?view=correlation" class="tab-btn {% if view_type == 'correlation' %}active{% endif %}">Korelacija prostorov</a>
-        <a href="?view=hourly" class="tab-btn {% if view_type == 'hourly' %}active{% endif %}">Dnevni vzorec</a>
-        <a href="?view=weekly" class="tab-btn {% if view_type == 'weekly' %}active{% endif %}">Tedenski vzorec</a>
+        <a href="?view=trend" class="tab-btn {% if view_type == 'trend' %}active{% endif %}">Time trend</a>
+        <a href="?view=correlation" class="tab-btn {% if view_type == 'correlation' %}active{% endif %}">Room correlation</a>
+        <a href="?view=hourly" class="tab-btn {% if view_type == 'hourly' %}active{% endif %}">Daily pattern</a>
+        <a href="?view=weekly" class="tab-btn {% if view_type == 'weekly' %}active{% endif %}">Weekly pattern</a>
     </div>
 
-<!-- Poenoten filter + Export blok -->
+<!-- Unified filter + export -->
 <div class="glass rounded-3xl p-6 mb-8">
-    <form method="get" id="filter-form" class="flex flex-wrap items-end gap-6">
+    <form method="get" id="filter-form" class="flex flex-wrap items-end gap-6" onsubmit="return false;">
         {% if view_type %}
             <input type="hidden" name="view" value="{{ view_type }}">
         {% endif %}
 
-        <!-- Datumski picker -->
+        <!-- Date range pickers -->
 <div class="flex gap-4 items-end">
     <div>
-        <label class="block text-sm text-slate-400 mb-1">Od</label>
+        <label class="block text-sm text-slate-400 mb-1">From</label>
         <input type="datetime-local"
                name="start"
 			   id="start_date"
@@ -76,20 +76,16 @@
                class="bg-slate-800 border border-slate-700 rounded-2xl px-4 py-3 text-white focus:outline-none focus:border-blue-500">
     </div>
     <div>
-        <label class="block text-sm text-slate-400 mb-1">Do</label>
+        <label class="block text-sm text-slate-400 mb-1">To</label>
         <input type="datetime-local"
                name="end"
 			   id="end_date"
                value="{{ end|date:'Y-m-d\TH:i' }}"
                class="bg-slate-800 border border-slate-700 rounded-2xl px-4 py-3 text-white focus:outline-none focus:border-blue-500">
     </div>
-    <button type="submit"
-            class="bg-gradient-to-r from-blue-600 to-cyan-500 hover:from-blue-500 hover:to-cyan-400 px-8 py-3 rounded-3xl font-medium text-white transition-all">
-        Osveži graf
-    </button>
 </div>
 
-        <!-- Resampling nastavitve -->
+        <!-- Resampling settings -->
         <div class="flex-1 min-w-[280px]">
             <label class="block text-xs text-slate-400 mb-1.5">Resampling</label>
             <div class="flex gap-3">
@@ -97,22 +93,22 @@
                     <option value="1"   {% if interval == 1 %}selected{% endif %}>1 min</option>
                     <option value="5"   {% if interval == 5 %}selected{% endif %}>5 min</option>
                     <option value="15"  {% if interval == 15 %}selected{% endif %}>15 min</option>
-                    <option value="60"  {% if interval == 60 %}selected{% endif %}>1 ura</option>
-                    <option value="1440"{% if interval == 1440 %}selected{% endif %}>1 dan</option>
+                    <option value="60"  {% if interval == 60 %}selected{% endif %}>1 hour</option>
+                    <option value="1440"{% if interval == 1440 %}selected{% endif %}>1 day</option>
                 </select>
 
                 <select name="fill_method" id="fill_method" class="flex-1 bg-slate-900 border border-slate-700 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:border-blue-500">
                     <option value="ffill"      {% if fill_method == 'ffill' %}selected{% endif %}>Forward Fill</option>
-                    <option value="interpolate"{% if fill_method == 'interpolate' %}selected{% endif %}>Interpolacija</option>
+                    <option value="interpolate"{% if fill_method == 'interpolate' %}selected{% endif %}>Interpolation</option>
                     <option value="bfill"      {% if fill_method == 'bfill' %}selected{% endif %}>Backward Fill</option>
                     <option value="zero"       {% if fill_method == 'zero' %}selected{% endif %}>0</option>
                 </select>
             </div>
         </div>
 
-        <!-- Akcije -->
+        <!-- Actions -->
         <div class="flex gap-3">
-            <!-- Hitri gumbi -->
+            <!-- Quick range buttons -->
             <a href="#" 
 			data-hours="1"
                class="quick-date-btn px-5 py-3 text-sm rounded-2xl transition-all {% if request.GET.quickh == '1' %}bg-blue-600 text-white{% else %}bg-slate-800 hover:bg-slate-700{% endif %}">
@@ -146,26 +142,26 @@
             <a href="#" 
 				data-days="0"
                class="quick-date-btn px-5 py-3 text-sm rounded-2xl transition-all {% if all_data %}bg-blue-600 text-white{% else %}bg-slate-800 hover:bg-slate-700{% endif %}">
-                Vsi
+                All
             </a>
 
-            <!-- Osveži + Export -->
-            <button type="submit" 
+            <!-- Refresh + Export -->
+            <button type="button" id="refresh-graph-btn"
                     class="bg-blue-600 hover:bg-blue-500 px-6 py-3 rounded-2xl text-sm font-medium transition-all">
-                Osveži graf
+                Refresh chart
             </button>
 
             <button type="button" onclick="exportCSV()" 
                     class="bg-emerald-600 hover:bg-emerald-500 px-6 py-3 rounded-2xl text-sm font-medium transition-all flex items-center gap-2">
                 <i class="fas fa-download"></i>
-                Izvozi CSV
+                Export CSV
             </button>
 
 <div class="flex items-center gap-2 mt-2">
     <input type="checkbox" id="ignore_spikes" name="ignore_spikes" 
            {% if ignore_spikes %}checked{% endif %} class="w-4 h-4 accent-blue-600">
     <label for="ignore_spikes" class="text-sm text-slate-300 cursor-pointer">
-        Ignoriraj skoke (outlierje)
+        Ignore spikes (outliers)
     </label>
 </div>
 
@@ -173,14 +169,14 @@
     </form>
 </div>
 
-    <!-- Glavni graf -->
+    <!-- Main chart -->
     {% if fig %}
         <div class="glass rounded-3xl p-8">
             <div id="plotly-graph" class="w-full rounded-3xl overflow-hidden" style="height: 650px;"></div>
         </div>
     {% elif no_data %}
         <div class="glass rounded-3xl p-16 text-center">
-            <p class="text-slate-400 text-xl">Ni podatkov za ta parameter.</p>
+            <p class="text-slate-400 text-xl">No data for this parameter.</p>
         </div>
     {% endif %}
 
@@ -192,12 +188,12 @@ let parameterId = {{ parameter.id }};
 function parseLocalDate(input) {
     if (!input) return new Date(NaN);
 
-    // Če je že Date objekt (kar Plotly včasih naredi)
+    // If already a Date object (Plotly sometimes does this)
     if (input instanceof Date) {
         return input;
     }
 
-    // String primer
+    // String input
     const str = String(input);
     const normalized = str.replace('T', ' ').replace('Z', '').trim();
     const parts = normalized.split(/[- :.]/);
@@ -230,7 +226,7 @@ function adjustYAxisToVisibleRange(gd, xRangeFromEvent = null) {
     let hasData = false;
     let pointsChecked = 0;
 
-    // Uporabi calcdata (najbolj zanesljivo)
+    // Use calcdata (most reliable)
     if (gd.calcdata && gd.calcdata.length > 0) {
         gd.calcdata.forEach((calcTrace, i) => {
             const trace = gd.data[i];
@@ -242,7 +238,7 @@ function adjustYAxisToVisibleRange(gd, xRangeFromEvent = null) {
 
             for (let j = 0; j < xVals.length; j++) {
                 pointsChecked++;
-                const xTime = new Date(xVals[j]);     // že je število (timestamp)
+                const xTime = new Date(xVals[j]);     // already a timestamp number
 				
 				//console.log(xMin + ' < ' + xTime);
 
@@ -259,7 +255,7 @@ function adjustYAxisToVisibleRange(gd, xRangeFromEvent = null) {
     if (hasData && isFinite(yMin) && isFinite(yMax)) {
         const padding = (yMax - yMin) * 0.08 || 1;
 
-        console.log('%c[USPEH] Y-os prilagojena na vidne podatke', 'color:#22c55e', {
+        console.log('%c[OK] Y-axis fitted to visible data', 'color:#22c55e', {
             yMin: yMin.toFixed(2),
             yMax: yMax.toFixed(2),
             pointsChecked
@@ -272,7 +268,7 @@ function adjustYAxisToVisibleRange(gd, xRangeFromEvent = null) {
         });
 		
     } else {
-        console.log('%c[FAIL] Ni našel točk v območju', 'color:#ef4444', {
+        console.log('%c[FAIL] No points found in range', 'color:#ef4444', {
             xMin: new Date(xMin),
             xMax: new Date(xMax),
             pointsChecked,
@@ -317,14 +313,14 @@ function adjustYAxisToVisibleRangeWithData(gd, xRangeFromEvent = null) {
 
     if (hasData && isFinite(yMin) && isFinite(yMax)) {
         const padding = (yMax - yMin) * 0.08 || 1;
-        console.log('%c[USPEH - FALLBACK] Y-os prilagojena', 'color:#22c55e', { yMin, yMax });
+        console.log('%c[OK - FALLBACK] Y-axis fitted', 'color:#22c55e', { yMin, yMax });
 
         Plotly.relayout(gd, {
             'yaxis.range': [yMin - padding, yMax + padding],
             'yaxis.autorange': false
         });
         
-        gd._yAxisAdjusted = true; // da ne kličemo fallbacka dvakrat
+        gd._yAxisAdjusted = true; // prevent double fallback
         setTimeout(() => { gd._yAxisAdjusted = false; }, 500);
     }
 }
@@ -348,9 +344,11 @@ async function loadGraph(extraParams = {}) {
 		show_params: tmprms
     });
 
-    if (document.getElementById('ignore_spikes')?.checked) {
-        params.set('ignore_spikes', '1');
-    }
+    // Always send ignore_spikes so the API can update session correctly
+    params.set(
+        'ignore_spikes',
+        document.getElementById('ignore_spikes')?.checked ? 'on' : 'off'
+    );
 
     // Cancel in-flight request so rapid picker steps keep only the latest range
     if (typeof loadGraphAbortController !== 'undefined' && loadGraphAbortController) {
@@ -387,7 +385,7 @@ async function loadGraph(extraParams = {}) {
 
                     setTimeout(() => {
                         if (!currentGraphDiv._yAdjustedSuccessfully) {
-                            console.log('%c[INFO] Preklop na avtorange y-osi', 'color:#eab308');
+                            console.log('%c[INFO] Falling back to y-axis autorange', 'color:#eab308');
                             Plotly.relayout(currentGraphDiv, { 'yaxis.autorange': true });
                         }
                         currentGraphDiv._yAdjustedSuccessfully = false;
@@ -397,6 +395,9 @@ async function loadGraph(extraParams = {}) {
                 Plotly.relayout(currentGraphDiv, { 'yaxis.autorange': true });
             }
         });
+
+        // After a successful load, (re)start live polling if end is in the future
+        setupLiveRefresh();
     } catch (err) {
         if (err && err.name === 'AbortError') return;
         console.error('Failed to load graph', err);
@@ -407,6 +408,7 @@ async function loadGraph(extraParams = {}) {
 let loadGraphTimer = null;
 let loadGraphAbortController = null;
 let lastLoadGraphKey = '';
+let liveRefreshTimer = null;
 
 function getFilterKey() {
     return [
@@ -422,6 +424,48 @@ function clearQuickDateHighlight() {
     document.querySelectorAll('.quick-date-btn').forEach(b =>
         b.classList.remove('!bg-blue-600', 'text-white')
     );
+}
+
+function parseDateTimeLocalValue(value) {
+    if (!value) return null;
+    // datetime-local is local wall time without timezone
+    const m = String(value).match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/);
+    if (!m) return null;
+    return new Date(
+        Number(m[1]), Number(m[2]) - 1, Number(m[3]),
+        Number(m[4]), Number(m[5]), 0, 0
+    );
+}
+
+/**
+ * When the selected "To" time is in the future, poll the chart at the
+ * resampling interval so new measurements appear without a full page reload.
+ */
+function setupLiveRefresh() {
+    if (liveRefreshTimer) {
+        clearInterval(liveRefreshTimer);
+        liveRefreshTimer = null;
+    }
+
+    const endDate = parseDateTimeLocalValue(document.getElementById('end_date')?.value);
+    if (!endDate || isNaN(endDate.getTime())) return;
+
+    const now = new Date();
+    if (endDate.getTime() <= now.getTime()) return;
+
+    const intervalMin = Math.max(1, parseInt(document.getElementById('interval')?.value || '60', 10) || 60);
+    const periodMs = intervalMin * 60 * 1000;
+
+    liveRefreshTimer = setInterval(() => {
+        // Stop automatically once the selected end is no longer in the future
+        const endNow = parseDateTimeLocalValue(document.getElementById('end_date')?.value);
+        if (!endNow || endNow.getTime() <= Date.now()) {
+            clearInterval(liveRefreshTimer);
+            liveRefreshTimer = null;
+            return;
+        }
+        scheduleLoadGraph({ immediate: true, force: true, clearQuick: false });
+    }, periodMs);
 }
 
 function scheduleLoadGraph(options = {}) {
@@ -442,7 +486,7 @@ function scheduleLoadGraph(options = {}) {
         if (end && !valid(end)) return;
 
         const key = getFilterKey();
-        // Skip identical requests unless forced (e.g. explicit submit)
+        // Skip identical requests unless forced (e.g. explicit refresh button)
         if (!force && key === lastLoadGraphKey) return;
         lastLoadGraphKey = key;
         loadGraph();
@@ -504,7 +548,6 @@ document.addEventListener('DOMContentLoaded', () => {
     scheduleLoadGraph({ immediate: true, clearQuick: false, force: true });
 
     // datetime-local: "input" fires as soon as date / hour / minute changes
-    // (not only after the picker is closed). "change" remains as a fallback.
     ['start_date', 'end_date'].forEach(id => {
         const el = document.getElementById(id);
         if (!el) return;
@@ -512,27 +555,46 @@ document.addEventListener('DOMContentLoaded', () => {
         el.addEventListener('change', () => scheduleLoadGraph({ immediate: true }));
     });
 
-    // Selects only need "change"
+    // Selects
     ['interval', 'fill_method'].forEach(id => {
         const el = document.getElementById(id);
         if (!el) return;
         el.addEventListener('change', () => scheduleLoadGraph({ immediate: true }));
     });
 
+    // Ignore spikes checkbox — must refresh chart content
     const spikes = document.getElementById('ignore_spikes');
     if (spikes) {
-        spikes.addEventListener('change', () => scheduleLoadGraph({ immediate: true }));
+        spikes.addEventListener('change', () => {
+            lastLoadGraphKey = '';
+            scheduleLoadGraph({ immediate: true, force: true });
+        });
     }
 
-    // Keep submit as AJAX refresh (no full page reload)
+    // Refresh button — AJAX only, never full page reload
+    const refreshBtn = document.getElementById('refresh-graph-btn');
+    if (refreshBtn) {
+        refreshBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            lastLoadGraphKey = '';
+            scheduleLoadGraph({ immediate: true, force: true });
+        });
+    }
+
+    // Belt-and-suspenders: form must never navigate
     const form = document.getElementById('filter-form');
     if (form) {
         form.addEventListener('submit', (e) => {
             e.preventDefault();
+            e.stopPropagation();
+            lastLoadGraphKey = '';
             scheduleLoadGraph({ immediate: true, force: true });
+            return false;
         });
     }
 });
+
 </script>
 </div>
 
@@ -571,7 +633,7 @@ document.addEventListener('DOMContentLoaded', () => {
 </style>
 
 <script>
-    // Dodaj animacijo po nalaganju strani
+    // Add animation after page load
     document.addEventListener('DOMContentLoaded', function() {
         const graphs = document.querySelectorAll('.plotly-graph-div');
         graphs.forEach((graph, index) => {
@@ -609,7 +671,7 @@ document.addEventListener('DOMContentLoaded', () => {
     function updateLatestValues(data) {
 		const room_box = document.querySelectorAll('#latest_measurements div#room_' + data.room_id);
 		console.log(room_box);
-        // Poišči vse vrstice s parametri
+        // Find latest-value elements for this room
         const valueEl = room_box[0].querySelector('span.last_value');
 		console.log(valueEl);
 		valueEl.innerHTML = parseFloat(data.value).toFixed(2);
