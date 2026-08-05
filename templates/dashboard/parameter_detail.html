@@ -101,7 +101,7 @@
                     <option value="1440"{% if interval == 1440 %}selected{% endif %}>1 dan</option>
                 </select>
 
-                <select name="fill_method" class="flex-1 bg-slate-900 border border-slate-700 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:border-blue-500">
+                <select name="fill_method" id="fill_method" class="flex-1 bg-slate-900 border border-slate-700 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:border-blue-500">
                     <option value="ffill"      {% if fill_method == 'ffill' %}selected{% endif %}>Forward Fill</option>
                     <option value="interpolate"{% if fill_method == 'interpolate' %}selected{% endif %}>Interpolacija</option>
                     <option value="bfill"      {% if fill_method == 'bfill' %}selected{% endif %}>Backward Fill</option>
@@ -328,14 +328,13 @@ function adjustYAxisToVisibleRangeWithData(gd, xRangeFromEvent = null) {
         setTimeout(() => { gd._yAxisAdjusted = false; }, 500);
     }
 }
-// Glavna funkcija za nalaganje grafa (brez quick parametra)
+// Main graph loader
 async function loadGraph(extraParams = {}) {
 	let tmprms = new Array();
-    if (currentGraphDiv.calcdata && currentGraphDiv.calcdata.length > 0) {
+    if (currentGraphDiv && currentGraphDiv.calcdata && currentGraphDiv.calcdata.length > 0) {
         currentGraphDiv.calcdata.forEach((calcTrace, i) => {
             const trace = currentGraphDiv.data[i];
 			if (!trace || trace.visible === 'legendonly' || trace.visible === false) return;
-			console.log(trace);
 			tmprms.push(trace['name'].toLowerCase());
 		});
 	}
@@ -349,62 +348,124 @@ async function loadGraph(extraParams = {}) {
 		show_params: tmprms
     });
 
-	
-	
+    if (document.getElementById('ignore_spikes')?.checked) {
+        params.set('ignore_spikes', '1');
+    }
+
+    // Cancel in-flight request so rapid picker steps keep only the latest range
+    if (typeof loadGraphAbortController !== 'undefined' && loadGraphAbortController) {
+        loadGraphAbortController.abort();
+    }
+    loadGraphAbortController = new AbortController();
 
     const url = `/api/chart-data/?${params.toString()}`;
 
-        const res = await fetch(url);
+    try {
+        const res = await fetch(url, { signal: loadGraphAbortController.signal });
+        if (!res.ok) return;
+        const figJson = await res.json();
 
-const figJson = await res.json();
+        if (!currentGraphDiv) return;
 
-    const isUpdate = currentGraphDiv.data && currentGraphDiv.data.length > 0;
+        const isUpdate = currentGraphDiv.data && currentGraphDiv.data.length > 0;
 
-    if (isUpdate) {
-        await Plotly.react(currentGraphDiv, figJson.data, figJson.layout, { responsive: true });
+        if (isUpdate) {
+            await Plotly.react(currentGraphDiv, figJson.data, figJson.layout, { responsive: true });
+        } else {
+            await Plotly.newPlot(currentGraphDiv, figJson.data, figJson.layout, { responsive: true });
+        }
+
+        currentGraphDiv.removeAllListeners('plotly_relayout');
+
+        currentGraphDiv.on('plotly_relayout', function(eventData) {
+            if (eventData['xaxis.range[0]'] && eventData['xaxis.range[1]']) {
+                setTimeout(() => {
+                    adjustYAxisToVisibleRange(currentGraphDiv, [
+                        eventData['xaxis.range[0]'],
+                        eventData['xaxis.range[1]']
+                    ]);
+
+                    setTimeout(() => {
+                        if (!currentGraphDiv._yAdjustedSuccessfully) {
+                            console.log('%c[INFO] Preklop na avtorange y-osi', 'color:#eab308');
+                            Plotly.relayout(currentGraphDiv, { 'yaxis.autorange': true });
+                        }
+                        currentGraphDiv._yAdjustedSuccessfully = false;
+                    }, 50);
+                }, 20);
+            } else if (eventData['xaxis.autorange'] === true) {
+                Plotly.relayout(currentGraphDiv, { 'yaxis.autorange': true });
+            }
+        });
+    } catch (err) {
+        if (err && err.name === 'AbortError') return;
+        console.error('Failed to load graph', err);
+    }
+}
+
+// Debounced graph reload so rapid hour/minute steps do not spam the API
+let loadGraphTimer = null;
+let loadGraphAbortController = null;
+let lastLoadGraphKey = '';
+
+function getFilterKey() {
+    return [
+        document.getElementById('start_date')?.value || '',
+        document.getElementById('end_date')?.value || '',
+        document.getElementById('interval')?.value || '',
+        document.getElementById('fill_method')?.value || '',
+        document.getElementById('ignore_spikes')?.checked ? '1' : '0',
+    ].join('|');
+}
+
+function clearQuickDateHighlight() {
+    document.querySelectorAll('.quick-date-btn').forEach(b =>
+        b.classList.remove('!bg-blue-600', 'text-white')
+    );
+}
+
+function scheduleLoadGraph(options = {}) {
+    const { immediate = false, clearQuick = true, force = false } = options;
+    if (clearQuick) clearQuickDateHighlight();
+
+    if (loadGraphTimer) {
+        clearTimeout(loadGraphTimer);
+        loadGraphTimer = null;
+    }
+
+    const run = () => {
+        const start = document.getElementById('start_date')?.value || '';
+        const end = document.getElementById('end_date')?.value || '';
+        // Require complete datetime-local values (YYYY-MM-DDTHH:MM)
+        const valid = (v) => /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(v);
+        if (start && !valid(start)) return;
+        if (end && !valid(end)) return;
+
+        const key = getFilterKey();
+        // Skip identical requests unless forced (e.g. explicit submit)
+        if (!force && key === lastLoadGraphKey) return;
+        lastLoadGraphKey = key;
+        loadGraph();
+    };
+
+    if (immediate) {
+        run();
     } else {
-        await Plotly.newPlot(currentGraphDiv, figJson.data, figJson.layout, { responsive: true });
+        // Short debounce: input fires on each date/hour/minute step in the picker
+        loadGraphTimer = setTimeout(run, 200);
     }
+}
 
-currentGraphDiv.removeAllListeners('plotly_relayout');
-
-currentGraphDiv.on('plotly_relayout', function(eventData) {
-    if (eventData['xaxis.range[0]'] && eventData['xaxis.range[1]']) {
-        
-        setTimeout(() => {
-            // Poskusi najprej z izračunom
-            adjustYAxisToVisibleRange(currentGraphDiv, [
-                eventData['xaxis.range[0]'],
-                eventData['xaxis.range[1]']
-            ]);
-
-            // Če ni našlo ničesar (pointsChecked === 0), uporabi avtorange
-            setTimeout(() => {
-                if (!currentGraphDiv._yAdjustedSuccessfully) {
-                    console.log('%c[INFO] Preklop na avtorange y-osi', 'color:#eab308');
-                    Plotly.relayout(currentGraphDiv, { 'yaxis.autorange': true });
-                }
-                currentGraphDiv._yAdjustedSuccessfully = false;
-            }, 50);
-
-        }, 20);
-
-    } else if (eventData['xaxis.autorange'] === true) {
-        Plotly.relayout(currentGraphDiv, { 'yaxis.autorange': true });
-    }
-});
-
-	}
-
-// Format za datetime-local input (lokalni čas)
+// Format for datetime-local input (local time)
 function formatForDateTimeLocal(date) {
     const pad = (n) => n.toString().padStart(2, '0');
     return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
-// === HITRI GUMBI z podporo za data-hours in data-days ===
+// === Quick range buttons (data-hours / data-days) ===
 document.querySelectorAll('.quick-date-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
+    btn.addEventListener('click', (e) => {
+        e.preventDefault();
         const hours = btn.dataset.hours ? parseInt(btn.dataset.hours) : null;
         const days = btn.dataset.days ? parseInt(btn.dataset.days) : null;
 
@@ -412,52 +473,65 @@ document.querySelectorAll('.quick-date-btn').forEach(btn => {
         let startDate;
 
         if (hours !== null && hours > 0) {
-            // Podpora za ure (npr. data-hours="1", "6", "12")
             startDate = new Date(now.getTime() - hours * 60 * 60 * 1000);
         } else if (days !== null) {
             if (days === 0) {
-                // All data
                 startDate = new Date('2020-01-01T00:00');
             } else {
                 startDate = new Date(now.getTime() - days * 24 * 60 * 60 * 1000);
             }
         } else {
-            console.warn('Quick button nima data-hours ali data-days atributa');
+            console.warn('Quick button is missing data-hours or data-days');
             return;
         }
 
-        // Nastavi vrednosti v input polja
         document.getElementById('start_date').value = formatForDateTimeLocal(startDate);
         document.getElementById('end_date').value = formatForDateTimeLocal(now);
 
-        // Označi aktivni gumb
-        document.querySelectorAll('.quick-date-btn').forEach(b => 
+        document.querySelectorAll('.quick-date-btn').forEach(b =>
             b.classList.remove('!bg-blue-600', 'text-white')
         );
         btn.classList.add('!bg-blue-600', 'text-white');
 
-        // Naloži graf
-        loadGraph();
+        lastLoadGraphKey = '';
+        scheduleLoadGraph({ immediate: true, clearQuick: false, force: true });
     });
 });
 
-// Inicializacija ob nalaganju strani
+// Init on page load
 document.addEventListener('DOMContentLoaded', () => {
-    loadGraph();
+    lastLoadGraphKey = '';
+    scheduleLoadGraph({ immediate: true, clearQuick: false, force: true });
 
-    // Običajni listenerji za ročne spremembe
-    ['start_date', 'end_date', 'interval', 'fill_method'].forEach(id => {
+    // datetime-local: "input" fires as soon as date / hour / minute changes
+    // (not only after the picker is closed). "change" remains as a fallback.
+    ['start_date', 'end_date'].forEach(id => {
         const el = document.getElementById(id);
-        if (el) {
-            el.addEventListener('change', () => {
-                // Počisti označene quick gumbe, ker je uporabnik ročno spremenil datume
-                document.querySelectorAll('.quick-date-btn').forEach(b => 
-                    b.classList.remove('!bg-blue-600', 'text-white')
-                );
-                loadGraph();
-            });
-        }
+        if (!el) return;
+        el.addEventListener('input', () => scheduleLoadGraph({ immediate: false }));
+        el.addEventListener('change', () => scheduleLoadGraph({ immediate: true }));
     });
+
+    // Selects only need "change"
+    ['interval', 'fill_method'].forEach(id => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.addEventListener('change', () => scheduleLoadGraph({ immediate: true }));
+    });
+
+    const spikes = document.getElementById('ignore_spikes');
+    if (spikes) {
+        spikes.addEventListener('change', () => scheduleLoadGraph({ immediate: true }));
+    }
+
+    // Keep submit as AJAX refresh (no full page reload)
+    const form = document.getElementById('filter-form');
+    if (form) {
+        form.addEventListener('submit', (e) => {
+            e.preventDefault();
+            scheduleLoadGraph({ immediate: true, force: true });
+        });
+    }
 });
 </script>
 </div>
