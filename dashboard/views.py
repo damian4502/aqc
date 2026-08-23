@@ -128,101 +128,77 @@ def apply_dark_theme(fig, animate=True):
     return fig
     
 def export_room_csv(request, room_id):
-    room = get_object_or_404(Room, id=room_id)
-    
-    # Pridobi parametre iz forme
-    start_date_str = request.GET.get('start_date')
-    end_date_str = request.GET.get('end_date')
-    interval_str = request.GET.get('interval', '60')
-    fill_method = request.GET.get('fill', 'ffill')
+    from django.utils.dateparse import parse_datetime
 
-    # Datumski filter
-    if start_date_str and end_date_str:
-        try:
-            start_date = datetime.strptime(start_date_str, '%Y-%m-%d')
-            end_date = datetime.strptime(end_date_str, '%Y-%m-%d')
-            end_date = end_date.replace(hour=23, minute=59, second=59)
-        except ValueError:
+    room = get_object_or_404(Room, id=room_id)
+
+    # Date range: room_detail form sends start/end (datetime-local);
+    # older clients may still send start_date/end_date (date-only).
+    all_data = request.GET.get('all') == 'true'
+    if all_data:
+        start_date = None
+        end_date = timezone.now()
+    else:
+        start_date_str = request.GET.get('start') or request.GET.get('start_date')
+        end_date_str = request.GET.get('end') or request.GET.get('end_date')
+        if start_date_str and end_date_str:
+            try:
+                start_date = parse_datetime(start_date_str)
+                if start_date is None:
+                    start_date = datetime.strptime(start_date_str[:10], '%Y-%m-%d')
+                end_date = parse_datetime(end_date_str)
+                if end_date is None:
+                    end_date = datetime.strptime(end_date_str[:10], '%Y-%m-%d').replace(
+                        hour=23, minute=59, second=59
+                    )
+                if timezone.is_naive(start_date):
+                    start_date = timezone.make_aware(start_date)
+                if timezone.is_naive(end_date):
+                    end_date = timezone.make_aware(end_date)
+            except (ValueError, TypeError):
+                start_date = timezone.now() - timedelta(days=7)
+                end_date = timezone.now()
+        else:
             start_date = timezone.now() - timedelta(days=7)
             end_date = timezone.now()
-    else:
-        start_date = timezone.now() - timedelta(days=7)
-        end_date = timezone.now()
 
-    # Pridobi meritve
-    measurements = Measurement.objects.filter(
-        sensor__room=room,
-        timestamp__gte=start_date,
-        timestamp__lte=end_date
-    ).select_related('sensor', 'parameter')\
-     .order_by('timestamp')
+    interval_minutes = int(request.GET.get('interval', 15) or 15)
+    fill_method = request.GET.get('fill_method') or request.GET.get('fill', 'ffill')
+    ignore_spikes = parse_bool_flag(request.GET.get('ignore_spikes'), default=False)
+
+    qs = Measurement.objects.filter(sensor__room=room).select_related('sensor', 'parameter')
+    if not all_data:
+        qs = qs.filter(timestamp__gte=start_date, timestamp__lte=end_date)
+
+    measurements = qs.order_by('timestamp')
 
     if not measurements.exists():
         response = HttpResponse(content_type='text/csv')
-        response['Content-Disposition'] = f'attachment; filename="{room.name}_brez_podatki.csv"'
+        response['Content-Disposition'] = f'attachment; filename="{room.name}_no_data.csv"'
         return response
 
     df = pd.DataFrame(list(measurements.values(
-        'timestamp', 
-        'value', 
+        'timestamp',
+        'value',
         'parameter__name'
     )))
-
     df['timestamp'] = pd.to_datetime(df['timestamp'])
     df = df.rename(columns={'parameter__name': 'parameter'})
 
-    # === RESAMPLING + RAVNANJE Z MANJKAJOČIMI VREDNOSTMI ===
-    interval_min = int(interval_str)
-    
-    if interval_min > 0:
-        df = df.set_index('timestamp')
-        
-        # Pivot tabelo (vsak parameter = svoj stolpec)
-        pivot = df.pivot_table(
-            index=df.index,
-            columns='parameter',
-            values='value',
-            aggfunc='mean'
-        )
+    resampled = resample_measurements(
+        df, interval_minutes, fill_method, ignore_spikes=ignore_spikes
+    )
 
-        # Določitev frekvence
-        freq_map = {
-            1: 'min',
-            5: '5min',
-            15: '15min',
-            60: 'h',
-            1440: 'D'
-        }
-        freq = freq_map.get(interval_min, f'{interval_min}min')
+    resampled = resampled.reset_index()
+    if 'timestamp' in resampled.columns:
+        resampled['timestamp'] = pd.to_datetime(resampled['timestamp']).dt.strftime('%Y-%m-%d %H:%M:%S')
 
-        # Resampling
-        resampled = pivot.resample(freq).mean()
+    safe_name = "".join(c if c.isalnum() or c in ('-', '_') else '_' for c in room.name.replace(' ', '_'))
+    filename = f"{safe_name}_measurements_{interval_minutes}min.csv"
 
-        # Ravnanje z manjkajočimi vrednostmi
-        if fill_method == 'ffill':
-            resampled = resampled.ffill()
-        elif fill_method == 'bfill':
-            resampled = resampled.bfill()
-        elif fill_method == 'interpolate':
-            resampled = resampled.interpolate(method='linear')
-        elif fill_method == 'zero':
-            resampled = resampled.fillna(0)
-        elif fill_method == 'none':
-            pass  # pusti NaN vrednosti
-        # else: privzeto ffill
-
-        df = resampled.reset_index()
-
-    # Priprava CSV datoteke
     response = HttpResponse(content_type='text/csv')
-    filename = f"{room.name.replace(' ', '_')}_meritve_{datetime.now().strftime('%Y%m%d_%H%M')}.csv"
     response['Content-Disposition'] = f'attachment; filename="{filename}"'
-
-    # Lepši format datuma
-    if 'timestamp' in df.columns:
-        df['timestamp'] = pd.to_datetime(df['timestamp']).dt.strftime('%Y-%m-%d %H:%M:%S')
-
-    df.to_csv(response, index=False, encoding='utf-8')
+    resampled.to_csv(response, index=False, encoding='utf-8')
     return response
     
 from django.shortcuts import render, get_object_or_404

@@ -4,7 +4,7 @@
 {% block title %}{{ room.name }} - Air Quality Control{% endblock %}
 
 {% block content %}
-<div class="max-w-6xl mx-auto space-y-8">   <!-- manjša max širina -->
+<div class="max-w-6xl mx-auto space-y-8">   <!-- narrower max width -->
 
     <!-- Header -->
     <div class="flex justify-between items-center">
@@ -29,7 +29,7 @@
 </select>
 
     </div>
-    <!-- AQI Gauge na vrhu -->
+    <!-- AQI gauge at the top -->
     {% if aqi_gauge %}
     <div class="flex justify-center mb-10">
         <div class="w-72">
@@ -37,7 +37,7 @@
         </div>
     </div>
     {% endif %}
-    <!-- Zadnje meritve - manjše kartice -->
+    <!-- Latest measurements - compact cards -->
     <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4" id="latest_measurements">
         {% for m in room.latest_measurements %}
         <div class="glass rounded-2xl p-5 text-sm" id="parameter_{{m.parameter.id}}">
@@ -170,7 +170,7 @@
         </div>
     </form>
 </div>
-<!-- Glavni graf / vsebina -->
+<!-- Main chart / content -->
 <div id="main-graph" class="glass rounded-3xl p-6 min-h-[600px]">
     {% if no_data %}
         <div class="flex items-center justify-center h-96 text-slate-400">
@@ -621,52 +621,52 @@ document.addEventListener('DOMContentLoaded', () => {
 
 <script>
     function exportCSV() {
+        const params = new URLSearchParams();
         const form = document.getElementById('filter-form');
-        const formData = new FormData(form);
-        
-        let baseUrl;
-        {% if room %}
-            baseUrl = '{% url "export_room_csv" room.id %}';
-        {% elif parameter %}
-            baseUrl = '{% url "export_parameter_csv" parameter.id %}';
-        {% endif %}
-        
-        let params = new URLSearchParams();
-        for (let [key, value] of formData.entries()) {
-            if (value) params.append(key, value);
+
+        if (form) {
+            const formData = new FormData(form);
+            for (const [key, value] of formData.entries()) {
+                if (value) params.append(key, value);
+            }
         }
-        
+
+        // Prefer live input values so the export matches the visible filter range
+        const start = document.getElementById('start_date')?.value;
+        const end = document.getElementById('end_date')?.value;
+        if (start) params.set('start', start);
+        if (end) params.set('end', end);
+
+        const interval = document.getElementById('interval')?.value;
+        if (interval) params.set('interval', interval);
+
+        const fill = document.getElementById('fill_method')?.value;
+        if (fill) params.set('fill_method', fill);
+
+        params.set(
+            'ignore_spikes',
+            document.getElementById('ignore_spikes')?.checked ? 'on' : 'off'
+        );
+
+        const baseUrl = '{% url "export_room_csv" room.id %}';
         window.location.href = baseUrl + '?' + params.toString();
     }
-	
-	unction updateLatestValues(data) {
-        // Find latest-value elements for this room
+
+    function updateLatestValues(data) {
         const paramRows = document.querySelectorAll('#latest_measurements div#parameter_' + data.parameter_id);
-        
-			console.log(paramRows);
+
         paramRows.forEach(row => {
-			// Posodobi vrednost
-			const valueEl = row.querySelector('p.text-2xl.font-semibold');
-			if (valueEl) {
-				valueEl.innerHTML = parseFloat(data.value).toFixed(1);
-				
-				// Kratka zelena animacija
-				valueEl.classList.add('!text-emerald-400');
-				setTimeout(() => valueEl.classList.remove('!text-emerald-400'), 300);
-			}
+            const valueEl = row.querySelector('p.text-2xl.font-semibold');
+            if (valueEl) {
+                valueEl.innerHTML = parseFloat(data.value).toFixed(1);
+                valueEl.classList.add('!text-emerald-400');
+                setTimeout(() => valueEl.classList.remove('!text-emerald-400'), 300);
+            }
 
-			// Posodobi čas
-			const timeEl = row.querySelector('p.text-xs.text-emerald-400');
-			if (timeEl) {
-				timeEl.textContent = data.time;
-			}
-
-			console.log(`Posodobljena vrednost: ${data.parameter} = ${data.value}`);
+            const timeEl = row.querySelector('p.text-xs.text-emerald-400');
+            if (timeEl) {
+                timeEl.textContent = data.time;
+            }
         });
     }
-
-    // Zaženi ob nalaganju strani
-    document.addEventListener('DOMContentLoaded', function() {
-        connectLiveUpdate();
-    });
 </script>{% endblock %}
