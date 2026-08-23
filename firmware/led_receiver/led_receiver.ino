@@ -3,10 +3,10 @@
     Based on the ESP-NOW Broadcast Slave example (Lucas Saavedra Vaz, 2024).
 
     Receives broadcast payloads and shows them on a 4-module FC-16 MAX7219
-    matrix (32 x 8). JSON objects/arrays are flattened into readable
-    "key: value" lines and shown one field at a time at a comfortable reading
-    pace. Non-JSON payloads are shown as-is. Long lines scroll; short lines
-    are centred and held.
+    matrix (32 x 8). JSON objects/arrays are flattened into a key, then its
+    value, shown one after another at a comfortable reading pace. Non-JSON
+    payloads are shown as-is. Long lines scroll; short lines are centred
+    and held.
 
     Libraries: ESP32 Arduino core 3.x (ESP32_NOW), MD_MAX72XX.
     No extra JSON library is required.
@@ -187,21 +187,15 @@ static void addItem(const char *text) {
 static void emitPair(const char *key, const char *value) {
   char foldedVal[ITEM_MAX_LEN];
   foldUtf8(value ? value : "", foldedVal, sizeof(foldedVal));
-  if (!foldedVal[0] && !(value && value[0] == '0')) {
-    /* keep explicit empty / zero values */
-  }
 
-  char line[ITEM_MAX_LEN];
   if (key && key[0]) {
     char pretty[KEY_MAX_LEN];
     char foldedKey[KEY_MAX_LEN];
     foldUtf8(key, foldedKey, sizeof(foldedKey));
     humanizeKey(foldedKey, pretty, sizeof(pretty));
-    snprintf(line, sizeof(line), "%s: %s", pretty, foldedVal);
-  } else {
-    snprintf(line, sizeof(line), "%s", foldedVal);
+    addItem(pretty);
   }
-  addItem(line);
+  addItem(foldedVal);
 }
 
 /* ---------- Minimal JSON walker ---------- */
