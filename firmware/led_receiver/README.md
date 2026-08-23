@@ -4,8 +4,8 @@ Sketch for an ESP32 + 4-module FC-16 MAX7219 matrix (32×8).
 
 ## Behaviour
 
-- JSON objects and arrays are flattened into `key: value` lines and shown
-  one field at a time (about 2.4 s each, or scrolled if the line is wider
+- JSON objects and arrays are flattened into a key, then its value, shown
+  one after another (about 2.4 s each, or scrolled if the line is wider
   than the panel).
 - Anything that is not valid JSON is shown as a single line.
 - New broadcasts replace the current queue immediately.
