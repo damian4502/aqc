@@ -101,7 +101,7 @@
                 <select name="fill_method" id="fill_method" class="flex-1 bg-slate-900 border border-slate-700 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:border-blue-500">
                     <option value="ffill"      {% if fill_method == 'ffill' %}selected{% endif %}>Forward Fill</option>
                     <option value="interpolate"{% if fill_method == 'interpolate' %}selected{% endif %}>Interpolation</option>
-                    <option value="bfill"      {% if fill_method == 'bfill' %}selected{% endif %}>Backward Fill</option>
+                    <option value="bfill"      {% if fill_method == 'bfill' %}selected{% endif %}> Backward Fill</option>
                     <option value="zero"       {% if fill_method == 'zero' %}selected{% endif %}>0</option>
                 </select>
             </div>
@@ -159,12 +159,15 @@
             </button>
 
 
-			<div class="flex items-center gap-2 mt-2">
-				<input type="checkbox" id="ignore_spikes" name="ignore_spikes" 
-					   {% if ignore_spikes %}checked{% endif %} class="w-4 h-4 accent-blue-600">
-				<label for="ignore_spikes" class="text-sm text-slate-300 cursor-pointer">
-					Ignore spikes (outliers)
-				</label>
+			<div>
+				<label class="block text-xs text-slate-400 mb-1.5">Ignore spikes</label>
+				<select name="spike_factor" id="spike_factor"
+						class="bg-slate-900 border border-slate-700 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:border-blue-500 min-w-[140px]">
+					<option value="0" {% if not spike_factor or spike_factor == 0 %}selected{% endif %}>Off</option>
+					<option value="3.5" {% if spike_factor == 3.5 %}selected{% endif %}>Mild</option>
+					<option value="2.5" {% if spike_factor == 2.5 %}selected{% endif %}>Medium</option>
+					<option value="1.5" {% if spike_factor == 1.5 %}selected{% endif %}>Aggressive</option>
+				</select>
 			</div>
 
         </div>
@@ -347,10 +350,10 @@ async function loadGraph(extraParams = {}) {
 		show_params: tmprms
     });
 
-    // Always send ignore_spikes so the API can update session correctly
+    // Spike filtering aggressiveness (IQR multiplier; 0 = off)
     params.set(
-        'ignore_spikes',
-        document.getElementById('ignore_spikes')?.checked ? 'on' : 'off'
+        'spike_factor',
+        document.getElementById('spike_factor')?.value || '0'
     );
 
     // Cancel in-flight request so rapid picker steps keep only the latest range
@@ -419,7 +422,7 @@ function getFilterKey() {
         document.getElementById('end_date')?.value || '',
         document.getElementById('interval')?.value || '',
         document.getElementById('fill_method')?.value || '',
-        document.getElementById('ignore_spikes')?.checked ? '1' : '0',
+        document.getElementById('spike_factor')?.value || '0',
     ].join('|');
 }
 
@@ -558,21 +561,15 @@ document.addEventListener('DOMContentLoaded', () => {
         el.addEventListener('change', () => scheduleLoadGraph({ immediate: true }));
     });
 
-    // Selects
-    ['interval', 'fill_method'].forEach(id => {
+    // Selects (including spike aggressiveness)
+    ['interval', 'fill_method', 'spike_factor'].forEach(id => {
         const el = document.getElementById(id);
         if (!el) return;
-        el.addEventListener('change', () => scheduleLoadGraph({ immediate: true }));
-    });
-
-    // Ignore spikes checkbox — must refresh chart content
-    const spikes = document.getElementById('ignore_spikes');
-    if (spikes) {
-        spikes.addEventListener('change', () => {
+        el.addEventListener('change', () => {
             lastLoadGraphKey = '';
             scheduleLoadGraph({ immediate: true, force: true });
         });
-    }
+    });
 
     // Refresh button — AJAX only, never full page reload
     const refreshBtn = document.getElementById('refresh-graph-btn');
@@ -644,8 +641,8 @@ document.addEventListener('DOMContentLoaded', () => {
         if (fill) params.set('fill_method', fill);
 
         params.set(
-            'ignore_spikes',
-            document.getElementById('ignore_spikes')?.checked ? 'on' : 'off'
+            'spike_factor',
+            document.getElementById('spike_factor')?.value || '0'
         );
 
         const baseUrl = '{% url "export_room_csv" room.id %}';
