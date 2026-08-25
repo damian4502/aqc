@@ -61,10 +61,14 @@
             </label>
             <input type="text" name="title" id="title" required maxlength="200"
                    autofocus
-                   placeholder="npr. Odprto okno, Kuhanje, Čiščenje..."
+                   placeholder="npr. Odprto okno v kuhinji, visok CO2..."
                    class="w-full bg-slate-900 border border-slate-700 rounded-2xl px-4 py-3.5 text-white text-base
                           focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30
                           placeholder:text-slate-600">
+            <p class="text-xs text-slate-500 mt-2">
+                Če v naslovu omeniš prostor ali parameter, se povezava ustvari sama.
+            </p>
+            <div id="detected-links" class="hidden mt-2 flex flex-wrap gap-1.5"></div>
         </div>
 
         <!-- Timestamp -->
@@ -216,11 +220,15 @@
                     {% if event.description %}
                     <p class="text-xs text-slate-400 mt-0.5 line-clamp-2">{{ event.description }}</p>
                     {% endif %}
-                    {% with rooms_list=event.rooms.all %}
-                    {% if rooms_list %}
-                    <p class="text-[11px] text-slate-500 mt-1">
-                        <i class="fas fa-door-open mr-1"></i>
-                        {% for r in rooms_list %}{{ r.name }}{% if not forloop.last %}, {% endif %}{% endfor %}
+                    {% with rooms_list=event.rooms.all params_list=event.parameters.all %}
+                    {% if rooms_list or params_list %}
+                    <p class="text-[11px] text-slate-500 mt-1 flex flex-wrap gap-x-3 gap-y-0.5">
+                        {% if rooms_list %}
+                        <span><i class="fas fa-door-open mr-1"></i>{% for r in rooms_list %}{{ r.name }}{% if not forloop.last %}, {% endif %}{% endfor %}</span>
+                        {% endif %}
+                        {% if params_list %}
+                        <span><i class="fas fa-flask mr-1"></i>{% for p in params_list %}{{ p.name }}{% if not forloop.last %}, {% endif %}{% endfor %}</span>
+                        {% endif %}
                     </p>
                     {% endif %}
                     {% endwith %}
@@ -279,6 +287,7 @@
 {% endblock %}
 
 {% block scripts %}
+<script id="detect-catalog" type="application/json">{{ detect_catalog|default:"{}"|safe }}</script>
 <script>
 (function () {
     const tsInput = document.getElementById('timestamp');
@@ -287,6 +296,13 @@
     const btnQuick = document.getElementById('mode-quick');
     const btnFull = document.getElementById('mode-full');
     const titleInput = document.getElementById('title');
+    const descInput = document.getElementById('description');
+    const detectedBox = document.getElementById('detected-links');
+
+    let catalog = { rooms: [], parameters: [] };
+    try {
+        catalog = JSON.parse(document.getElementById('detect-catalog').textContent || '{}');
+    } catch (e) {}
 
     function pad(n) { return String(n).padStart(2, '0'); }
 
@@ -327,6 +343,107 @@
         });
     };
 
+    function normalize(s) {
+        return (s || '').toLowerCase().replace(/,/g, '.');
+    }
+
+    const SLO_SUFFIXES = [
+        'ami', 'ama', 'oma', 'ema', 'ah', 'am', 'ih', 'im',
+        'je', 'ja', 'ju', 'ji', 'o', 'e', 'i', 'a', 'u'
+    ];
+
+    function inflectedForms(word) {
+        word = normalize(word).trim();
+        const forms = new Set([word]);
+        if (!word || /\d/.test(word) || word.length <= 3) return forms;
+        const stem = 'aeiou'.indexOf(word[word.length - 1]) >= 0 ? word.slice(0, -1) : word;
+        if (stem.length < 3) return forms;
+        SLO_SUFFIXES.forEach(function (suf) { forms.add(stem + suf); });
+        return forms;
+    }
+
+    function findSpan(hay, labels) {
+        let best = null;
+        (labels || []).forEach(function (raw) {
+            raw = normalize(raw).trim();
+            if (raw.length < 2 || /^\d+$/.test(raw)) return;
+            const words = raw.split(/\s+/);
+            let pos = 0;
+            let spanStart = null;
+            let spanEnd = null;
+            let ok = true;
+            for (let w = 0; w < words.length; w++) {
+                const forms = Array.from(inflectedForms(words[w])).sort(function (a, b) { return b.length - a.length; });
+                let found = null;
+                forms.forEach(function (form) {
+                    const escaped = form.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                    const re = new RegExp('(?<!\\w)' + escaped + '(?!\\w)', 'gi');
+                    re.lastIndex = pos;
+                    const slice = hay.slice(pos);
+                    const m = new RegExp('(?<!\\w)' + escaped + '(?!\\w)', 'i').exec(slice);
+                    if (!m) return;
+                    const absStart = pos + m.index;
+                    const absEnd = absStart + m[0].length;
+                    if (!found || absStart < found[0]) found = [absStart, absEnd];
+                });
+                if (!found) { ok = false; break; }
+                if (spanStart === null) spanStart = found[0];
+                spanEnd = found[1];
+                pos = found[1];
+            }
+            if (ok && spanStart !== null) {
+                const cand = [spanStart, spanEnd];
+                if (!best || cand[0] < best[0] || (cand[0] === best[0] && cand[1] > best[1])) best = cand;
+            }
+        });
+        return best;
+    }
+
+    function collectMatches(hay, items) {
+        const ranked = (items || []).slice().sort(function (a, b) { return b.name.length - a.name.length; });
+        const matched = [];
+        const occupied = [];
+        ranked.forEach(function (obj) {
+            const span = findSpan(hay, [obj.name, obj.identifier]);
+            if (!span) return;
+            if (occupied.some(function (o) { return span[0] < o[1] && span[1] > o[0]; })) return;
+            occupied.push(span);
+            matched.push(obj);
+        });
+        return matched;
+    }
+
+    function chip(label, kind) {
+        const color = kind === 'room'
+            ? 'bg-sky-500/15 text-sky-300 border-sky-500/30'
+            : 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30';
+        const icon = kind === 'room' ? 'fa-door-open' : 'fa-flask';
+        return '<span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium border ' +
+            color + '"><i class="fas ' + icon + ' text-[10px]"></i>' + label + '</span>';
+    }
+
+    function updateDetected() {
+        if (!detectedBox) return;
+        if (modeInput.value !== 'quick') {
+            detectedBox.classList.add('hidden');
+            detectedBox.innerHTML = '';
+            return;
+        }
+        const hay = normalize((titleInput.value || '') + ' ' + ((descInput && descInput.value) || ''));
+        const rooms = collectMatches(hay, catalog.rooms);
+        const params = collectMatches(hay, catalog.parameters);
+        if (!rooms.length && !params.length) {
+            detectedBox.classList.add('hidden');
+            detectedBox.innerHTML = '';
+            return;
+        }
+        const html = rooms.map(r => chip(r.name, 'room'))
+            .concat(params.map(p => chip(p.name, 'param')))
+            .join('');
+        detectedBox.innerHTML = html;
+        detectedBox.classList.remove('hidden');
+    }
+
     window.setMode = function (mode) {
         modeInput.value = mode;
         const isFull = mode === 'full';
@@ -342,7 +459,11 @@
                 : 'text-slate-400 hover:text-white');
 
         try { localStorage.setItem('eventFormMode', mode); } catch (e) {}
+        updateDetected();
     };
+
+    titleInput.addEventListener('input', updateDetected);
+    if (descInput) descInput.addEventListener('input', updateDetected);
 
     // Restore last mode (desktop users often want full form)
     try {
@@ -362,3 +483,4 @@
 })();
 </script>
 {% endblock %}
+

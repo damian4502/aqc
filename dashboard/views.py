@@ -1537,16 +1537,113 @@ def serial_monitor(request):
     return render(request, 'dashboard/serial_monitor.html')
 
 
+def _normalize_match_text(text):
+    """Lowercase and treat comma as decimal point (PM2,5 == PM2.5)."""
+    return (text or '').lower().replace(',', '.')
+
+
+_SLO_CASE_SUFFIXES = (
+    'ami', 'ama', 'oma', 'ema', 'ah', 'am', 'ih', 'im',
+    'je', 'ja', 'ju', 'ji', 'o', 'e', 'i', 'a', 'u',
+)
+
+
+def _inflected_forms(word):
+    """Nominative plus common Slovenian case endings for a single token."""
+    word = _normalize_match_text(word).strip()
+    forms = {word}
+    if not word or any(ch.isdigit() for ch in word) or len(word) <= 3:
+        return forms
+    stem = word[:-1] if word[-1] in 'aeiou' else word
+    if len(stem) < 3:
+        return forms
+    for suffix in _SLO_CASE_SUFFIXES:
+        forms.add(stem + suffix)
+    return forms
+
+
+def detect_rooms_and_parameters(text, rooms, parameters):
+    """Find rooms/parameters whose names appear in title or description.
+
+    Longest names win so "Dnevna soba" is not also matched as "Soba".
+    Matches are case-insensitive tokens, including Slovenian case endings
+    (kuhinja / kuhinji). Parameter identifier is also considered (pm25, co2).
+    """
+    import re
+
+    haystack = _normalize_match_text(text)
+    if not haystack.strip():
+        return [], []
+
+    def find_span(labels):
+        """Return (start, end) of the earliest non-overlapping match for labels."""
+        best = None
+        for raw in labels:
+            raw = _normalize_match_text(raw).strip()
+            if len(raw) < 2 or raw.isdigit():
+                continue
+            words = raw.split()
+            word_forms = [_inflected_forms(w) for w in words]
+            pos = 0
+            span_start = None
+            span_end = None
+            ok = True
+            for forms in word_forms:
+                found = None
+                for form in sorted(forms, key=len, reverse=True):
+                    pattern = r'(?<!\w)' + re.escape(form) + r'(?!\w)'
+                    match = re.search(pattern, haystack[pos:])
+                    if not match:
+                        continue
+                    abs_start = pos + match.start()
+                    abs_end = pos + match.end()
+                    if found is None or abs_start < found[0]:
+                        found = (abs_start, abs_end)
+                if not found:
+                    ok = False
+                    break
+                if span_start is None:
+                    span_start = found[0]
+                span_end = found[1]
+                pos = found[1]
+            if ok and span_start is not None:
+                cand = (span_start, span_end)
+                if best is None or cand[0] < best[0] or (cand[0] == best[0] and cand[1] > best[1]):
+                    best = cand
+        return best
+
+    def collect(items, extra_attr=None):
+        ranked = sorted(items, key=lambda o: -len(o.name))
+        matched = []
+        occupied = []
+        for obj in ranked:
+            labels = [obj.name]
+            extra = getattr(obj, extra_attr, None) if extra_attr else None
+            if extra:
+                labels.append(extra)
+            span = find_span(labels)
+            if not span:
+                continue
+            start, end = span
+            if any(start < occ_end and end > occ_start for occ_start, occ_end in occupied):
+                continue
+            occupied.append((start, end))
+            matched.append(obj)
+        return matched
+
+    return collect(rooms), collect(parameters, extra_attr='identifier')
+
+
 def event_create(request):
     """Add a new Event. Supports quick (title + time) and full form modes."""
     from django.contrib import messages
     from django.shortcuts import redirect
     from parameters.models import Parameter
-    from django.utils.dateparse import parse_datetime
     from datetime import datetime as dt
+    import json
 
-    rooms = Room.objects.all().order_by('order', 'name')
-    parameters = Parameter.objects.all().order_by('order', 'name')
+    rooms = list(Room.objects.all().order_by('order', 'name'))
+    parameters = list(Parameter.objects.all().order_by('order', 'name'))
     recent_events = Event.objects.prefetch_related('rooms', 'parameters').order_by('-timestamp')[:15]
 
     # Default timestamp: now in local timezone, formatted for datetime-local input
@@ -1564,9 +1661,9 @@ def event_create(request):
 
         errors = []
         if not title:
-            errors.append('Event title is required.')
+            errors.append('Naziv dogodka je obvezen.')
         if not timestamp_raw:
-            errors.append('Date and time are required.')
+            errors.append('Datum in čas sta obvezna.')
 
         event_ts = None
         if timestamp_raw:
@@ -1578,7 +1675,7 @@ def event_create(request):
                     naive = dt.strptime(timestamp_raw[:16], '%Y-%m-%d %H:%M')
                 event_ts = timezone.make_aware(naive, timezone.get_current_timezone())
             except (ValueError, TypeError):
-                errors.append('Invalid date and time format.')
+                errors.append('Neveljaven format datuma in časa.')
 
         # Validate color as simple hex
         if color and not (color.startswith('#') and len(color) in (4, 7)):
@@ -1594,16 +1691,34 @@ def event_create(request):
                 description=description,
                 color=color or '#10b981',
             )
-            if room_ids:
-                event.rooms.set(Room.objects.filter(id__in=room_ids))
-            if parameter_ids:
-                event.parameters.set(Parameter.objects.filter(id__in=parameter_ids))
 
-            messages.success(
-                request,
-                f'Event "{event.title}" saved '
-                f'({timezone.localtime(event.timestamp).strftime("%d.%m.%Y %H:%M")}).'
-            )
+            linked_rooms = []
+            linked_params = []
+            if mode == 'quick':
+                linked_rooms, linked_params = detect_rooms_and_parameters(
+                    f'{title} {description}', rooms, parameters
+                )
+            else:
+                if room_ids:
+                    linked_rooms = list(Room.objects.filter(id__in=room_ids))
+                if parameter_ids:
+                    linked_params = list(Parameter.objects.filter(id__in=parameter_ids))
+
+            if linked_rooms:
+                event.rooms.set(linked_rooms)
+            if linked_params:
+                event.parameters.set(linked_params)
+
+            when = timezone.localtime(event.timestamp).strftime('%d.%m.%Y %H:%M')
+            msg = f'Dogodek „{event.title}“ shranjen ({when}).'
+            extras = []
+            if linked_rooms:
+                extras.append('prostori: ' + ', '.join(r.name for r in linked_rooms))
+            if linked_params:
+                extras.append('parametri: ' + ', '.join(p.name for p in linked_params))
+            if extras:
+                msg += ' Povezano — ' + '; '.join(extras) + '.'
+            messages.success(request, msg)
             # Stay on page for quick successive adds (esp. mobile)
             return redirect('event_create')
 
@@ -1612,15 +1727,22 @@ def event_create(request):
         'parameters': parameters,
         'recent_events': recent_events,
         'default_timestamp': default_timestamp,
+        'detect_catalog': json.dumps({
+            'rooms': [{'id': r.id, 'name': r.name} for r in rooms],
+            'parameters': [
+                {'id': p.id, 'name': p.name, 'identifier': p.identifier}
+                for p in parameters
+            ],
+        }, ensure_ascii=False),
         'color_presets': [
-            ('#10b981', 'Green'),
-            ('#3b82f6', 'Blue'),
-            ('#f59e0b', 'Orange'),
-            ('#ef4444', 'Red'),
-            ('#a855f7', 'Purple'),
-            ('#06b6d4', 'Cyan'),
-            ('#eab308', 'Yellow'),
-            ('#f43f5e', 'Pink'),
+            ('#10b981', 'Zelena'),
+            ('#3b82f6', 'Modra'),
+            ('#f59e0b', 'Oranžna'),
+            ('#ef4444', 'Rdeča'),
+            ('#a855f7', 'Vijolična'),
+            ('#06b6d4', 'Cian'),
+            ('#eab308', 'Rumena'),
+            ('#f43f5e', 'Roza'),
         ],
     }
     return render(request, 'dashboard/event_form.html', context)
