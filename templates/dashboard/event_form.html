@@ -66,7 +66,7 @@
                           focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30
                           placeholder:text-slate-600">
             <p class="text-xs text-slate-500 mt-2">
-                Če v naslovu omeniš prostor ali parameter, se povezava ustvari sama.
+                Če v naslovu ali opisu omeniš prostor ali parameter, se povezava ustvari sama.
             </p>
             <div id="detected-links" class="hidden mt-2 flex flex-wrap gap-1.5"></div>
         </div>
@@ -157,7 +157,7 @@
                     <p class="text-sm text-slate-500 px-3 py-2">Ni definiranih prostorov.</p>
                     {% endfor %}
                 </div>
-                <p class="text-xs text-slate-500 mt-1.5">Če ne izbereš nobenega, dogodek ni vezan na prostor.</p>
+                <p class="text-xs text-slate-500 mt-1.5">Zaznani iz naslova/opisa se obkljukajo sami. Lahko dodaš še druge.</p>
             </div>
 
             <!-- Parameters -->
@@ -186,7 +186,7 @@
                     <p class="text-sm text-slate-500 px-3 py-2">Ni definiranih parametrov.</p>
                     {% endfor %}
                 </div>
-                <p class="text-xs text-slate-500 mt-1.5">Neobvezno — za označevanje na grafih parametrov.</p>
+                <p class="text-xs text-slate-500 mt-1.5">Zaznani iz naslova/opisa se obkljukajo sami. Neobvezno za grafe.</p>
             </div>
         </div>
 
@@ -413,6 +413,8 @@
         return matched;
     }
 
+    const autoChecked = { rooms: new Set(), parameters: new Set() };
+
     function chip(label, kind) {
         const color = kind === 'room'
             ? 'bg-sky-500/15 text-sky-300 border-sky-500/30'
@@ -422,16 +424,29 @@
             color + '"><i class="fas ' + icon + ' text-[10px]"></i>' + label + '</span>';
     }
 
+    function syncCheckboxes(name, detectedItems) {
+        const detectedIds = new Set((detectedItems || []).map(function (o) { return String(o.id); }));
+        document.querySelectorAll('input[name="' + name + '"]').forEach(function (el) {
+            const id = el.value;
+            if (detectedIds.has(id)) {
+                if (!el.checked) {
+                    el.checked = true;
+                    autoChecked[name].add(id);
+                }
+            } else if (autoChecked[name].has(id)) {
+                el.checked = false;
+                autoChecked[name].delete(id);
+            }
+        });
+    }
+
     function updateDetected() {
         if (!detectedBox) return;
-        if (modeInput.value !== 'quick') {
-            detectedBox.classList.add('hidden');
-            detectedBox.innerHTML = '';
-            return;
-        }
         const hay = normalize((titleInput.value || '') + ' ' + ((descInput && descInput.value) || ''));
         const rooms = collectMatches(hay, catalog.rooms);
         const params = collectMatches(hay, catalog.parameters);
+        syncCheckboxes('rooms', rooms);
+        syncCheckboxes('parameters', params);
         if (!rooms.length && !params.length) {
             detectedBox.classList.add('hidden');
             detectedBox.innerHTML = '';

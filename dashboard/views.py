@@ -1634,6 +1634,17 @@ def detect_rooms_and_parameters(text, rooms, parameters):
     return collect(rooms), collect(parameters, extra_attr='identifier')
 
 
+def _merge_unique(primary, extra):
+    """Preserve primary order, then append extras not already present."""
+    seen = {obj.id for obj in primary}
+    merged = list(primary)
+    for obj in extra:
+        if obj.id not in seen:
+            seen.add(obj.id)
+            merged.append(obj)
+    return merged
+
+
 def event_create(request):
     """Add a new Event. Supports quick (title + time) and full form modes."""
     from django.contrib import messages
@@ -1694,15 +1705,13 @@ def event_create(request):
 
             linked_rooms = []
             linked_params = []
-            if mode == 'quick':
-                linked_rooms, linked_params = detect_rooms_and_parameters(
-                    f'{title} {description}', rooms, parameters
-                )
-            else:
-                if room_ids:
-                    linked_rooms = list(Room.objects.filter(id__in=room_ids))
-                if parameter_ids:
-                    linked_params = list(Parameter.objects.filter(id__in=parameter_ids))
+            detected_rooms, detected_params = detect_rooms_and_parameters(
+                f'{title} {description}', rooms, parameters
+            )
+            checked_rooms = list(Room.objects.filter(id__in=room_ids)) if room_ids else []
+            checked_params = list(Parameter.objects.filter(id__in=parameter_ids)) if parameter_ids else []
+            linked_rooms = _merge_unique(detected_rooms, checked_rooms)
+            linked_params = _merge_unique(detected_params, checked_params)
 
             if linked_rooms:
                 event.rooms.set(linked_rooms)
