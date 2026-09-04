@@ -1495,6 +1495,325 @@ def trends_view(request):
     return render(request, 'dashboard/trends.html', context)
 
 
+def correlations_view(request):
+    """Cross-room / cross-parameter correlation page.
+
+    The user picks any number of rooms and parameters plus a time window.
+    Each (room, parameter) pair becomes a resampled series; Pearson or
+    Spearman r is then computed between every pair of series.
+    """
+    from django.utils.dateparse import parse_datetime
+    from rooms.models import RoomGroup
+    import json
+    from dashboard.correlations import (
+        MAX_SERIES,
+        MIN_OVERLAP,
+        downsample_series,
+        make_series_label,
+        pairwise_correlations,
+    )
+
+    rooms = list(Room.objects.all().order_by("order", "name"))
+    parameters = list(Parameter.objects.all().order_by("order", "name"))
+    groups = list(RoomGroup.objects.prefetch_related("rooms").order_by("name"))
+
+    selected_room_ids = []
+    for raw in request.GET.getlist("room"):
+        try:
+            selected_room_ids.append(int(raw))
+        except (TypeError, ValueError):
+            continue
+    selected_parameter_ids = []
+    for raw in request.GET.getlist("parameter"):
+        try:
+            selected_parameter_ids.append(int(raw))
+        except (TypeError, ValueError):
+            continue
+
+    # Remember last checkbox set, but only auto-compute when the query
+    # string actually carries a selection (shareable URLs still work).
+    has_query_selection = bool(
+        request.GET.getlist("room") or request.GET.getlist("parameter")
+    )
+    if has_query_selection:
+        request.session["corr_rooms"] = selected_room_ids
+        request.session["corr_parameters"] = selected_parameter_ids
+    elif not request.GET:
+        selected_room_ids = list(request.session.get("corr_rooms") or [])
+        selected_parameter_ids = list(request.session.get("corr_parameters") or [])
+
+    method = (request.GET.get("method") or "pearson").strip().lower()
+    if method not in ("pearson", "spearman"):
+        method = "pearson"
+
+    try:
+        min_overlap = int(request.GET.get("min_overlap", MIN_OVERLAP) or MIN_OVERLAP)
+    except (TypeError, ValueError):
+        min_overlap = MIN_OVERLAP
+    min_overlap = max(5, min(min_overlap, 500))
+
+    all_data = request.GET.get("all") == "true"
+    start_date_str = request.GET.get("start")
+    end_date_str = request.GET.get("end")
+    quick_days = request.GET.get("quick")
+    quick_hours = request.GET.get("quickh")
+
+    if all_data:
+        start_date = None
+        end_date = timezone.now()
+        context_start = ""
+        context_end = ""
+    else:
+        if quick_days:
+            try:
+                days = int(quick_days)
+                start_date = timezone.now() - timedelta(days=days)
+                end_date = timezone.now()
+            except (TypeError, ValueError):
+                start_date = timezone.now() - timedelta(days=7)
+                end_date = timezone.now()
+        elif quick_hours:
+            try:
+                hours = int(quick_hours)
+                start_date = timezone.now() - timedelta(hours=hours)
+                end_date = timezone.now()
+            except (TypeError, ValueError):
+                start_date = timezone.now() - timedelta(days=7)
+                end_date = timezone.now()
+        elif start_date_str and end_date_str:
+            try:
+                start_date = parse_datetime(start_date_str)
+                end_date = parse_datetime(end_date_str)
+                if start_date is None:
+                    start_date = datetime.strptime(start_date_str[:10], "%Y-%m-%d")
+                if end_date is None:
+                    end_date = datetime.strptime(end_date_str[:10], "%Y-%m-%d").replace(
+                        hour=23, minute=59, second=59
+                    )
+                if timezone.is_naive(start_date):
+                    start_date = timezone.make_aware(start_date)
+                if timezone.is_naive(end_date):
+                    end_date = timezone.make_aware(end_date)
+            except (ValueError, TypeError):
+                start_date = timezone.now() - timedelta(days=7)
+                end_date = timezone.now()
+        else:
+            start_date = timezone.now() - timedelta(days=7)
+            end_date = timezone.now()
+
+        context_start = start_date.strftime("%Y-%m-%d") if start_date else ""
+        context_end = end_date.strftime("%Y-%m-%d") if end_date else ""
+        request.session["chart_start_date"] = context_start
+        request.session["chart_end_date"] = context_end
+
+    try:
+        interval_minutes = int(
+            request.GET.get("interval", request.session.get("resample_interval", 15)) or 15
+        )
+    except (TypeError, ValueError):
+        interval_minutes = 15
+    fill_method = request.GET.get(
+        "fill_method", request.session.get("resample_fill_method", "ffill")
+    )
+    if "spike_factor" in request.GET:
+        spike_factor = parse_spike_factor(request.GET.get("spike_factor"))
+    elif "ignore_spikes" in request.GET:
+        spike_factor = parse_spike_factor(request.GET.get("ignore_spikes"), default=0.0)
+    else:
+        spike_factor = parse_spike_factor(request.session.get("spike_factor"), default=0.0)
+        if spike_factor == 0.0 and request.session.get("ignore_spikes"):
+            spike_factor = 2.5
+
+    request.session["resample_interval"] = interval_minutes
+    request.session["resample_fill_method"] = fill_method
+    request.session["spike_factor"] = spike_factor
+
+    selected_rooms = [r for r in rooms if r.id in selected_room_ids]
+    selected_parameters = [p for p in parameters if p.id in selected_parameter_ids]
+
+    include_room = len(selected_rooms) != 1
+    include_parameter = len(selected_parameters) != 1
+
+    n_series_selected = len(selected_rooms) * len(selected_parameters)
+    truncated = False
+    compute_error = None
+    should_compute = has_query_selection and n_series_selected >= 2
+
+    corr_matrix = None
+    pairs = []
+    fig_html = None
+    scatter_json = "{}"
+    series_count = 0
+    sample_count = 0
+    skipped_constant = 0
+    title = "Correlations"
+
+    if should_compute and n_series_selected > MAX_SERIES:
+        truncated = True
+        compute_error = (
+            f"That selection would build {n_series_selected} series "
+            f"(limit is {MAX_SERIES}). Narrow the rooms or parameters."
+        )
+        should_compute = False
+    elif has_query_selection and n_series_selected == 1:
+        compute_error = "Need at least two series — add another room or parameter."
+    elif has_query_selection and n_series_selected == 0:
+        compute_error = "Select at least one room and one parameter."
+
+    if should_compute:
+        qs = Measurement.objects.filter(
+            sensor__room_id__in=selected_room_ids,
+            parameter_id__in=selected_parameter_ids,
+        ).select_related("sensor__room", "parameter")
+        if not all_data and start_date:
+            qs = qs.filter(timestamp__gte=start_date, timestamp__lte=end_date)
+
+        measurements = qs.order_by("timestamp")
+        if not measurements.exists():
+            compute_error = "No measurements in this period for the selected series."
+        else:
+            df = pd.DataFrame(
+                list(
+                    measurements.values(
+                        "timestamp",
+                        "value",
+                        "sensor__room__name",
+                        "parameter__name",
+                    )
+                )
+            )
+            df["timestamp"] = pd.to_datetime(df["timestamp"])
+            df["parameter"] = [
+                make_series_label(
+                    room,
+                    param,
+                    include_room=include_room,
+                    include_parameter=include_parameter,
+                )
+                for room, param in zip(
+                    df["sensor__room__name"], df["parameter__name"]
+                )
+            ]
+
+            resampled = resample_measurements(
+                df, interval_minutes, fill_method, spike_factor=spike_factor
+            )
+            if resampled is None or resampled.empty:
+                compute_error = "No overlapping samples after resampling."
+            else:
+                resampled = resampled.dropna(axis=1, how="all")
+                series_count = len(resampled.columns)
+                sample_count = int(len(resampled))
+                if series_count < 2:
+                    compute_error = (
+                        "Fewer than two series have data in this period."
+                    )
+                else:
+                    corr_matrix, pairs, _counts = pairwise_correlations(
+                        resampled, method=method, min_overlap=min_overlap
+                    )
+                    skipped_constant = series_count * (series_count - 1) // 2 - len(pairs)
+
+                    if include_room and include_parameter:
+                        title = "Cross-series correlation"
+                    elif include_room:
+                        title = f"Room correlation — {selected_parameters[0].name}"
+                    else:
+                        title = f"Parameter correlation — {selected_rooms[0].name}"
+
+                    method_label = "Pearson" if method == "pearson" else "Spearman"
+                    if corr_matrix.empty or corr_matrix.shape[0] < 2:
+                        compute_error = (
+                            "Not enough overlapping samples to compute correlations."
+                        )
+                    else:
+                        fig = px.imshow(
+                            corr_matrix,
+                            text_auto=".2f",
+                            aspect="auto",
+                            color_continuous_scale="RdBu_r",
+                            zmin=-1,
+                            zmax=1,
+                            title=(
+                                f"{title} ({method_label}, {interval_minutes} min bins)"
+                            ),
+                        )
+                        height = min(1100, max(420, 90 + 34 * series_count))
+                        fig.update_layout(
+                            height=height,
+                            xaxis=dict(tickangle=45, side="bottom"),
+                            yaxis=dict(autorange="reversed"),
+                            coloraxis_colorbar=dict(title="r"),
+                        )
+                        fig = apply_dark_theme(fig, animate=False)
+                        fig_html = fig.to_html(
+                            full_html=False, include_plotlyjs="cdn"
+                        )
+                        try:
+                            scatter_json = json.dumps(
+                                downsample_series(resampled),
+                                ensure_ascii=False,
+                                allow_nan=False,
+                            )
+                        except (TypeError, ValueError):
+                            scatter_json = "{}"
+
+                        if request.GET.get("format") == "csv":
+                            response = HttpResponse(content_type="text/csv")
+                            filename = f"correlations_{method}_{interval_minutes}min.csv"
+                            response["Content-Disposition"] = (
+                                f'attachment; filename="{filename}"'
+                            )
+                            corr_matrix.to_csv(response, float_format="%.4f")
+                            return response
+
+    period_label = "all data" if all_data else None
+    if not period_label and start_date and end_date:
+        period_label = (
+            f"{timezone.localtime(start_date).strftime('%d %b %Y %H:%M')} – "
+            f"{timezone.localtime(end_date).strftime('%d %b %Y %H:%M')}"
+        )
+
+    groups_payload = [
+        {"id": g.id, "name": g.name, "room_ids": [r.id for r in g.rooms.all()]}
+        for g in groups
+    ]
+
+    context = {
+        "rooms": rooms,
+        "parameters": parameters,
+        "groups": groups,
+        "groups_json": json.dumps(groups_payload),
+        "selected_room_ids": set(selected_room_ids),
+        "selected_parameter_ids": set(selected_parameter_ids),
+        "method": method,
+        "min_overlap": min_overlap,
+        "start_date": context_start,
+        "end_date": context_end,
+        "start": start_date,
+        "end": end_date,
+        "all_data": all_data,
+        "interval": interval_minutes,
+        "fill_method": fill_method,
+        "spike_factor": spike_factor,
+        "fig": fig_html,
+        "pairs": pairs,
+        "scatter_json": scatter_json,
+        "compute_error": compute_error,
+        "truncated": truncated,
+        "has_query_selection": has_query_selection,
+        "series_count": series_count,
+        "sample_count": sample_count,
+        "pair_count": len(pairs),
+        "skipped_constant": skipped_constant,
+        "period_label": period_label,
+        "title": title,
+        "n_series_selected": n_series_selected,
+        "max_series": MAX_SERIES,
+    }
+    return render(request, "dashboard/correlations.html", context)
+
+
 def differential_pressure_view(request):
     pressure_param = Parameter.objects.filter(id=11).first()
 

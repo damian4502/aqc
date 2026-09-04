@@ -13,6 +13,7 @@ urlpatterns = [
     path('api/room/<int:room_id>/live/', room_live_data, name='room_live_data'),
     path('parameter/<int:parameter_id>/export/', export_parameter_csv, name='export_parameter_csv'),
     path('trends/', trends_view, name='trends'),
+    path('correlations/', correlations_view, name='correlations'),
     path('monitor/', monitor, name='monitor'),
     path('differential-pressure/', differential_pressure_view, name='differential_pressure'),
     path('custom/<int:dashboard_id>/', custom_dashboard, name='custom_dashboard'),

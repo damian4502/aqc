@@ -1,0 +1,478 @@
+{% extends "base.html" %}
+
+{% block title %}Correlations - Air Quality Control{% endblock %}
+
+{% block content %}
+<div class="max-w-7xl mx-auto space-y-8">
+
+    <div class="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
+        <div>
+            <h1 class="text-4xl sm:text-5xl font-bold text-white tracking-tighter">Correlations</h1>
+            <p class="text-slate-400 mt-2 max-w-2xl">
+                Pick any rooms and parameters, then a time window. Each room × parameter
+                pair becomes a series; the matrix shows how those series move together.
+            </p>
+        </div>
+        <div class="text-xs text-slate-500">
+            r near <span class="text-emerald-400 font-medium">+1</span> moves together,
+            r near <span class="text-rose-400 font-medium">−1</span> opposite,
+            r near 0 is little linear relationship.
+        </div>
+    </div>
+
+    <form method="get" id="corr-form" class="space-y-6">
+
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <!-- Rooms -->
+            <div class="glass rounded-3xl p-6">
+                <div class="flex items-center justify-between mb-3">
+                    <label class="text-sm font-medium text-slate-200">
+                        <i class="fas fa-door-open mr-1.5 text-blue-400"></i> Rooms
+                    </label>
+                    <div class="flex gap-2 text-xs">
+                        <button type="button" onclick="toggleAll('room', true)" class="text-blue-400 hover:underline">All</button>
+                        <span class="text-slate-600">|</span>
+                        <button type="button" onclick="toggleAll('room', false)" class="text-slate-400 hover:underline">None</button>
+                    </div>
+                </div>
+                {% if groups %}
+                <div class="flex flex-wrap gap-2 mb-3" id="group-chips">
+                    {% for g in groups %}
+                    <button type="button"
+                            data-group-id="{{ g.id }}"
+                            onclick="toggleGroup({{ g.id }})"
+                            class="group-chip px-3 py-1.5 rounded-xl text-[11px] bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700">
+                        {{ g.name }}
+                    </button>
+                    {% endfor %}
+                </div>
+                {% endif %}
+                <div class="bg-slate-900/70 border border-slate-700 rounded-2xl p-3 max-h-56 overflow-y-auto space-y-1">
+                    {% for room in rooms %}
+                    <label class="flex items-center gap-3 px-2 py-1.5 rounded-xl hover:bg-slate-800/80 cursor-pointer text-sm">
+                        <input type="checkbox" name="room" value="{{ room.id }}"
+                               class="room-cb accent-blue-500 w-4 h-4"
+                               {% if room.id in selected_room_ids %}checked{% endif %}>
+                        <span class="text-slate-200">{{ room.name }}</span>
+                    </label>
+                    {% empty %}
+                    <p class="text-slate-500 text-sm px-2 py-2">No rooms defined.</p>
+                    {% endfor %}
+                </div>
+                <p class="text-[11px] text-slate-500 mt-2"><span id="room-count">0</span> selected</p>
+            </div>
+
+            <!-- Parameters -->
+            <div class="glass rounded-3xl p-6">
+                <div class="flex items-center justify-between mb-3">
+                    <label class="text-sm font-medium text-slate-200">
+                        <i class="fas fa-sliders-h mr-1.5 text-cyan-400"></i> Parameters
+                    </label>
+                    <div class="flex gap-2 text-xs">
+                        <button type="button" onclick="toggleAll('parameter', true)" class="text-blue-400 hover:underline">All</button>
+                        <span class="text-slate-600">|</span>
+                        <button type="button" onclick="toggleAll('parameter', false)" class="text-slate-400 hover:underline">None</button>
+                    </div>
+                </div>
+                <div class="bg-slate-900/70 border border-slate-700 rounded-2xl p-3 max-h-56 overflow-y-auto space-y-1">
+                    {% for p in parameters %}
+                    <label class="flex items-center gap-3 px-2 py-1.5 rounded-xl hover:bg-slate-800/80 cursor-pointer text-sm">
+                        <input type="checkbox" name="parameter" value="{{ p.id }}"
+                               class="param-cb accent-cyan-500 w-4 h-4"
+                               {% if p.id in selected_parameter_ids %}checked{% endif %}>
+                        <span class="text-slate-200">{{ p.name }}</span>
+                        {% if p.unit %}<span class="text-slate-500 text-xs">{{ p.unit }}</span>{% endif %}
+                    </label>
+                    {% empty %}
+                    <p class="text-slate-500 text-sm px-2 py-2">No parameters defined.</p>
+                    {% endfor %}
+                </div>
+                <p class="text-[11px] text-slate-500 mt-2">
+                    <span id="param-count">0</span> selected
+                    · <span id="series-preview">0</span> series
+                    <span id="series-warn" class="hidden text-amber-400"> (over the {{ max_series }} limit)</span>
+                </p>
+            </div>
+        </div>
+
+        <!-- Time range + resampling -->
+        <div class="glass rounded-3xl p-6">
+            <div class="flex flex-wrap items-end gap-5">
+
+                <div class="flex gap-4 items-end">
+                    <div>
+                        <label class="block text-sm text-slate-400 mb-1">From</label>
+                        <input type="datetime-local" name="start" id="start_date"
+                               value="{{ start|date:'Y-m-d\TH:i' }}"
+                               class="bg-slate-800 border border-slate-700 rounded-2xl px-4 py-3 text-white focus:outline-none focus:border-blue-500">
+                    </div>
+                    <div>
+                        <label class="block text-sm text-slate-400 mb-1">To</label>
+                        <input type="datetime-local" name="end" id="end_date"
+                               value="{{ end|date:'Y-m-d\TH:i' }}"
+                               class="bg-slate-800 border border-slate-700 rounded-2xl px-4 py-3 text-white focus:outline-none focus:border-blue-500">
+                    </div>
+                </div>
+
+                <div>
+                    <label class="block text-xs text-slate-400 mb-1.5">Method</label>
+                    <select name="method" id="method"
+                            class="bg-slate-900 border border-slate-700 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:border-blue-500 min-w-[140px]">
+                        <option value="pearson" {% if method == 'pearson' %}selected{% endif %}>Pearson r</option>
+                        <option value="spearman" {% if method == 'spearman' %}selected{% endif %}>Spearman ρ</option>
+                    </select>
+                </div>
+
+                <div class="min-w-[220px] flex-1">
+                    <label class="block text-xs text-slate-400 mb-1.5">Resampling</label>
+                    <div class="flex gap-3">
+                        <select name="interval" id="interval"
+                                class="flex-1 bg-slate-900 border border-slate-700 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:border-blue-500">
+                            <option value="1"    {% if interval == 1 %}selected{% endif %}>1 min</option>
+                            <option value="5"    {% if interval == 5 %}selected{% endif %}>5 min</option>
+                            <option value="15"   {% if interval == 15 %}selected{% endif %}>15 min</option>
+                            <option value="60"   {% if interval == 60 %}selected{% endif %}>1 hour</option>
+                            <option value="1440" {% if interval == 1440 %}selected{% endif %}>1 day</option>
+                        </select>
+                        <select name="fill_method" id="fill_method"
+                                class="flex-1 bg-slate-900 border border-slate-700 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:border-blue-500">
+                            <option value="ffill"       {% if fill_method == 'ffill' %}selected{% endif %}>Forward fill</option>
+                            <option value="interpolate" {% if fill_method == 'interpolate' %}selected{% endif %}>Interpolation</option>
+                            <option value="bfill"       {% if fill_method == 'bfill' %}selected{% endif %}>Backward fill</option>
+                            <option value="zero"        {% if fill_method == 'zero' %}selected{% endif %}>Fill with 0</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div>
+                    <label class="block text-xs text-slate-400 mb-1.5">Ignore spikes</label>
+                    <select name="spike_factor" id="spike_factor"
+                            class="bg-slate-900 border border-slate-700 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:border-blue-500 min-w-[140px]">
+                        <option value="0"   {% if not spike_factor or spike_factor == 0 %}selected{% endif %}>Off</option>
+                        <option value="3.5" {% if spike_factor == 3.5 %}selected{% endif %}>Mild</option>
+                        <option value="2.5" {% if spike_factor == 2.5 %}selected{% endif %}>Medium</option>
+                        <option value="1.5" {% if spike_factor == 1.5 %}selected{% endif %}>Aggressive</option>
+                    </select>
+                </div>
+
+                <div>
+                    <label class="block text-xs text-slate-400 mb-1.5">Min. overlap</label>
+                    <input type="number" name="min_overlap" id="min_overlap" min="5" max="500" step="1"
+                           value="{{ min_overlap }}"
+                           class="w-24 bg-slate-900 border border-slate-700 rounded-2xl px-4 py-3 text-sm text-white focus:outline-none focus:border-blue-500">
+                </div>
+            </div>
+
+            <div class="flex flex-wrap items-center gap-3 mt-5">
+                <button type="button" data-hours="1"  class="quick-date-btn px-4 py-2.5 text-sm rounded-2xl {% if request.GET.quickh == '1' %}bg-blue-600 text-white{% else %}bg-slate-800 hover:bg-slate-700{% endif %}">1h</button>
+                <button type="button" data-hours="8"  class="quick-date-btn px-4 py-2.5 text-sm rounded-2xl {% if request.GET.quickh == '8' %}bg-blue-600 text-white{% else %}bg-slate-800 hover:bg-slate-700{% endif %}">8h</button>
+                <button type="button" data-days="1"   class="quick-date-btn px-4 py-2.5 text-sm rounded-2xl {% if request.GET.quick == '1' %}bg-blue-600 text-white{% else %}bg-slate-800 hover:bg-slate-700{% endif %}">24h</button>
+                <button type="button" data-days="7"   class="quick-date-btn px-4 py-2.5 text-sm rounded-2xl {% if request.GET.quick == '7' or not request.GET.quick and not request.GET.quickh and not all_data %}bg-blue-600 text-white{% else %}bg-slate-800 hover:bg-slate-700{% endif %}">7d</button>
+                <button type="button" data-days="30"  class="quick-date-btn px-4 py-2.5 text-sm rounded-2xl {% if request.GET.quick == '30' %}bg-blue-600 text-white{% else %}bg-slate-800 hover:bg-slate-700{% endif %}">30d</button>
+                <button type="button" data-days="0"   class="quick-date-btn px-4 py-2.5 text-sm rounded-2xl {% if all_data %}bg-blue-600 text-white{% else %}bg-slate-800 hover:bg-slate-700{% endif %}">All</button>
+
+                <input type="hidden" name="all" id="all_data" value="{% if all_data %}true{% endif %}">
+
+                <div class="flex-1"></div>
+
+                <button type="submit"
+                        class="bg-blue-600 hover:bg-blue-500 px-6 py-3 rounded-2xl text-sm font-medium transition-all">
+                    Compute correlations
+                </button>
+                {% if fig %}
+                <button type="submit" name="format" value="csv"
+                        class="bg-emerald-600 hover:bg-emerald-500 px-6 py-3 rounded-2xl text-sm font-medium transition-all flex items-center gap-2">
+                    <i class="fas fa-download"></i>
+                    Export CSV
+                </button>
+                {% endif %}
+            </div>
+            <p class="text-[11px] text-slate-500 mt-3">
+                Pearson measures linear co-movement. Spearman uses ranks, so it also
+                catches steady but non-linear relationships and is less sensitive to spikes.
+            </p>
+        </div>
+    </form>
+
+    {% if compute_error %}
+    <div class="glass rounded-3xl p-8 border-l-4 border-amber-500">
+        <p class="text-amber-200">{{ compute_error }}</p>
+    </div>
+    {% elif not has_query_selection %}
+    <div class="glass rounded-3xl p-16 text-center">
+        <i class="fas fa-project-diagram text-4xl text-slate-600 mb-4"></i>
+        <p class="text-slate-300 text-lg">Select rooms and parameters, then compute.</p>
+        <p class="text-slate-500 text-sm mt-2">
+            Two rooms of the same parameter show spatial coupling.
+            Two parameters in one room show how those quantities travel together.
+        </p>
+    </div>
+    {% endif %}
+
+    {% if fig %}
+    <div class="flex flex-wrap gap-3 text-xs">
+        <span class="px-3 py-1.5 rounded-full bg-slate-800 text-slate-300">{{ series_count }} series</span>
+        <span class="px-3 py-1.5 rounded-full bg-slate-800 text-slate-300">{{ pair_count }} pairs</span>
+        <span class="px-3 py-1.5 rounded-full bg-slate-800 text-slate-300">{{ sample_count }} bins</span>
+        {% if period_label %}
+        <span class="px-3 py-1.5 rounded-full bg-slate-800 text-slate-300">{{ period_label }}</span>
+        {% endif %}
+        <span class="px-3 py-1.5 rounded-full bg-slate-800 text-slate-300">{{ method|title }}</span>
+        {% if skipped_constant %}
+        <span class="px-3 py-1.5 rounded-full bg-slate-800 text-slate-500">{{ skipped_constant }} pairs skipped (overlap / constant)</span>
+        {% endif %}
+    </div>
+
+    <div class="glass rounded-3xl p-4 sm:p-8 overflow-x-auto">
+        <p class="text-xs text-slate-500 mb-3">Click a cell to open the scatter plot for that pair.</p>
+        <div id="corr-heatmap" class="w-full rounded-3xl overflow-hidden">
+            {{ fig|safe }}
+        </div>
+    </div>
+
+    <div id="scatter-card" class="glass rounded-3xl p-6 hidden">
+        <div class="flex items-start justify-between gap-4 mb-3">
+            <div>
+                <h2 class="text-xl font-semibold text-white" id="scatter-title">Scatter</h2>
+                <p class="text-xs text-slate-500 mt-1" id="scatter-sub"></p>
+            </div>
+            <button type="button" onclick="hideScatter()"
+                    class="text-slate-400 hover:text-white px-3 py-2 rounded-xl hover:bg-slate-800">
+                <i class="fas fa-times"></i>
+            </button>
+        </div>
+        <div id="scatter-plot" class="w-full" style="height: 420px;"></div>
+    </div>
+
+    {% if pairs %}
+    <div class="glass rounded-3xl p-6">
+        <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
+            <h2 class="text-xl font-semibold text-white">Ranked pairs</h2>
+            <div class="flex flex-wrap gap-2 text-xs" id="pair-filters">
+                <button type="button" data-filter="all" class="pair-filter px-3 py-1.5 rounded-xl bg-blue-600 text-white">All</button>
+                <button type="button" data-filter="positive" class="pair-filter px-3 py-1.5 rounded-xl bg-slate-800 text-slate-300">Positive</button>
+                <button type="button" data-filter="negative" class="pair-filter px-3 py-1.5 rounded-xl bg-slate-800 text-slate-300">Negative</button>
+                <button type="button" data-filter="strong" class="pair-filter px-3 py-1.5 rounded-xl bg-slate-800 text-slate-300">|r| ≥ 0.6</button>
+            </div>
+        </div>
+        <div class="overflow-x-auto">
+            <table class="w-full text-sm" id="pairs-table">
+                <thead>
+                    <tr class="text-left text-slate-400 border-b border-slate-700">
+                        <th class="py-2 pr-4 font-medium">Series A</th>
+                        <th class="py-2 pr-4 font-medium">Series B</th>
+                        <th class="py-2 pr-4 font-medium text-right">r</th>
+                        <th class="py-2 pr-4 font-medium">Strength</th>
+                        <th class="py-2 pr-4 font-medium">Direction</th>
+                        <th class="py-2 pr-4 font-medium text-right">n</th>
+                        <th class="py-2 font-medium text-right">p</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for pair in pairs %}
+                    <tr class="pair-row border-b border-slate-800/80 hover:bg-slate-800/40 cursor-pointer"
+                        data-dir="{{ pair.direction|lower }}"
+                        data-abs="{{ pair.abs_r }}"
+                        data-a="{{ pair.a }}"
+                        data-b="{{ pair.b }}"
+                        onclick="showScatter('{{ pair.a|escapejs }}', '{{ pair.b|escapejs }}', {{ pair.r }})">
+                        <td class="py-2.5 pr-4 text-slate-200">{{ pair.a }}</td>
+                        <td class="py-2.5 pr-4 text-slate-200">{{ pair.b }}</td>
+                        <td class="py-2.5 pr-4 text-right font-semibold tabular-nums
+                            {% if pair.r >= 0.6 %}text-emerald-400{% elif pair.r <= -0.6 %}text-rose-400{% else %}text-slate-300{% endif %}">
+                            {{ pair.r|floatformat:3 }}
+                        </td>
+                        <td class="py-2.5 pr-4 text-slate-400">{{ pair.strength }}</td>
+                        <td class="py-2.5 pr-4">
+                            {% if pair.direction == 'Positive' %}
+                                <span class="text-emerald-400">Positive</span>
+                            {% else %}
+                                <span class="text-rose-400">Negative</span>
+                            {% endif %}
+                        </td>
+                        <td class="py-2.5 pr-4 text-right text-slate-400 tabular-nums">{{ pair.n }}</td>
+                        <td class="py-2.5 text-right text-slate-400 tabular-nums">{{ pair.p_display }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    {% endif %}
+    {% endif %}
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const GROUPS = {{ groups_json|safe }};
+const SCATTER = {{ scatter_json|safe }};
+const MAX_SERIES = {{ max_series }};
+
+function checkedCount(selector) {
+    return document.querySelectorAll(selector + ':checked').length;
+}
+
+function updateCounts() {
+    const rooms = checkedCount('.room-cb');
+    const params = checkedCount('.param-cb');
+    const series = rooms * params;
+    const roomEl = document.getElementById('room-count');
+    const paramEl = document.getElementById('param-count');
+    const seriesEl = document.getElementById('series-preview');
+    const warnEl = document.getElementById('series-warn');
+    if (roomEl) roomEl.textContent = rooms;
+    if (paramEl) paramEl.textContent = params;
+    if (seriesEl) seriesEl.textContent = series;
+    if (warnEl) warnEl.classList.toggle('hidden', series <= MAX_SERIES);
+}
+
+function toggleAll(kind, on) {
+    const sel = kind === 'room' ? '.room-cb' : '.param-cb';
+    document.querySelectorAll(sel).forEach(cb => { cb.checked = on; });
+    updateCounts();
+}
+
+function toggleGroup(groupId) {
+    const group = GROUPS.find(g => g.id === groupId);
+    if (!group) return;
+    const boxes = group.room_ids
+        .map(id => document.querySelector('.room-cb[value="' + id + '"]'))
+        .filter(Boolean);
+    const allOn = boxes.length > 0 && boxes.every(cb => cb.checked);
+    boxes.forEach(cb => { cb.checked = !allOn; });
+    updateCounts();
+}
+
+function toLocalInput(date) {
+    const pad = n => String(n).padStart(2, '0');
+    return date.getFullYear() + '-' + pad(date.getMonth() + 1) + '-' + pad(date.getDate())
+        + 'T' + pad(date.getHours()) + ':' + pad(date.getMinutes());
+}
+
+function applyQuickRange(btn) {
+    const form = document.getElementById('corr-form');
+    const allInput = document.getElementById('all_data');
+    const startInput = document.getElementById('start_date');
+    const endInput = document.getElementById('end_date');
+    const days = btn.dataset.days;
+    const hours = btn.dataset.hours;
+    const now = new Date();
+    allInput.value = '';
+    if (days === '0') {
+        allInput.value = 'true';
+    } else {
+        const start = new Date(now);
+        if (hours) start.setHours(start.getHours() - parseInt(hours, 10));
+        else start.setDate(start.getDate() - parseInt(days || '7', 10));
+        startInput.value = toLocalInput(start);
+        endInput.value = toLocalInput(now);
+    }
+    form.submit();
+}
+
+function hideScatter() {
+    const card = document.getElementById('scatter-card');
+    if (card) card.classList.add('hidden');
+}
+
+function alignedPoints(aName, bName) {
+    const a = SCATTER[aName];
+    const b = SCATTER[bName];
+    if (!a || !b) return { x: [], y: [] };
+    const mapB = new Map();
+    for (let i = 0; i < b.t.length; i++) {
+        if (b.t[i] != null && b.v[i] != null) mapB.set(b.t[i], b.v[i]);
+    }
+    const x = [];
+    const y = [];
+    for (let i = 0; i < a.t.length; i++) {
+        if (a.t[i] == null || a.v[i] == null) continue;
+        if (!mapB.has(a.t[i])) continue;
+        x.push(a.v[i]);
+        y.push(mapB.get(a.t[i]));
+    }
+    return { x, y };
+}
+
+function showScatter(aName, bName, rValue) {
+    const card = document.getElementById('scatter-card');
+    const plot = document.getElementById('scatter-plot');
+    if (!card || !plot || typeof Plotly === 'undefined') return;
+    const pts = alignedPoints(aName, bName);
+    const title = document.getElementById('scatter-title');
+    const sub = document.getElementById('scatter-sub');
+    if (title) title.textContent = aName + '  vs  ' + bName;
+    const rText = (typeof rValue === 'number' && isFinite(rValue)) ? 'r = ' + rValue.toFixed(3) + ' · ' : '';
+    if (sub) sub.textContent = rText + pts.x.length + ' aligned samples';
+    card.classList.remove('hidden');
+    card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+
+    const trace = {
+        x: pts.x,
+        y: pts.y,
+        mode: 'markers',
+        type: 'scatter',
+        marker: { size: 7, color: '#38bdf8', opacity: 0.7 },
+        hovertemplate: aName + ': %{x:.2f}<br>' + bName + ': %{y:.2f}<extra></extra>',
+    };
+    const layout = {
+        template: 'plotly_dark',
+        paper_bgcolor: 'rgba(15,23,42,0)',
+        plot_bgcolor: 'rgba(15,23,42,0.75)',
+        font: { color: '#e2e8f0', size: 13 },
+        margin: { l: 60, r: 20, t: 20, b: 50 },
+        xaxis: { title: aName, gridcolor: 'rgba(148,163,184,0.15)', zeroline: false },
+        yaxis: { title: bName, gridcolor: 'rgba(148,163,184,0.15)', zeroline: false },
+    };
+    Plotly.react(plot, [trace], layout, { responsive: true });
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    updateCounts();
+    document.querySelectorAll('.room-cb, .param-cb').forEach(cb => {
+        cb.addEventListener('change', updateCounts);
+    });
+    document.querySelectorAll('.quick-date-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.preventDefault();
+            applyQuickRange(btn);
+        });
+    });
+
+    document.querySelectorAll('.pair-filter').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const mode = btn.dataset.filter;
+            document.querySelectorAll('.pair-filter').forEach(b => {
+                b.classList.remove('bg-blue-600', 'text-white');
+                b.classList.add('bg-slate-800', 'text-slate-300');
+            });
+            btn.classList.add('bg-blue-600', 'text-white');
+            btn.classList.remove('bg-slate-800', 'text-slate-300');
+            document.querySelectorAll('.pair-row').forEach(row => {
+                const dir = row.dataset.dir;
+                const abs = parseFloat(row.dataset.abs);
+                let show = true;
+                if (mode === 'positive') show = dir === 'positive';
+                else if (mode === 'negative') show = dir === 'negative';
+                else if (mode === 'strong') show = abs >= 0.6;
+                row.style.display = show ? '' : 'none';
+            });
+        });
+    });
+
+    const heat = document.querySelector('#corr-heatmap .js-plotly-plot');
+    if (heat && heat.on) {
+        heat.on('plotly_click', (ev) => {
+            const pt = ev.points && ev.points[0];
+            if (!pt) return;
+            const x = String(pt.x);
+            const y = String(pt.y);
+            if (!x || !y || x === y) return;
+            showScatter(y, x, typeof pt.z === 'number' ? pt.z : undefined);
+        });
+    }
+});
+</script>
+{% endblock %}
