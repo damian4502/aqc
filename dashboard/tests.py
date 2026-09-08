@@ -124,3 +124,101 @@ class FormatAndDownsampleTests(SimpleTestCase):
         self.assertIn("co2", payload)
         self.assertLessEqual(len(payload["co2"]["t"]), 100 + 1)
         self.assertEqual(len(payload["co2"]["t"]), len(payload["co2"]["v"]))
+
+
+class PatternHelperTests(SimpleTestCase):
+    def _frame(self):
+        """Two weeks of hourly samples: Monday 08:00 is 100, everything else 10."""
+        # 2026-01-05 is a Monday
+        idx = pd.date_range("2026-01-05", periods=14 * 24, freq="h")
+        values = []
+        for ts in idx:
+            if ts.weekday() == 0 and ts.hour == 8:
+                values.append(100.0)
+            else:
+                values.append(10.0)
+        return pd.DataFrame({"timestamp": idx, "value": values})
+
+    def test_hourly_peak_at_eight(self):
+        from dashboard.patterns import calendar_hour_means, hourly_profile, prepare_frame
+
+        prepared = prepare_frame(calendar_hour_means(self._frame()))
+        hourly = hourly_profile(prepared)
+        peak = hourly.dropna(subset=["mean"]).sort_values("mean", ascending=False).iloc[0]
+        self.assertEqual(int(peak["hour"]), 8)
+        self.assertGreater(peak["mean"], 15)
+
+    def test_weekday_peak_monday(self):
+        from dashboard.patterns import calendar_hour_means, prepare_frame, weekday_profile
+
+        prepared = prepare_frame(calendar_hour_means(self._frame()))
+        weekly = weekday_profile(prepared)
+        peak = weekly.dropna(subset=["mean"]).sort_values("mean", ascending=False).iloc[0]
+        self.assertEqual(int(peak["weekday"]), 0)
+        self.assertEqual(peak["day_name"], "Monday")
+
+    def test_heatmap_shape(self):
+        from dashboard.patterns import calendar_hour_means, prepare_frame, weekday_hour_matrices
+
+        prepared = prepare_frame(calendar_hour_means(self._frame()))
+        mean, count = weekday_hour_matrices(prepared)
+        self.assertEqual(list(mean.index), [
+            "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday",
+        ])
+        self.assertEqual(list(mean.columns), [f"{h:02d}" for h in range(24)])
+        self.assertEqual(mean.shape, (7, 24))
+        self.assertGreater(mean.loc["Monday", "08"], mean.loc["Tuesday", "08"])
+        self.assertGreater(int(count.loc["Monday", "08"]), 0)
+
+    def test_calendar_hour_equal_weight(self):
+        from dashboard.patterns import calendar_hour_means
+
+        # Ten samples of 0 at 10:00, one sample of 100 at 11:00 — hourly means
+        # should be 0 and 100, not a raw-sample bias toward 10:00.
+        rows = [{"timestamp": "2026-01-05 10:00:00", "value": 0.0}] * 10
+        rows.append({"timestamp": "2026-01-05 11:00:00", "value": 100.0})
+        df = pd.DataFrame(rows)
+        df["timestamp"] = pd.to_datetime(df["timestamp"])
+        hourly = calendar_hour_means(df)
+        self.assertEqual(len(hourly), 2)
+        by_hour = {ts.hour: val for ts, val in zip(hourly["timestamp"], hourly["value"])}
+        self.assertAlmostEqual(by_hour[10], 0.0)
+        self.assertAlmostEqual(by_hour[11], 100.0)
+
+    def test_empty(self):
+        from dashboard.patterns import (
+            calendar_hour_means,
+            hourly_profile,
+            prepare_frame,
+            summarize_patterns,
+            weekday_hour_matrices,
+            weekday_profile,
+        )
+
+        empty = pd.DataFrame(columns=["timestamp", "value"])
+        prepared = prepare_frame(calendar_hour_means(empty))
+        hourly = hourly_profile(prepared)
+        weekly = weekday_profile(prepared)
+        mean, count = weekday_hour_matrices(prepared)
+        summary = summarize_patterns(hourly, weekly)
+        self.assertEqual(len(hourly), 24)
+        self.assertEqual(len(weekly), 7)
+        self.assertTrue(mean.isna().all().all())
+        self.assertEqual(summary["hour_bins"], 0)
+        self.assertIsNone(summary["peak_hour"])
+
+    def test_summarize(self):
+        from dashboard.patterns import (
+            calendar_hour_means,
+            hourly_profile,
+            prepare_frame,
+            summarize_patterns,
+            weekday_profile,
+        )
+
+        prepared = prepare_frame(calendar_hour_means(self._frame()))
+        summary = summarize_patterns(hourly_profile(prepared), weekday_profile(prepared))
+        self.assertEqual(summary["peak_hour"], "08:00")
+        self.assertEqual(summary["peak_day"], "Monday")
+        self.assertIsNotNone(summary["overall_mean"])
+

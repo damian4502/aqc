@@ -1,0 +1,255 @@
+{% extends "base.html" %}
+
+{% block title %}Daily & hourly patterns - Air Quality Control{% endblock %}
+
+{% block content %}
+<div class="max-w-7xl mx-auto space-y-8">
+
+    <div class="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
+        <div>
+            <h1 class="text-4xl sm:text-5xl font-bold text-white tracking-tighter">Daily & hourly patterns</h1>
+            <p class="text-slate-400 mt-2 max-w-2xl">
+                Pick a room and a parameter. Averages are grouped by hour of day and
+                by weekday, so you can see when that quantity typically rises or falls.
+            </p>
+        </div>
+        {% if period_label %}
+        <p class="text-xs text-slate-500">{{ period_label }}</p>
+        {% endif %}
+    </div>
+
+    <form method="get" id="pattern-form" class="glass rounded-3xl p-6 space-y-6">
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-5">
+            <div>
+                <label class="block text-sm text-slate-400 mb-1.5">
+                    <i class="fas fa-door-open mr-1.5 text-blue-400"></i> Room
+                </label>
+                <select name="room" id="room"
+                        class="w-full bg-slate-900 border border-slate-700 rounded-2xl px-4 py-3 text-sm text-white focus:outline-none focus:border-blue-500">
+                    <option value="">Select a room</option>
+                    {% for room in rooms %}
+                    <option value="{{ room.id }}" {% if room.id == selected_room_id %}selected{% endif %}>{{ room.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div>
+                <label class="block text-sm text-slate-400 mb-1.5">
+                    <i class="fas fa-sliders-h mr-1.5 text-cyan-400"></i> Parameter
+                </label>
+                <select name="parameter" id="parameter"
+                        class="w-full bg-slate-900 border border-slate-700 rounded-2xl px-4 py-3 text-sm text-white focus:outline-none focus:border-blue-500">
+                    <option value="">Select a parameter</option>
+                    {% for p in parameters %}
+                    <option value="{{ p.id }}" {% if p.id == selected_parameter_id %}selected{% endif %}>
+                        {{ p.name }}{% if p.unit %} ({{ p.unit }}){% endif %}
+                    </option>
+                    {% endfor %}
+                </select>
+            </div>
+        </div>
+
+        <div class="flex flex-wrap items-end gap-5">
+            <div>
+                <label class="block text-sm text-slate-400 mb-1">From</label>
+                <input type="datetime-local" name="start" id="start_date"
+                       value="{{ start|date:'Y-m-d\TH:i' }}"
+                       class="bg-slate-800 border border-slate-700 rounded-2xl px-4 py-3 text-white focus:outline-none focus:border-blue-500">
+            </div>
+            <div>
+                <label class="block text-sm text-slate-400 mb-1">To</label>
+                <input type="datetime-local" name="end" id="end_date"
+                       value="{{ end|date:'Y-m-d\TH:i' }}"
+                       class="bg-slate-800 border border-slate-700 rounded-2xl px-4 py-3 text-white focus:outline-none focus:border-blue-500">
+            </div>
+            <div>
+                <label class="block text-xs text-slate-400 mb-1.5">Ignore spikes</label>
+                <select name="spike_factor" id="spike_factor"
+                        class="bg-slate-900 border border-slate-700 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:border-blue-500 min-w-[140px]">
+                    <option value="0"   {% if not spike_factor or spike_factor == 0 %}selected{% endif %}>Off</option>
+                    <option value="3.5" {% if spike_factor == 3.5 %}selected{% endif %}>Mild</option>
+                    <option value="2.5" {% if spike_factor == 2.5 %}selected{% endif %}>Medium</option>
+                    <option value="1.5" {% if spike_factor == 1.5 %}selected{% endif %}>Aggressive</option>
+                </select>
+            </div>
+        </div>
+
+        <div class="flex flex-wrap items-center gap-3">
+            <button type="button" data-days="7"  class="quick-date-btn px-4 py-2.5 text-sm rounded-2xl {% if request.GET.quick == '7' %}bg-blue-600 text-white{% else %}bg-slate-800 hover:bg-slate-700{% endif %}">7d</button>
+            <button type="button" data-days="30" class="quick-date-btn px-4 py-2.5 text-sm rounded-2xl {% if request.GET.quick == '30' or not request.GET.quick and not request.GET.quickh and not all_data %}bg-blue-600 text-white{% else %}bg-slate-800 hover:bg-slate-700{% endif %}">30d</button>
+            <button type="button" data-days="90" class="quick-date-btn px-4 py-2.5 text-sm rounded-2xl {% if request.GET.quick == '90' %}bg-blue-600 text-white{% else %}bg-slate-800 hover:bg-slate-700{% endif %}">90d</button>
+            <button type="button" data-days="0"  class="quick-date-btn px-4 py-2.5 text-sm rounded-2xl {% if all_data %}bg-blue-600 text-white{% else %}bg-slate-800 hover:bg-slate-700{% endif %}">All</button>
+            <input type="hidden" name="all" id="all_data" value="{% if all_data %}true{% endif %}">
+            <div class="flex-1"></div>
+            <button type="submit"
+                    class="bg-blue-600 hover:bg-blue-500 px-6 py-3 rounded-2xl text-sm font-medium transition-all">
+                Show patterns
+            </button>
+            {% if fig_heat %}
+            <button type="submit" name="format" value="csv"
+                    class="bg-emerald-600 hover:bg-emerald-500 px-6 py-3 rounded-2xl text-sm font-medium transition-all flex items-center gap-2">
+                <i class="fas fa-download"></i>
+                Export CSV
+            </button>
+            {% endif %}
+        </div>
+        <p class="text-[11px] text-slate-500">
+            Each calendar hour is averaged first, then those hours are grouped by
+            hour of day and weekday (Europe/Ljubljana). Weekend hours are overlaid
+            on the daily chart.
+        </p>
+    </form>
+
+    {% if compute_error %}
+    <div class="glass rounded-3xl p-8 border-l-4 border-amber-500">
+        <p class="text-amber-200">{{ compute_error }}</p>
+    </div>
+    {% elif not fig_hourly %}
+    <div class="glass rounded-3xl p-16 text-center">
+        <i class="fas fa-clock text-4xl text-slate-600 mb-4"></i>
+        <p class="text-slate-300 text-lg">Select a room and a parameter, then show patterns.</p>
+        <p class="text-slate-500 text-sm mt-2">
+            Thirty days usually reveals a stable weekly rhythm. Longer windows smooth noise.
+        </p>
+    </div>
+    {% endif %}
+
+    {% if summary %}
+    <div class="grid grid-cols-2 lg:grid-cols-5 gap-4">
+        <div class="glass rounded-2xl p-5">
+            <p class="text-[11px] uppercase tracking-wider text-slate-500">Overall mean</p>
+            <p class="text-2xl font-semibold text-white mt-1">{{ card_overall }} <span class="text-sm font-normal text-slate-400">{{ unit }}</span></p>
+            <p class="text-[11px] text-slate-500 mt-1">{{ summary.hour_bins }} hour bins</p>
+        </div>
+        <div class="glass rounded-2xl p-5">
+            <p class="text-[11px] uppercase tracking-wider text-slate-500">Peak hour</p>
+            <p class="text-2xl font-semibold text-rose-400 mt-1">{{ summary.peak_hour|default:"—" }}</p>
+            <p class="text-[11px] text-slate-400 mt-1">{{ card_peak_hour_val }} {{ unit }}</p>
+        </div>
+        <div class="glass rounded-2xl p-5">
+            <p class="text-[11px] uppercase tracking-wider text-slate-500">Quiet hour</p>
+            <p class="text-2xl font-semibold text-cyan-400 mt-1">{{ summary.quiet_hour|default:"—" }}</p>
+            <p class="text-[11px] text-slate-400 mt-1">{{ card_quiet_hour_val }} {{ unit }}</p>
+        </div>
+        <div class="glass rounded-2xl p-5">
+            <p class="text-[11px] uppercase tracking-wider text-slate-500">Peak weekday</p>
+            <p class="text-2xl font-semibold text-rose-400 mt-1">{{ summary.peak_day|default:"—" }}</p>
+            <p class="text-[11px] text-slate-400 mt-1">{{ card_peak_day_val }} {{ unit }}</p>
+        </div>
+        <div class="glass rounded-2xl p-5 col-span-2 lg:col-span-1">
+            <p class="text-[11px] uppercase tracking-wider text-slate-500">Quiet weekday</p>
+            <p class="text-2xl font-semibold text-cyan-400 mt-1">{{ summary.quiet_day|default:"—" }}</p>
+            <p class="text-[11px] text-slate-400 mt-1">{{ card_quiet_day_val }} {{ unit }}</p>
+        </div>
+    </div>
+    {% endif %}
+
+    {% if fig_hourly %}
+    <div class="glass rounded-3xl p-4 sm:p-8 overflow-x-auto">
+        {{ fig_hourly|safe }}
+    </div>
+    {% endif %}
+
+    {% if fig_weekly %}
+    <div class="glass rounded-3xl p-4 sm:p-8 overflow-x-auto">
+        {{ fig_weekly|safe }}
+    </div>
+    {% endif %}
+
+    {% if fig_heat %}
+    <div class="glass rounded-3xl p-4 sm:p-8 overflow-x-auto">
+        <p class="text-xs text-slate-500 mb-3">Each cell is the mean for that weekday and hour of day.</p>
+        {{ fig_heat|safe }}
+    </div>
+    {% endif %}
+
+    {% if hourly_rows or weekly_rows %}
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div class="glass rounded-3xl p-6">
+            <h2 class="text-lg font-semibold text-white mb-3">Hour of day</h2>
+            <div class="overflow-x-auto max-h-96">
+                <table class="w-full text-sm">
+                    <thead>
+                        <tr class="text-left text-slate-400 border-b border-slate-700">
+                            <th class="py-2 pr-4 font-medium">Hour</th>
+                            <th class="py-2 pr-4 font-medium text-right">Mean</th>
+                            <th class="py-2 pr-4 font-medium text-right">Std</th>
+                            <th class="py-2 font-medium text-right">n</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for row in hourly_rows %}
+                        <tr class="border-b border-slate-800/80">
+                            <td class="py-2 pr-4 text-slate-200">{{ row.hour }}</td>
+                            <td class="py-2 pr-4 text-right tabular-nums text-slate-200">{{ row.mean }}</td>
+                            <td class="py-2 pr-4 text-right tabular-nums text-slate-400">{{ row.std }}</td>
+                            <td class="py-2 text-right tabular-nums text-slate-400">{{ row.count }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        <div class="glass rounded-3xl p-6">
+            <h2 class="text-lg font-semibold text-white mb-3">Day of week</h2>
+            <div class="overflow-x-auto">
+                <table class="w-full text-sm">
+                    <thead>
+                        <tr class="text-left text-slate-400 border-b border-slate-700">
+                            <th class="py-2 pr-4 font-medium">Day</th>
+                            <th class="py-2 pr-4 font-medium text-right">Mean</th>
+                            <th class="py-2 pr-4 font-medium text-right">Std</th>
+                            <th class="py-2 font-medium text-right">n</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for row in weekly_rows %}
+                        <tr class="border-b border-slate-800/80">
+                            <td class="py-2 pr-4 text-slate-200">{{ row.day }}</td>
+                            <td class="py-2 pr-4 text-right tabular-nums text-slate-200">{{ row.mean }}</td>
+                            <td class="py-2 pr-4 text-right tabular-nums text-slate-400">{{ row.std }}</td>
+                            <td class="py-2 text-right tabular-nums text-slate-400">{{ row.count }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function toLocalInput(date) {
+    const pad = n => String(n).padStart(2, '0');
+    return date.getFullYear() + '-' + pad(date.getMonth() + 1) + '-' + pad(date.getDate())
+        + 'T' + pad(date.getHours()) + ':' + pad(date.getMinutes());
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    const form = document.getElementById('pattern-form');
+    document.querySelectorAll('.quick-date-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.preventDefault();
+            const allInput = document.getElementById('all_data');
+            const startInput = document.getElementById('start_date');
+            const endInput = document.getElementById('end_date');
+            const days = btn.dataset.days;
+            const now = new Date();
+            allInput.value = '';
+            if (days === '0') {
+                allInput.value = 'true';
+            } else {
+                const start = new Date(now);
+                start.setDate(start.getDate() - parseInt(days || '30', 10));
+                startInput.value = toLocalInput(start);
+                endInput.value = toLocalInput(now);
+            }
+            form.submit();
+        });
+    });
+});
+</script>
+{% endblock %}

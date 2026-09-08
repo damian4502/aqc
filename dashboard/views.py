@@ -1814,6 +1814,363 @@ def correlations_view(request):
     return render(request, "dashboard/correlations.html", context)
 
 
+def patterns_view(request):
+    """Average values by hour of day and weekday for one room × parameter."""
+    from django.utils.dateparse import parse_datetime
+    from dashboard.patterns import (
+        calendar_hour_means,
+        hourly_profile,
+        prepare_frame,
+        summarize_patterns,
+        weekday_hour_matrices,
+        weekday_profile,
+    )
+
+    rooms = list(Room.objects.all().order_by("order", "name"))
+    parameters = list(Parameter.objects.all().order_by("order", "name"))
+
+    selected_room_id = None
+    selected_parameter_id = None
+    raw_room = request.GET.get("room")
+    raw_param = request.GET.get("parameter")
+    try:
+        if raw_room:
+            selected_room_id = int(raw_room)
+    except (TypeError, ValueError):
+        selected_room_id = None
+    try:
+        if raw_param:
+            selected_parameter_id = int(raw_param)
+    except (TypeError, ValueError):
+        selected_parameter_id = None
+
+    has_query_selection = bool(raw_room or raw_param)
+    if has_query_selection:
+        request.session["pattern_room"] = selected_room_id
+        request.session["pattern_parameter"] = selected_parameter_id
+    elif not request.GET:
+        selected_room_id = request.session.get("pattern_room")
+        selected_parameter_id = request.session.get("pattern_parameter")
+
+    selected_room = next((r for r in rooms if r.id == selected_room_id), None)
+    selected_parameter = next((p for p in parameters if p.id == selected_parameter_id), None)
+
+    all_data = request.GET.get("all") == "true"
+    start_date_str = request.GET.get("start")
+    end_date_str = request.GET.get("end")
+    quick_days = request.GET.get("quick")
+    quick_hours = request.GET.get("quickh")
+
+    if all_data:
+        start_date = None
+        end_date = timezone.now()
+        context_start = ""
+        context_end = ""
+    else:
+        if quick_days:
+            try:
+                days = int(quick_days)
+                start_date = timezone.now() - timedelta(days=days)
+                end_date = timezone.now()
+            except (TypeError, ValueError):
+                start_date = timezone.now() - timedelta(days=30)
+                end_date = timezone.now()
+        elif quick_hours:
+            try:
+                hours = int(quick_hours)
+                start_date = timezone.now() - timedelta(hours=hours)
+                end_date = timezone.now()
+            except (TypeError, ValueError):
+                start_date = timezone.now() - timedelta(days=30)
+                end_date = timezone.now()
+        elif start_date_str and end_date_str:
+            try:
+                start_date = parse_datetime(start_date_str)
+                end_date = parse_datetime(end_date_str)
+                if start_date is None:
+                    start_date = datetime.strptime(start_date_str[:10], "%Y-%m-%d")
+                if end_date is None:
+                    end_date = datetime.strptime(end_date_str[:10], "%Y-%m-%d").replace(
+                        hour=23, minute=59, second=59
+                    )
+                if timezone.is_naive(start_date):
+                    start_date = timezone.make_aware(start_date)
+                if timezone.is_naive(end_date):
+                    end_date = timezone.make_aware(end_date)
+            except (ValueError, TypeError):
+                start_date = timezone.now() - timedelta(days=30)
+                end_date = timezone.now()
+        else:
+            start_date = timezone.now() - timedelta(days=30)
+            end_date = timezone.now()
+
+        context_start = start_date.strftime("%Y-%m-%d") if start_date else ""
+        context_end = end_date.strftime("%Y-%m-%d") if end_date else ""
+
+    if "spike_factor" in request.GET:
+        spike_factor = parse_spike_factor(request.GET.get("spike_factor"))
+    elif "ignore_spikes" in request.GET:
+        spike_factor = parse_spike_factor(request.GET.get("ignore_spikes"), default=0.0)
+    else:
+        spike_factor = parse_spike_factor(request.session.get("spike_factor"), default=0.0)
+        if spike_factor == 0.0 and request.session.get("ignore_spikes"):
+            spike_factor = 2.5
+    request.session["spike_factor"] = spike_factor
+
+    compute_error = None
+    fig_hourly = None
+    fig_weekly = None
+    fig_heat = None
+    summary = None
+    hourly_rows = []
+    weekly_rows = []
+    should_compute = bool(selected_room and selected_parameter) and (
+        has_query_selection or not request.GET
+    )
+
+    if has_query_selection and not (selected_room and selected_parameter):
+        compute_error = "Select both a room and a parameter."
+        should_compute = False
+
+    if should_compute:
+        qs = Measurement.objects.filter(
+            sensor__room=selected_room,
+            parameter=selected_parameter,
+        )
+        if not all_data and start_date:
+            qs = qs.filter(timestamp__gte=start_date, timestamp__lte=end_date)
+        measurements = qs.order_by("timestamp")
+        if not measurements.exists():
+            compute_error = "No measurements in this period for that room and parameter."
+        else:
+            df = pd.DataFrame(
+                list(measurements.values("timestamp", "value", "parameter__name"))
+            )
+            df["timestamp"] = pd.to_datetime(df["timestamp"])
+            df = df.rename(columns={"parameter__name": "parameter"})
+            resampled = resample_measurements(
+                df, 15, "none", spike_factor=spike_factor
+            )
+            if resampled is None or resampled.empty:
+                source = df[["timestamp", "value"]]
+            else:
+                col = resampled.columns[0]
+                series = resampled[col].dropna()
+                source = pd.DataFrame(
+                    {"timestamp": series.index, "value": series.to_numpy()}
+                )
+
+            buckets = calendar_hour_means(source)
+            prepared = prepare_frame(buckets)
+            if prepared.empty:
+                compute_error = "Not enough samples after resampling to build a pattern."
+            else:
+                hourly = hourly_profile(prepared)
+                weekly = weekday_profile(prepared)
+                heat_mean, heat_count = weekday_hour_matrices(prepared)
+                summary = summarize_patterns(hourly, weekly)
+
+                weekday_mask = prepared["weekday"] < 5
+                hourly_wd = hourly_profile(prepared[weekday_mask])
+                hourly_we = hourly_profile(prepared[~weekday_mask])
+
+                unit = selected_parameter.unit or ""
+                title_base = f"{selected_parameter.name} — {selected_room.name}"
+
+                hourly_plot = hourly.copy()
+                hourly_plot["weekdays"] = hourly_wd["mean"]
+                hourly_plot["weekend"] = hourly_we["mean"]
+                fig_h = go.Figure()
+                fig_h.add_trace(go.Bar(
+                    x=hourly_plot["hour"],
+                    y=hourly_plot["mean"],
+                    name="All days",
+                    marker_color="#38bdf8",
+                    customdata=hourly_plot["count"],
+                    hovertemplate="Hour %{x}:00<br>Mean: %{y:.2f} "
+                    + unit
+                    + "<br>Hours sampled: %{customdata}<extra></extra>",
+                ))
+                fig_h.add_trace(go.Scatter(
+                    x=hourly_plot["hour"],
+                    y=hourly_plot["weekdays"],
+                    name="Mon–Fri",
+                    mode="lines+markers",
+                    line=dict(color="#34d399", width=3),
+                    hovertemplate="Hour %{x}:00<br>Weekdays: %{y:.2f} "
+                    + unit
+                    + "<extra></extra>",
+                ))
+                fig_h.add_trace(go.Scatter(
+                    x=hourly_plot["hour"],
+                    y=hourly_plot["weekend"],
+                    name="Sat–Sun",
+                    mode="lines+markers",
+                    line=dict(color="#f59e0b", width=3),
+                    hovertemplate="Hour %{x}:00<br>Weekend: %{y:.2f} "
+                    + unit
+                    + "<extra></extra>",
+                ))
+                fig_h.update_layout(
+                    title=f"Hour of day — {title_base}",
+                    xaxis=dict(
+                        title="Hour of day",
+                        tickmode="linear",
+                        dtick=1,
+                        range=[-0.5, 23.5],
+                    ),
+                    yaxis=dict(title=unit or "Mean"),
+                    barmode="overlay",
+                    height=420,
+                    legend=dict(orientation="h", y=1.08),
+                )
+                fig_h = apply_dark_theme(fig_h, animate=False)
+                fig_hourly = fig_h.to_html(full_html=False, include_plotlyjs="cdn")
+
+                fig_w = go.Figure()
+                fig_w.add_trace(go.Bar(
+                    x=weekly["day_name"],
+                    y=weekly["mean"],
+                    marker_color="#818cf8",
+                    customdata=weekly["count"],
+                    hovertemplate="%{x}<br>Mean: %{y:.2f} "
+                    + unit
+                    + "<br>Hours sampled: %{customdata}<extra></extra>",
+                    name="Mean",
+                ))
+                fig_w.update_layout(
+                    title=f"Day of week — {title_base}",
+                    xaxis=dict(
+                        title="",
+                        categoryorder="array",
+                        categoryarray=[
+                            "Monday", "Tuesday", "Wednesday", "Thursday",
+                            "Friday", "Saturday", "Sunday",
+                        ],
+                    ),
+                    yaxis=dict(title=unit or "Mean"),
+                    height=380,
+                    showlegend=False,
+                )
+                fig_w = apply_dark_theme(fig_w, animate=False)
+                fig_weekly = fig_w.to_html(full_html=False, include_plotlyjs="cdn")
+
+                z = heat_mean.values.astype(float)
+                nmat = heat_count.values
+                fig_m = go.Figure(
+                    data=go.Heatmap(
+                        z=z,
+                        x=list(heat_mean.columns),
+                        y=list(heat_mean.index),
+                        customdata=nmat,
+                        colorscale="YlOrRd",
+                        hovertemplate="%{y} %{x}:00<br>Mean: %{z:.2f} "
+                        + unit
+                        + "<br>Hours sampled: %{customdata}<extra></extra>",
+                        colorbar=dict(title=unit or "mean"),
+                    )
+                )
+                fig_m.update_layout(
+                    title=f"Weekday × hour — {title_base}",
+                    xaxis=dict(title="Hour of day", dtick=1, side="bottom"),
+                    yaxis=dict(title="", autorange="reversed"),
+                    height=420,
+                )
+                fig_m = apply_dark_theme(fig_m, animate=False)
+                fig_m.update_traces(
+                    hovertemplate="%{y} %{x}:00<br>Mean: %{z:.2f} "
+                    + unit
+                    + "<br>Hours sampled: %{customdata}<extra></extra>"
+                )
+                fig_heat = fig_m.to_html(full_html=False, include_plotlyjs=False)
+
+                def _fmt(val, decimals):
+                    if val is None or (isinstance(val, float) and np.isnan(val)):
+                        return "—"
+                    return f"{val:.{decimals}f}"
+
+                decimals = getattr(selected_parameter, "format_decimals", 2) or 2
+                hourly_rows = [
+                    {
+                        "hour": f"{int(row.hour):02d}:00",
+                        "mean": _fmt(row.mean, decimals),
+                        "std": _fmt(row.std, decimals),
+                        "count": int(row.count),
+                    }
+                    for row in hourly.itertuples()
+                ]
+                weekly_rows = [
+                    {
+                        "day": row.day_name,
+                        "mean": _fmt(row.mean, decimals),
+                        "std": _fmt(row.std, decimals),
+                        "count": int(row.count),
+                    }
+                    for row in weekly.itertuples()
+                ]
+
+                if request.GET.get("format") == "csv":
+                    response = HttpResponse(content_type="text/csv")
+                    safe_room = "".join(
+                        c if c.isalnum() or c in "-_" else "_"
+                        for c in selected_room.name.replace(" ", "_")
+                    )
+                    safe_param = "".join(
+                        c if c.isalnum() or c in "-_" else "_"
+                        for c in selected_parameter.name.replace(" ", "_")
+                    )
+                    response["Content-Disposition"] = (
+                        f'attachment; filename="patterns_{safe_room}_{safe_param}.csv"'
+                    )
+                    heat_mean.to_csv(response, float_format="%.4f")
+                    return response
+
+    period_label = "all data" if all_data else None
+    if not period_label and start_date and end_date:
+        period_label = (
+            f"{timezone.localtime(start_date).strftime('%d %b %Y')} – "
+            f"{timezone.localtime(end_date).strftime('%d %b %Y')}"
+        )
+
+    def _card_fmt(val):
+        if val is None:
+            return "—"
+        decimals = getattr(selected_parameter, "format_decimals", 1) if selected_parameter else 1
+        decimals = 1 if decimals is None else decimals
+        return f"{val:.{decimals}f}"
+
+    context = {
+        "rooms": rooms,
+        "parameters": parameters,
+        "selected_room_id": selected_room_id,
+        "selected_parameter_id": selected_parameter_id,
+        "selected_room": selected_room,
+        "selected_parameter": selected_parameter,
+        "start": start_date,
+        "end": end_date,
+        "start_date": context_start,
+        "end_date": context_end,
+        "all_data": all_data,
+        "spike_factor": spike_factor,
+        "fig_hourly": fig_hourly,
+        "fig_weekly": fig_weekly,
+        "fig_heat": fig_heat,
+        "summary": summary,
+        "hourly_rows": hourly_rows,
+        "weekly_rows": weekly_rows,
+        "compute_error": compute_error,
+        "has_query_selection": has_query_selection,
+        "period_label": period_label,
+        "unit": (selected_parameter.unit if selected_parameter else "") or "",
+        "card_overall": _card_fmt(summary["overall_mean"]) if summary else "—",
+        "card_peak_hour_val": _card_fmt(summary["peak_hour_value"]) if summary else "—",
+        "card_quiet_hour_val": _card_fmt(summary["quiet_hour_value"]) if summary else "—",
+        "card_peak_day_val": _card_fmt(summary["peak_day_value"]) if summary else "—",
+        "card_quiet_day_val": _card_fmt(summary["quiet_day_value"]) if summary else "—",
+    }
+    return render(request, "dashboard/patterns.html", context)
+
+
 def differential_pressure_view(request):
     pressure_param = Parameter.objects.filter(id=11).first()
 
