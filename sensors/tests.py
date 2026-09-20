@@ -69,6 +69,31 @@ class MqttReloadSignalTests(TestCase):
         revision = cache.get(MQTT_SUBSCRIPTIONS_REVISION_KEY)
         self.assertIsInstance(revision, float)
 
+    def test_sensor_create_bumps_revision_after_commit(self):
+        cache.delete(MQTT_SUBSCRIPTIONS_REVISION_KEY)
+        with self.captureOnCommitCallbacks(execute=True):
+            Sensor.objects.create(
+                room=self.room,
+                parameter=self.parameter,
+                name="Wall sensor",
+                location="wall",
+            )
+        self.assertIsNotNone(cache.get(MQTT_SUBSCRIPTIONS_REVISION_KEY))
+
+    def test_sensor_update_bumps_revision_after_commit(self):
+        cache.delete(MQTT_SUBSCRIPTIONS_REVISION_KEY)
+        new_room = Room.objects.create(name="Office")
+        with self.captureOnCommitCallbacks(execute=True):
+            self.sensor.room = new_room
+            self.sensor.save()
+        self.assertIsNotNone(cache.get(MQTT_SUBSCRIPTIONS_REVISION_KEY))
+
+    def test_sensor_delete_bumps_revision_after_commit(self):
+        cache.delete(MQTT_SUBSCRIPTIONS_REVISION_KEY)
+        with self.captureOnCommitCallbacks(execute=True):
+            self.sensor.delete()
+        self.assertIsNotNone(cache.get(MQTT_SUBSCRIPTIONS_REVISION_KEY))
+
 
 @override_settings(CACHES=LOC_MEM_CACHE)
 class MqttListenerRefreshTests(TestCase):
@@ -162,13 +187,27 @@ class MqttListenerRefreshTests(TestCase):
     def test_sensor_room_change_updates_cached_room_id(self):
         self._create_subscription("house/lab/co2")
         self.listener.refresh_subscriptions(reason="connect")
+        self.listener.client.reset_mock()
 
         new_room = Room.objects.create(name="Office")
-        self.sensor.room = new_room
-        self.sensor.save()
-        self.listener.refresh_subscriptions(reason="periodic")
+        with self.captureOnCommitCallbacks(execute=True):
+            self.sensor.room = new_room
+            self.sensor.save()
 
+        self.listener._maybe_refresh_subscriptions()
         self.assertEqual(self.listener.topics["house/lab/co2"]["room_id"], new_room.id)
+
+    def test_sensor_delete_unsubscribes_related_topics(self):
+        self._create_subscription("house/lab/co2")
+        self.listener.refresh_subscriptions(reason="connect")
+        self.listener.client.reset_mock()
+
+        with self.captureOnCommitCallbacks(execute=True):
+            self.sensor.delete()
+
+        self.listener._maybe_refresh_subscriptions()
+        self.listener.client.unsubscribe.assert_called_once_with("house/lab/co2")
+        self.assertNotIn("house/lab/co2", self.listener.topics)
 
     def test_skips_refresh_when_disconnected(self):
         self._create_subscription("house/lab/co2")
