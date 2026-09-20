@@ -48,9 +48,13 @@ services:
   mqtt-listener:
     build: .
     command: python mqtt_listener.py
+    volumes:
+      - .:/app
     depends_on:
       - db
       - redis
+      - mqtt
+      - memcached
     restart: always
     environment:
       DJANGO_SETTINGS_MODULE: config.settings

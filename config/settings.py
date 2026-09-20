@@ -41,7 +41,7 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     'rooms',
     'parameters',
-    'sensors',
+    'sensors.apps.SensorsConfig',
     'measurements',
     'import_data',
     'dashboard',
