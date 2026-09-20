@@ -2,4 +2,7 @@ from django.apps import AppConfig
 
 
 class SensorsConfig(AppConfig):
-    name = 'sensors'
+    name = "sensors"
+
+    def ready(self):
+        from . import signals  # noqa: F401
