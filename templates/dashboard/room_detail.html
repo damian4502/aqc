@@ -145,6 +145,13 @@
                class="quick-date-btn px-5 py-3 text-sm rounded-2xl transition-all {% if all_data %}bg-blue-600 text-white{% else %}bg-slate-800 hover:bg-slate-700{% endif %}">
                 All
             </a>
+            <button type="button"
+                    id="apply-zoom-btn"
+                    title="Set From/To to the current chart zoom"
+                    class="inline-flex items-center px-5 py-3 text-sm rounded-2xl transition-all bg-slate-800 hover:bg-slate-700">
+                <i class="fas fa-search-plus mr-1"></i>
+                Zoom
+            </button>
 
             <!-- Refresh + Export -->
             <button type="button" id="refresh-graph-btn"
@@ -192,15 +199,25 @@ let currentGraphDiv = document.getElementById('plotly-graph');
 let roomId = {{ room.id }};
 
 function parseLocalDate(input) {
-    if (!input) return new Date(NaN);
+    if (input == null || input === '') return new Date(NaN);
 
     // If already a Date object (Plotly sometimes does this)
     if (input instanceof Date) {
         return input;
     }
 
-    // String input
-    const str = String(input);
+    // Numeric timestamps (ms, or seconds if small)
+    if (typeof input === 'number' && isFinite(input)) {
+        return new Date(input < 1e12 ? input * 1000 : input);
+    }
+
+    const str = String(input).trim();
+    if (/^-?\d+(\.\d+)?$/.test(str)) {
+        const n = Number(str);
+        if (isFinite(n)) return new Date(n < 1e12 ? n * 1000 : n);
+    }
+
+    // String input (Plotly date axis: "YYYY-MM-DD HH:MM:SS.ffff")
     const normalized = str.replace('T', ' ').replace('Z', '').trim();
     const parts = normalized.split(/[- :.]/);
 
@@ -427,7 +444,7 @@ function getFilterKey() {
 }
 
 function clearQuickDateHighlight() {
-    document.querySelectorAll('.quick-date-btn').forEach(b =>
+    document.querySelectorAll('.quick-date-btn, #apply-zoom-btn').forEach(b =>
         b.classList.remove('!bg-blue-600', 'text-white')
     );
 }
@@ -512,6 +529,61 @@ function formatForDateTimeLocal(date) {
     return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
+function floorToMinute(date) {
+    const d = new Date(date.getTime());
+    d.setSeconds(0, 0);
+    return d;
+}
+
+function ceilToMinute(date) {
+    const d = new Date(date.getTime());
+    if (d.getSeconds() === 0 && d.getMilliseconds() === 0) return d;
+    d.setSeconds(0, 0);
+    d.setMinutes(d.getMinutes() + 1);
+    return d;
+}
+
+/** Visible x-axis range of the Plotly chart (current mouse zoom / pan). */
+function getVisibleChartRange() {
+    const gd = currentGraphDiv;
+    if (!gd) return null;
+
+    const range = gd.layout?.xaxis?.range || gd._fullLayout?.xaxis?.range;
+    if (!range || range.length < 2) return null;
+
+    const start = parseLocalDate(range[0]);
+    const end = parseLocalDate(range[1]);
+    if (isNaN(start.getTime()) || isNaN(end.getTime()) || start >= end) return null;
+    return { start, end };
+}
+
+/**
+ * Copy the current chart zoom into From/To and reload, so the period
+ * (and resampling window) matches what is visible on the graph.
+ */
+function applyChartZoomToPeriod() {
+    const visible = getVisibleChartRange();
+    const startInput = document.getElementById('start_date');
+    const endInput = document.getElementById('end_date');
+    if (!visible || !startInput || !endInput) return;
+
+    let start = floorToMinute(visible.start);
+    let end = ceilToMinute(visible.end);
+    if (end.getTime() <= start.getTime()) {
+        end = new Date(start.getTime() + 60 * 1000);
+    }
+
+    startInput.value = formatForDateTimeLocal(start);
+    endInput.value = formatForDateTimeLocal(end);
+
+    clearQuickDateHighlight();
+    const zoomBtn = document.getElementById('apply-zoom-btn');
+    if (zoomBtn) zoomBtn.classList.add('!bg-blue-600', 'text-white');
+
+    lastLoadGraphKey = '';
+    scheduleLoadGraph({ immediate: true, clearQuick: false, force: true });
+}
+
 // === Quick range buttons (data-hours / data-days) ===
 document.querySelectorAll('.quick-date-btn').forEach(btn => {
     btn.addEventListener('click', (e) => {
@@ -538,9 +610,7 @@ document.querySelectorAll('.quick-date-btn').forEach(btn => {
         document.getElementById('start_date').value = formatForDateTimeLocal(startDate);
         document.getElementById('end_date').value = formatForDateTimeLocal(now);
 
-        document.querySelectorAll('.quick-date-btn').forEach(b =>
-            b.classList.remove('!bg-blue-600', 'text-white')
-        );
+        clearQuickDateHighlight();
         btn.classList.add('!bg-blue-600', 'text-white');
 
         lastLoadGraphKey = '';
@@ -570,6 +640,16 @@ document.addEventListener('DOMContentLoaded', () => {
             scheduleLoadGraph({ immediate: true, force: true });
         });
     });
+
+    // Apply the currently zoomed chart range to From/To
+    const zoomBtn = document.getElementById('apply-zoom-btn');
+    if (zoomBtn) {
+        zoomBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            applyChartZoomToPeriod();
+        });
+    }
 
     // Refresh button — AJAX only, never full page reload
     const refreshBtn = document.getElementById('refresh-graph-btn');
