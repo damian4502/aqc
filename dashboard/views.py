@@ -38,6 +38,12 @@ from django.http import JsonResponse
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404
 from rooms.models import Room, Event
+from dashboard.chart_range import (
+    load_chart_range_from_session,
+    parse_chart_datetime,
+    resolve_chart_range,
+    save_chart_range_to_session,
+)
 
 def room_live_data(request, room_id):
     room = get_object_or_404(Room, id=room_id)
@@ -249,53 +255,9 @@ def room_detail(request, room_id):
     room = get_object_or_404(Room, id=room_id)
    
     view_type = request.GET.get('view', 'trend')
-    # === Unified date filter + quick buttons ===
-    all_data = request.GET.get('all') == 'true'
-    
-    if all_data:
-        start_date = None
-        end_date = timezone.now()
-        context_start = ''
-        context_end = ''
-    else:
-        start_date_str = request.GET.get('start' )
-        end_date_str = request.GET.get('end')
-        
-        # Quick buttons (24h, 7d, 30d)
-        quick_days = request.GET.get('quick')
-        quick_hours = request.GET.get('quickh')
-        if quick_days:
-            try:
-                days = int(quick_days)
-                start_date = timezone.now() - timedelta(days=days)
-                end_date = timezone.now()
-            except:
-                start_date = timezone.now() - timedelta(days=1)
-                end_date = timezone.now()
-        elif quick_hours:
-            try:
-                hours = int(quick_hours)
-                start_date = timezone.now() - timedelta(hours=hours)
-                end_date = timezone.now()
-            except:
-                start_date = timezone.now() - timedelta(days=1)
-                end_date = timezone.now()
-        elif start_date_str and end_date_str:
-            try:
-                start_date = parse_datetime(start_date_str)
-                end_date = parse_datetime(end_date_str)
-            except ValueError:
-                start_date = timezone.now() - timedelta(days=1)
-                end_date = timezone.now()
-        else:
-            # default
-            start_date = timezone.now() - timedelta(days=1)
-            end_date = timezone.now()
-
-        context_start = start_date.strftime('%Y-%m-%d') if start_date else ''
-        context_end = end_date.strftime('%Y-%m-%d') if end_date else ''
-        request.session['chart_start_date'] = context_start
-        request.session['chart_end_date'] = context_end
+    start_date, end_date, all_data = resolve_chart_range(request)
+    context_start = start_date.strftime('%Y-%m-%d') if start_date else ''
+    context_end = end_date.strftime('%Y-%m-%d') if end_date else ''
     
     # Latest measurements for the top card
 
@@ -684,13 +646,20 @@ def chart_data(request):
     else:
         show_params = show_params.split(',')
 
-    # default: last 24h
-    if not start_str:
-        end = timezone.now()
-        start = end - timedelta(hours=24)
+    # From/To: prefer the request, then the shared session, then last 24h.
+    # Persist whatever the chart actually uses so the next room/parameter
+    # page opens with the same range.
+    if start_str and end_str:
+        start = parse_chart_datetime(start_str) or (timezone.now() - timedelta(hours=24))
+        end = parse_chart_datetime(end_str) or timezone.now()
+        save_chart_range_to_session(request, start, end)
     else:
-        start = parse_datetime(start_str) or (timezone.now() - timedelta(hours=24))
-        end = parse_datetime(end_str) or timezone.now()
+        saved_start, saved_end = load_chart_range_from_session(request)
+        if saved_start and saved_end:
+            start, end = saved_start, saved_end
+        else:
+            end = timezone.now()
+            start = end - timedelta(hours=24)
 
     # === Measurements for graphs ===
     qs = Measurement.objects.all()
@@ -1144,53 +1113,9 @@ def parameter_detail(request, parameter_id):
     parameter = get_object_or_404(Parameter, id=parameter_id)
     
     view_type = request.GET.get('view', 'trend')
-    # === Unified date filter + quick buttons ===
-    all_data = request.GET.get('all') == 'true'
-    
-    if all_data:
-        start_date = None
-        end_date = timezone.now()
-        context_start = ''
-        context_end = ''
-    else:
-        start_date_str = request.GET.get('start' )
-        end_date_str = request.GET.get('end')
-        
-        # Quick buttons (24h, 7d, 30d)
-        quick_days = request.GET.get('quick')
-        quick_hours = request.GET.get('quickh')
-        if quick_days:
-            try:
-                days = int(quick_days)
-                start_date = timezone.now() - timedelta(days=days)
-                end_date = timezone.now()
-            except:
-                start_date = timezone.now() - timedelta(days=1)
-                end_date = timezone.now()
-        elif quick_hours:
-            try:
-                hours = int(quick_hours)
-                start_date = timezone.now() - timedelta(hours=hours)
-                end_date = timezone.now()
-            except:
-                start_date = timezone.now() - timedelta(days=1)
-                end_date = timezone.now()
-        elif start_date_str and end_date_str:
-            try:
-                start_date = parse_datetime(start_date_str)
-                end_date = parse_datetime(end_date_str)
-            except ValueError:
-                start_date = timezone.now() - timedelta(days=1)
-                end_date = timezone.now()
-        else:
-            # default
-            start_date = timezone.now() - timedelta(days=1)
-            end_date = timezone.now()
-
-        context_start = start_date.strftime('%Y-%m-%d') if start_date else ''
-        context_end = end_date.strftime('%Y-%m-%d') if end_date else ''
-        request.session['chart_start_date'] = context_start
-        request.session['chart_end_date'] = context_end
+    start_date, end_date, all_data = resolve_chart_range(request)
+    context_start = start_date.strftime('%Y-%m-%d') if start_date else ''
+    context_end = end_date.strftime('%Y-%m-%d') if end_date else ''
 
     # Latest measurements for this parameter (by rooms)
         
