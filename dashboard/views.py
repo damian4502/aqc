@@ -2348,9 +2348,9 @@ def event_create(request):
 
         errors = []
         if not title:
-            errors.append('Naziv dogodka je obvezen.')
+            errors.append('Event title is required.')
         if not timestamp_raw:
-            errors.append('Datum in čas sta obvezna.')
+            errors.append('Date and time are required.')
 
         event_ts = None
         if timestamp_raw:
@@ -2362,7 +2362,7 @@ def event_create(request):
                     naive = dt.strptime(timestamp_raw[:16], '%Y-%m-%d %H:%M')
                 event_ts = timezone.make_aware(naive, timezone.get_current_timezone())
             except (ValueError, TypeError):
-                errors.append('Neveljaven format datuma in časa.')
+                errors.append('Invalid date and time format.')
 
         # Validate color as simple hex
         if color and not (color.startswith('#') and len(color) in (4, 7)):
@@ -2395,14 +2395,14 @@ def event_create(request):
                 event.parameters.set(linked_params)
 
             when = timezone.localtime(event.timestamp).strftime('%d.%m.%Y %H:%M')
-            msg = f'Dogodek „{event.title}“ shranjen ({when}).'
+            msg = f'Event "{event.title}" saved ({when}).'
             extras = []
             if linked_rooms:
-                extras.append('prostori: ' + ', '.join(r.name for r in linked_rooms))
+                extras.append('rooms: ' + ', '.join(r.name for r in linked_rooms))
             if linked_params:
-                extras.append('parametri: ' + ', '.join(p.name for p in linked_params))
+                extras.append('parameters: ' + ', '.join(p.name for p in linked_params))
             if extras:
-                msg += ' Povezano — ' + '; '.join(extras) + '.'
+                msg += ' Linked — ' + '; '.join(extras) + '.'
             messages.success(request, msg)
             # Stay on page for quick successive adds (esp. mobile)
             return redirect('event_create')
@@ -2420,14 +2420,14 @@ def event_create(request):
             ],
         }, ensure_ascii=False),
         'color_presets': [
-            ('#10b981', 'Zelena'),
-            ('#3b82f6', 'Modra'),
-            ('#f59e0b', 'Oranžna'),
-            ('#ef4444', 'Rdeča'),
-            ('#a855f7', 'Vijolična'),
-            ('#06b6d4', 'Cian'),
-            ('#eab308', 'Rumena'),
-            ('#f43f5e', 'Roza'),
+            ('#10b981', 'Green'),
+            ('#3b82f6', 'Blue'),
+            ('#f59e0b', 'Orange'),
+            ('#ef4444', 'Red'),
+            ('#a855f7', 'Purple'),
+            ('#06b6d4', 'Cyan'),
+            ('#eab308', 'Yellow'),
+            ('#f43f5e', 'Pink'),
         ],
     }
     return render(request, 'dashboard/event_form.html', context)

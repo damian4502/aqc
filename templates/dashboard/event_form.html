@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Dodaj dogodek - Air Quality Control{% endblock %}
+{% block title %}Add event - Air Quality Control{% endblock %}
 
 {% block content %}
 <div class="max-w-xl mx-auto w-full">
@@ -7,13 +7,13 @@
     <!-- Header -->
     <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
         <div>
-            <h1 class="text-2xl sm:text-3xl font-bold text-white tracking-tight">Dodaj dogodek</h1>
-            <p class="text-slate-400 text-sm mt-1">Hitri vnos za mobilne naprave ali polni obrazec</p>
+            <h1 class="text-2xl sm:text-3xl font-bold text-white tracking-tight">Add event</h1>
+            <p class="text-slate-400 text-sm mt-1">Quick entry for mobile, or the full form</p>
         </div>
         <a href="{% url 'dashboard' %}"
            class="inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-slate-800 hover:bg-slate-700 rounded-2xl text-slate-300 text-sm transition-all">
             <i class="fas fa-arrow-left"></i>
-            <span>Nazaj</span>
+            <span>Back</span>
         </a>
     </div>
 
@@ -40,12 +40,12 @@
         <button type="button" id="mode-quick"
                 class="mode-btn flex-1 py-3 rounded-xl text-sm font-semibold transition-all bg-blue-600 text-white shadow-lg"
                 onclick="setMode('quick')">
-            <i class="fas fa-bolt mr-1.5"></i> Hitro
+            <i class="fas fa-bolt mr-1.5"></i> Quick
         </button>
         <button type="button" id="mode-full"
                 class="mode-btn flex-1 py-3 rounded-xl text-sm font-semibold transition-all text-slate-400 hover:text-white"
                 onclick="setMode('full')">
-            <i class="fas fa-sliders-h mr-1.5"></i> Vsa polja
+            <i class="fas fa-sliders-h mr-1.5"></i> All fields
         </button>
     </div>
 
@@ -57,16 +57,16 @@
         <!-- Title -->
         <div>
             <label for="title" class="block text-sm font-medium text-slate-300 mb-2">
-                <i class="fas fa-tag mr-1.5 text-blue-400"></i> Naziv dogodka
+                <i class="fas fa-tag mr-1.5 text-blue-400"></i> Event title
             </label>
             <input type="text" name="title" id="title" required maxlength="200"
                    autofocus
-                   placeholder="npr. Odprto okno v kuhinji, visok CO2..."
+                   placeholder="e.g. Kitchen window opened, high CO2..."
                    class="w-full bg-slate-900 border border-slate-700 rounded-2xl px-4 py-3.5 text-white text-base
                           focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30
                           placeholder:text-slate-600">
             <p class="text-xs text-slate-500 mt-2">
-                Če v naslovu ali opisu omeniš prostor ali parameter, se povezava ustvari sama.
+                Mention a room or parameter in the title or description and the link is created automatically.
             </p>
             <div id="detected-links" class="hidden mt-2 flex flex-wrap gap-1.5"></div>
         </div>
@@ -74,7 +74,7 @@
         <!-- Timestamp -->
         <div>
             <label for="timestamp" class="block text-sm font-medium text-slate-300 mb-2">
-                <i class="fas fa-clock mr-1.5 text-blue-400"></i> Datum in čas
+                <i class="fas fa-clock mr-1.5 text-blue-400"></i> Date and time
             </label>
             <div class="flex gap-2">
                 <input type="datetime-local" name="timestamp" id="timestamp" required
@@ -84,19 +84,19 @@
                 <button type="button" onclick="setNow()"
                         class="flex-shrink-0 px-4 py-3.5 bg-slate-800 hover:bg-slate-700 active:scale-95
                                border border-slate-700 rounded-2xl text-emerald-400 text-sm font-medium transition-all"
-                        title="Nastavi na trenutni čas">
-                    Zdaj
+                        title="Set to current time">
+                    Now
                 </button>
             </div>
 
             <!-- Quick time chips -->
-            <p class="text-xs text-slate-500 mt-3 mb-2">Hitri gumbi (nazaj v času)</p>
+            <p class="text-xs text-slate-500 mt-3 mb-2">Quick buttons (back in time)</p>
             <div class="flex flex-wrap gap-2" id="quick-time-chips">
-                <button type="button" class="time-chip" data-mins="1" onclick="setMinutesAgo(1)">pred 1 min</button>
-                <button type="button" class="time-chip" data-mins="5" onclick="setMinutesAgo(5)">pred 5 min</button>
-                <button type="button" class="time-chip" data-mins="15" onclick="setMinutesAgo(15)">pred 15 min</button>
-                <button type="button" class="time-chip" data-mins="30" onclick="setMinutesAgo(30)">pred 30 min</button>
-                <button type="button" class="time-chip" data-mins="60" onclick="setMinutesAgo(60)">pred 1 uro</button>
+                <button type="button" class="time-chip" data-mins="1" onclick="setMinutesAgo(1)">1 min ago</button>
+                <button type="button" class="time-chip" data-mins="5" onclick="setMinutesAgo(5)">5 min ago</button>
+                <button type="button" class="time-chip" data-mins="15" onclick="setMinutesAgo(15)">15 min ago</button>
+                <button type="button" class="time-chip" data-mins="30" onclick="setMinutesAgo(30)">30 min ago</button>
+                <button type="button" class="time-chip" data-mins="60" onclick="setMinutesAgo(60)">1 hour ago</button>
             </div>
         </div>
 
@@ -106,10 +106,10 @@
             <!-- Description -->
             <div>
                 <label for="description" class="block text-sm font-medium text-slate-300 mb-2">
-                    <i class="fas fa-align-left mr-1.5 text-blue-400"></i> Opis / opomba
+                    <i class="fas fa-align-left mr-1.5 text-blue-400"></i> Description / note
                 </label>
                 <textarea name="description" id="description" rows="3"
-                          placeholder="Neobvezna opomba k dogodku..."
+                          placeholder="Optional note about the event..."
                           class="w-full bg-slate-900 border border-slate-700 rounded-2xl px-4 py-3.5 text-white text-base
                                  focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30
                                  placeholder:text-slate-600 resize-y"></textarea>
@@ -118,7 +118,7 @@
             <!-- Color -->
             <div>
                 <label class="block text-sm font-medium text-slate-300 mb-2">
-                    <i class="fas fa-palette mr-1.5 text-blue-400"></i> Barva na grafu
+                    <i class="fas fa-palette mr-1.5 text-blue-400"></i> Chart color
                 </label>
                 <div class="flex flex-wrap items-center gap-3">
                     <input type="color" name="color" id="color" value="#10b981"
@@ -138,12 +138,12 @@
             <div>
                 <div class="flex items-center justify-between mb-2">
                     <label class="block text-sm font-medium text-slate-300">
-                        <i class="fas fa-door-open mr-1.5 text-blue-400"></i> Prostori
+                        <i class="fas fa-door-open mr-1.5 text-blue-400"></i> Rooms
                     </label>
                     <div class="flex gap-2 text-xs">
-                        <button type="button" onclick="toggleAll('rooms', true)" class="text-blue-400 hover:underline">Vsi</button>
+                        <button type="button" onclick="toggleAll('rooms', true)" class="text-blue-400 hover:underline">All</button>
                         <span class="text-slate-600">|</span>
-                        <button type="button" onclick="toggleAll('rooms', false)" class="text-slate-400 hover:underline">Nobeden</button>
+                        <button type="button" onclick="toggleAll('rooms', false)" class="text-slate-400 hover:underline">None</button>
                     </div>
                 </div>
                 <div class="bg-slate-900/70 border border-slate-700 rounded-2xl p-3 max-h-48 overflow-y-auto space-y-1">
@@ -154,22 +154,22 @@
                         <span class="text-sm text-slate-200">{{ room.name }}</span>
                     </label>
                     {% empty %}
-                    <p class="text-sm text-slate-500 px-3 py-2">Ni definiranih prostorov.</p>
+                    <p class="text-sm text-slate-500 px-3 py-2">No rooms defined.</p>
                     {% endfor %}
                 </div>
-                <p class="text-xs text-slate-500 mt-1.5">Zaznani iz naslova/opisa se obkljukajo sami. Lahko dodaš še druge.</p>
+                <p class="text-xs text-slate-500 mt-1.5">Matches from the title or description are checked automatically. You can add more.</p>
             </div>
 
             <!-- Parameters -->
             <div>
                 <div class="flex items-center justify-between mb-2">
                     <label class="block text-sm font-medium text-slate-300">
-                        <i class="fas fa-flask mr-1.5 text-blue-400"></i> Parametri
+                        <i class="fas fa-flask mr-1.5 text-blue-400"></i> Parameters
                     </label>
                     <div class="flex gap-2 text-xs">
-                        <button type="button" onclick="toggleAll('parameters', true)" class="text-blue-400 hover:underline">Vsi</button>
+                        <button type="button" onclick="toggleAll('parameters', true)" class="text-blue-400 hover:underline">All</button>
                         <span class="text-slate-600">|</span>
-                        <button type="button" onclick="toggleAll('parameters', false)" class="text-slate-400 hover:underline">Nobeden</button>
+                        <button type="button" onclick="toggleAll('parameters', false)" class="text-slate-400 hover:underline">None</button>
                     </div>
                 </div>
                 <div class="bg-slate-900/70 border border-slate-700 rounded-2xl p-3 max-h-48 overflow-y-auto space-y-1">
@@ -183,10 +183,10 @@
                         </span>
                     </label>
                     {% empty %}
-                    <p class="text-sm text-slate-500 px-3 py-2">Ni definiranih parametrov.</p>
+                    <p class="text-sm text-slate-500 px-3 py-2">No parameters defined.</p>
                     {% endfor %}
                 </div>
-                <p class="text-xs text-slate-500 mt-1.5">Zaznani iz naslova/opisa se obkljukajo sami. Neobvezno za grafe.</p>
+                <p class="text-xs text-slate-500 mt-1.5">Your last selection is remembered in this browser. Matches from the title or description are also checked automatically.</p>
             </div>
         </div>
 
@@ -196,7 +196,7 @@
                        active:scale-[0.98] py-4 sm:py-5 rounded-2xl font-semibold text-base sm:text-lg
                        transition-all shadow-lg shadow-blue-900/30 flex items-center justify-center gap-2">
             <i class="fas fa-plus-circle"></i>
-            <span>Shrani dogodek</span>
+            <span>Save event</span>
         </button>
     </form>
 
@@ -204,7 +204,7 @@
     {% if recent_events %}
     <div class="mt-8">
         <h2 class="text-lg font-semibold text-white mb-3 flex items-center gap-2">
-            <i class="fas fa-history text-slate-400"></i> Zadnji dogodki
+            <i class="fas fa-history text-slate-400"></i> Recent events
         </h2>
         <div class="space-y-2">
             {% for event in recent_events %}
@@ -298,6 +298,8 @@
     const titleInput = document.getElementById('title');
     const descInput = document.getElementById('description');
     const detectedBox = document.getElementById('detected-links');
+    const eventForm = document.getElementById('event-form');
+    const PARAMS_LS_KEY = 'eventFormParameterIds';
 
     let catalog = { rooms: [], parameters: [] };
     try {
@@ -337,10 +339,37 @@
         document.getElementById('color').value = hex;
     };
 
+    function parameterCheckboxes() {
+        return document.querySelectorAll('input[name="parameters"]');
+    }
+
+    function saveParameterSelection() {
+        const ids = Array.from(parameterCheckboxes())
+            .filter(function (el) { return el.checked; })
+            .map(function (el) { return el.value; });
+        try { localStorage.setItem(PARAMS_LS_KEY, JSON.stringify(ids)); } catch (e) {}
+    }
+
+    function restoreParameterSelection() {
+        let ids = [];
+        try {
+            ids = JSON.parse(localStorage.getItem(PARAMS_LS_KEY) || '[]');
+        } catch (e) {
+            return;
+        }
+        if (!Array.isArray(ids) || !ids.length) return;
+        const idSet = new Set(ids.map(String));
+        parameterCheckboxes().forEach(function (el) {
+            if (idSet.has(el.value)) el.checked = true;
+        });
+    }
+
     window.toggleAll = function (name, checked) {
         document.querySelectorAll('input[name="' + name + '"]').forEach(el => {
             el.checked = checked;
+            if (name === 'parameters') autoChecked.parameters.delete(el.value);
         });
+        if (name === 'parameters') saveParameterSelection();
     };
 
     function normalize(s) {
@@ -480,7 +509,19 @@
     titleInput.addEventListener('input', updateDetected);
     if (descInput) descInput.addEventListener('input', updateDetected);
 
-    // Restore last mode (desktop users often want full form)
+    parameterCheckboxes().forEach(function (el) {
+        el.addEventListener('change', function () {
+            autoChecked.parameters.delete(el.value);
+            saveParameterSelection();
+        });
+    });
+
+    if (eventForm) {
+        eventForm.addEventListener('submit', saveParameterSelection);
+    }
+
+    // Restore last parameter selection, then last mode.
+    restoreParameterSelection();
     try {
         const saved = localStorage.getItem('eventFormMode');
         // On narrow screens default to quick
@@ -498,4 +539,3 @@
 })();
 </script>
 {% endblock %}
-
