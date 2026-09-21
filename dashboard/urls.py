@@ -1,5 +1,6 @@
 from django.urls import path
 from .views import *
+from .compare import compare_view
 
 urlpatterns = [
     path('', dashboard_overview, name='dashboard'),
@@ -14,6 +15,7 @@ urlpatterns = [
     path('parameter/<int:parameter_id>/export/', export_parameter_csv, name='export_parameter_csv'),
     path('trends/', trends_view, name='trends'),
     path('correlations/', correlations_view, name='correlations'),
+    path('compare/', compare_view, name='compare'),
     path('patterns/', patterns_view, name='patterns'),
     path('monitor/', monitor, name='monitor'),
     path('differential-pressure/', differential_pressure_view, name='differential_pressure'),
