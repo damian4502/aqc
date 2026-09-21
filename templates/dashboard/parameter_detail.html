@@ -195,6 +195,74 @@
 let currentGraphDiv = document.getElementById('plotly-graph');
 let parameterId = {{ parameter.id }};
 
+
+const TRACE_VIS_LS_KEY = 'chartVisible.parameter.{{ parameter.id }}';
+
+function normalizeTraceName(name) {
+    return String(name || '').trim().toLowerCase();
+}
+
+function getVisibleTraceNames(gd) {
+    if (!gd || !Array.isArray(gd.data)) return null;
+    const names = [];
+    gd.data.forEach(function (trace) {
+        if (!trace || !trace.name) return;
+        if (trace.visible === 'legendonly' || trace.visible === false) return;
+        names.push(normalizeTraceName(trace.name));
+    });
+    return names;
+}
+
+function loadSavedTraceVisibility() {
+    try {
+        const raw = localStorage.getItem(TRACE_VIS_LS_KEY);
+        if (!raw) return null;
+        const names = JSON.parse(raw);
+        if (!Array.isArray(names)) return null;
+        return names.map(normalizeTraceName).filter(Boolean);
+    } catch (e) {
+        return null;
+    }
+}
+
+function saveTraceVisibility(gd) {
+    const names = getVisibleTraceNames(gd);
+    if (!names) return;
+    try {
+        localStorage.setItem(TRACE_VIS_LS_KEY, JSON.stringify(names));
+    } catch (e) {}
+}
+
+function getShowParamsForRequest() {
+    const gd = currentGraphDiv;
+    if (gd && Array.isArray(gd.data) && gd.data.length > 0) {
+        return getVisibleTraceNames(gd);
+    }
+    return loadSavedTraceVisibility();
+}
+
+function applySavedTraceVisibility(gd) {
+    const saved = loadSavedTraceVisibility();
+    if (!saved || !gd || !Array.isArray(gd.data) || !gd.data.length) return;
+    const savedSet = new Set(saved);
+    const vis = gd.data.map(function (trace) {
+        if (!trace || !trace.name) return true;
+        return savedSet.has(normalizeTraceName(trace.name)) ? true : 'legendonly';
+    });
+    Plotly.restyle(gd, { visible: vis });
+}
+
+function bindTraceVisibilityPersistence(gd) {
+    if (!gd || typeof gd.on !== 'function') return;
+    const persist = function () {
+        setTimeout(function () { saveTraceVisibility(gd); }, 0);
+    };
+    gd.on('plotly_legendclick', persist);
+    gd.on('plotly_legenddoubleclick', persist);
+    gd.on('plotly_restyle', persist);
+}
+
+
 function parseLocalDate(input) {
     if (input == null || input === '') return new Date(NaN);
 
@@ -346,23 +414,18 @@ function adjustYAxisToVisibleRangeWithData(gd, xRangeFromEvent = null) {
 }
 // Main graph loader
 async function loadGraph(extraParams = {}) {
-	let tmprms = new Array();
-    if (currentGraphDiv && currentGraphDiv.calcdata && currentGraphDiv.calcdata.length > 0) {
-        currentGraphDiv.calcdata.forEach((calcTrace, i) => {
-            const trace = currentGraphDiv.data[i];
-			if (!trace || trace.visible === 'legendonly' || trace.visible === false) return;
-			tmprms.push(trace['name'].toLowerCase());
-		});
-	}
-
     const params = new URLSearchParams({
 		parameter_id: {{parameter.id}},
         start: document.getElementById('start_date')?.value || '',
         end: document.getElementById('end_date')?.value || '',
         interval: document.getElementById('interval')?.value || '60',
-        fill: document.getElementById('fill_method')?.value || 'ffill',
-		show_params: tmprms
+        fill: document.getElementById('fill_method')?.value || 'ffill'
     });
+
+    const showParams = getShowParamsForRequest();
+    if (showParams !== null) {
+        params.set('show_params', showParams.length ? showParams.join(',') : '__none__');
+    }
 
     // Spike filtering aggressiveness (IQR multiplier; 0 = off)
     params.set(
@@ -394,6 +457,17 @@ async function loadGraph(extraParams = {}) {
         }
 
         currentGraphDiv.removeAllListeners('plotly_relayout');
+        if (typeof currentGraphDiv.removeAllListeners === 'function') {
+            currentGraphDiv.removeAllListeners('plotly_restyle');
+            currentGraphDiv.removeAllListeners('plotly_legendclick');
+            currentGraphDiv.removeAllListeners('plotly_legenddoubleclick');
+        }
+
+        if (!isUpdate) {
+            applySavedTraceVisibility(currentGraphDiv);
+        }
+
+        bindTraceVisibilityPersistence(currentGraphDiv);
 
         currentGraphDiv.on('plotly_relayout', function(eventData) {
             if (eventData['xaxis.range[0]'] && eventData['xaxis.range[1]']) {
