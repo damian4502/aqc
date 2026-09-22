@@ -167,11 +167,21 @@
                 <button type="button" data-hours="1"  class="quick-date-btn px-4 py-2.5 text-sm rounded-2xl {% if request.GET.quickh == '1' %}bg-blue-600 text-white{% else %}bg-slate-800 hover:bg-slate-700{% endif %}">1h</button>
                 <button type="button" data-hours="8"  class="quick-date-btn px-4 py-2.5 text-sm rounded-2xl {% if request.GET.quickh == '8' %}bg-blue-600 text-white{% else %}bg-slate-800 hover:bg-slate-700{% endif %}">8h</button>
                 <button type="button" data-days="1"   class="quick-date-btn px-4 py-2.5 text-sm rounded-2xl {% if request.GET.quick == '1' %}bg-blue-600 text-white{% else %}bg-slate-800 hover:bg-slate-700{% endif %}">24h</button>
-                <button type="button" data-days="7"   class="quick-date-btn px-4 py-2.5 text-sm rounded-2xl {% if request.GET.quick == '7' or not request.GET.quick and not request.GET.quickh and not all_data %}bg-blue-600 text-white{% else %}bg-slate-800 hover:bg-slate-700{% endif %}">7d</button>
+                <button type="button" data-days="7"   class="quick-date-btn px-4 py-2.5 text-sm rounded-2xl {% if request.GET.quick == '7' %}bg-blue-600 text-white{% else %}bg-slate-800 hover:bg-slate-700{% endif %}">7d</button>
                 <button type="button" data-days="30"  class="quick-date-btn px-4 py-2.5 text-sm rounded-2xl {% if request.GET.quick == '30' %}bg-blue-600 text-white{% else %}bg-slate-800 hover:bg-slate-700{% endif %}">30d</button>
                 <button type="button" data-days="0"   class="quick-date-btn px-4 py-2.5 text-sm rounded-2xl {% if all_data %}bg-blue-600 text-white{% else %}bg-slate-800 hover:bg-slate-700{% endif %}">All</button>
+                <button type="button" id="apply-zoom-btn"
+                        title="Set From/To to the current chart zoom"
+                        {% if not fig %}disabled{% endif %}
+                        class="inline-flex items-center px-4 py-2.5 text-sm rounded-2xl transition-all {% if request.GET.zoomed == '1' %}bg-blue-600 text-white{% else %}bg-slate-800 hover:bg-slate-700{% endif %} {% if not fig %}opacity-40 cursor-not-allowed{% endif %}">
+                    <i class="fas fa-search-plus mr-1"></i>
+                    Zoom
+                </button>
 
                 <input type="hidden" name="all" id="all_data" value="{% if all_data %}true{% endif %}">
+                <input type="hidden" name="quick" id="quick" value="{{ request.GET.quick|default:'' }}">
+                <input type="hidden" name="quickh" id="quickh" value="{{ request.GET.quickh|default:'' }}">
+                <input type="hidden" name="zoomed" id="zoomed" value="{{ request.GET.zoomed|default:'' }}">
 
                 <div class="flex-1"></div>
 
@@ -351,24 +361,117 @@ function toLocalInput(date) {
         + 'T' + pad(date.getHours()) + ':' + pad(date.getMinutes());
 }
 
+function setHidden(id, value) {
+    const el = document.getElementById(id);
+    if (el) el.value = value;
+}
+
+function clearPeriodFlags() {
+    setHidden('all_data', '');
+    setHidden('quick', '');
+    setHidden('quickh', '');
+    setHidden('zoomed', '');
+}
+
 function applyQuickRange(btn) {
     const form = document.getElementById('corr-form');
-    const allInput = document.getElementById('all_data');
     const startInput = document.getElementById('start_date');
     const endInput = document.getElementById('end_date');
     const days = btn.dataset.days;
     const hours = btn.dataset.hours;
     const now = new Date();
-    allInput.value = '';
+    clearPeriodFlags();
     if (days === '0') {
-        allInput.value = 'true';
+        setHidden('all_data', 'true');
     } else {
         const start = new Date(now);
-        if (hours) start.setHours(start.getHours() - parseInt(hours, 10));
-        else start.setDate(start.getDate() - parseInt(days || '7', 10));
+        if (hours) {
+            start.setHours(start.getHours() - parseInt(hours, 10));
+            setHidden('quickh', hours);
+        } else {
+            start.setDate(start.getDate() - parseInt(days || '7', 10));
+            setHidden('quick', days || '7');
+        }
         startInput.value = toLocalInput(start);
         endInput.value = toLocalInput(now);
     }
+    form.submit();
+}
+
+function parseLocalDate(input) {
+    if (input == null || input === '') return new Date(NaN);
+    if (input instanceof Date) return input;
+    if (typeof input === 'number' && isFinite(input)) {
+        return new Date(input < 1e12 ? input * 1000 : input);
+    }
+    const str = String(input).trim();
+    if (/^-?\d+(\.\d+)?$/.test(str)) {
+        const n = Number(str);
+        if (isFinite(n)) return new Date(n < 1e12 ? n * 1000 : n);
+    }
+    const normalized = str.replace('T', ' ').replace('Z', '').trim();
+    const parts = normalized.split(/[- :.]/);
+    const year  = parseInt(parts[0], 10);
+    const month = parseInt(parts[1], 10) - 1;
+    const day   = parseInt(parts[2], 10);
+    const hour  = parseInt(parts[3] || '0', 10);
+    const min   = parseInt(parts[4] || '0', 10);
+    const sec   = parseInt(parts[5] || '0', 10);
+    const ms    = parseInt((parts[6] || '0').padEnd(3, '0').slice(0, 3), 10);
+    return new Date(year, month, day, hour, min, sec, ms);
+}
+
+function floorToMinute(date) {
+    const d = new Date(date.getTime());
+    d.setSeconds(0, 0);
+    return d;
+}
+
+function ceilToMinute(date) {
+    const d = new Date(date.getTime());
+    if (d.getSeconds() === 0 && d.getMilliseconds() === 0) return d;
+    d.setSeconds(0, 0);
+    d.setMinutes(d.getMinutes() + 1);
+    return d;
+}
+
+function getGraphDiv() {
+    const wrap = document.getElementById('corr-heatmap');
+    if (!wrap) return null;
+    return wrap.querySelector('.js-plotly-plot')
+        || wrap.querySelector('.plotly-graph-div')
+        || wrap.querySelector('.plotly');
+}
+
+function getVisibleChartRange() {
+    const gd = getGraphDiv();
+    if (!gd) return null;
+    const range = (gd.layout && gd.layout.xaxis && gd.layout.xaxis.range)
+        || (gd._fullLayout && gd._fullLayout.xaxis && gd._fullLayout.xaxis.range);
+    if (!range || range.length < 2) return null;
+    const start = parseLocalDate(range[0]);
+    const end = parseLocalDate(range[1]);
+    if (isNaN(start.getTime()) || isNaN(end.getTime()) || start >= end) return null;
+    return { start, end };
+}
+
+function applyChartZoomToPeriod() {
+    const visible = getVisibleChartRange();
+    const form = document.getElementById('corr-form');
+    const startInput = document.getElementById('start_date');
+    const endInput = document.getElementById('end_date');
+    if (!visible || !form || !startInput || !endInput) return;
+
+    let start = floorToMinute(visible.start);
+    let end = ceilToMinute(visible.end);
+    if (end.getTime() <= start.getTime()) {
+        end = new Date(start.getTime() + 60 * 1000);
+    }
+
+    startInput.value = toLocalInput(start);
+    endInput.value = toLocalInput(end);
+    clearPeriodFlags();
+    setHidden('zoomed', '1');
     form.submit();
 }
 
@@ -440,6 +543,19 @@ document.addEventListener('DOMContentLoaded', () => {
             applyQuickRange(btn);
         });
     });
+    ['start_date', 'end_date'].forEach(id => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.addEventListener('change', clearPeriodFlags);
+    });
+    const zoomBtn = document.getElementById('apply-zoom-btn');
+    if (zoomBtn) {
+        zoomBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            applyChartZoomToPeriod();
+        });
+    }
 
     document.querySelectorAll('.pair-filter').forEach(btn => {
         btn.addEventListener('click', () => {
