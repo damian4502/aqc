@@ -1437,35 +1437,42 @@ def correlations_view(request):
         make_series_label,
         pairwise_correlations,
     )
+    from dashboard.series_selection import (
+        expand_series_pairs,
+        pairs_filter,
+        parse_id_list,
+        parse_series_pairs,
+    )
 
     rooms = list(Room.objects.all().order_by("order", "name"))
     parameters = list(Parameter.objects.all().order_by("order", "name"))
     groups = list(RoomGroup.objects.prefetch_related("rooms").order_by("name"))
+    valid_room_ids = {room.id for room in rooms}
+    valid_parameter_ids = {param.id for param in parameters}
 
-    selected_room_ids = []
-    for raw in request.GET.getlist("room"):
-        try:
-            selected_room_ids.append(int(raw))
-        except (TypeError, ValueError):
-            continue
-    selected_parameter_ids = []
-    for raw in request.GET.getlist("parameter"):
-        try:
-            selected_parameter_ids.append(int(raw))
-        except (TypeError, ValueError):
-            continue
+    selected_room_ids = parse_id_list(request.GET.getlist("room"))
+    selected_parameter_ids = parse_id_list(request.GET.getlist("parameter"))
+    explicit_pairs = parse_series_pairs(
+        request.GET.getlist("series"), valid_room_ids, valid_parameter_ids
+    )
 
     # Remember last checkbox set, but only auto-compute when the query
     # string actually carries a selection (shareable URLs still work).
     has_query_selection = bool(
-        request.GET.getlist("room") or request.GET.getlist("parameter")
+        selected_room_ids or selected_parameter_ids or explicit_pairs
     )
     if has_query_selection:
         request.session["corr_rooms"] = selected_room_ids
         request.session["corr_parameters"] = selected_parameter_ids
+        request.session["corr_series"] = [f"{room_id}:{param_id}" for room_id, param_id in explicit_pairs]
     elif not request.GET:
-        selected_room_ids = list(request.session.get("corr_rooms") or [])
-        selected_parameter_ids = list(request.session.get("corr_parameters") or [])
+        selected_room_ids = parse_id_list(request.session.get("corr_rooms") or [])
+        selected_parameter_ids = parse_id_list(request.session.get("corr_parameters") or [])
+        explicit_pairs = parse_series_pairs(
+            request.session.get("corr_series") or [],
+            valid_room_ids,
+            valid_parameter_ids,
+        )
 
     method = (request.GET.get("method") or "pearson").strip().lower()
     if method not in ("pearson", "spearman"):
@@ -1553,13 +1560,29 @@ def correlations_view(request):
     request.session["resample_fill_method"] = fill_method
     request.session["spike_factor"] = spike_factor
 
-    selected_rooms = [r for r in rooms if r.id in selected_room_ids]
-    selected_parameters = [p for p in parameters if p.id in selected_parameter_ids]
-
-    include_room = len(selected_rooms) != 1
-    include_parameter = len(selected_parameters) != 1
-
-    n_series_selected = len(selected_rooms) * len(selected_parameters)
+    room_by_id = {room.id: room for room in rooms}
+    parameter_by_id = {param.id: param for param in parameters}
+    series_pairs = expand_series_pairs(
+        selected_room_ids, selected_parameter_ids, explicit_pairs
+    )
+    pair_room_ids = {room_id for room_id, _param_id in series_pairs}
+    pair_parameter_ids = {param_id for _room_id, param_id in series_pairs}
+    pair_rooms = [room for room in rooms if room.id in pair_room_ids]
+    pair_parameters = [param for param in parameters if param.id in pair_parameter_ids]
+    include_room = len(pair_rooms) != 1
+    include_parameter = len(pair_parameters) != 1
+    n_series_selected = len(series_pairs)
+    selected_series = [
+        {
+            "room_id": room_id,
+            "parameter_id": param_id,
+            "room_name": room_by_id[room_id].name,
+            "parameter_name": parameter_by_id[param_id].name,
+            "unit": parameter_by_id[param_id].unit or "",
+            "key": f"{room_id}:{param_id}",
+        }
+        for room_id, param_id in explicit_pairs
+    ]
     truncated = False
     compute_error = None
     should_compute = has_query_selection and n_series_selected >= 2
@@ -1577,19 +1600,19 @@ def correlations_view(request):
         truncated = True
         compute_error = (
             f"That selection would build {n_series_selected} series "
-            f"(limit is {MAX_SERIES}). Narrow the rooms or parameters."
+            f"(limit is {MAX_SERIES}). Uncheck some rooms or parameters, "
+            "or add only the individual series you need."
         )
         should_compute = False
     elif has_query_selection and n_series_selected == 1:
-        compute_error = "Need at least two series — add another room or parameter."
+        compute_error = "Need at least two series — add another room, parameter, or combination."
     elif has_query_selection and n_series_selected == 0:
-        compute_error = "Select at least one room and one parameter."
+        compute_error = "Select at least one room and one parameter, or add individual series."
 
     if should_compute:
-        qs = Measurement.objects.filter(
-            sensor__room_id__in=selected_room_ids,
-            parameter_id__in=selected_parameter_ids,
-        ).select_related("sensor__room", "parameter")
+        qs = Measurement.objects.filter(pairs_filter(series_pairs)).select_related(
+            "sensor__room", "parameter"
+        )
         if not all_data and start_date:
             qs = qs.filter(timestamp__gte=start_date, timestamp__lte=end_date)
 
@@ -1642,9 +1665,9 @@ def correlations_view(request):
                     if include_room and include_parameter:
                         title = "Cross-series correlation"
                     elif include_room:
-                        title = f"Room correlation — {selected_parameters[0].name}"
+                        title = f"Room correlation — {pair_parameters[0].name}"
                     else:
-                        title = f"Parameter correlation — {selected_rooms[0].name}"
+                        title = f"Parameter correlation — {pair_rooms[0].name}"
 
                     method_label = "Pearson" if method == "pearson" else "Spearman"
                     if corr_matrix.empty or corr_matrix.shape[0] < 2:
@@ -1711,6 +1734,7 @@ def correlations_view(request):
         "groups_json": json.dumps(groups_payload),
         "selected_room_ids": set(selected_room_ids),
         "selected_parameter_ids": set(selected_parameter_ids),
+        "selected_series": selected_series,
         "method": method,
         "min_overlap": min_overlap,
         "start_date": context_start,

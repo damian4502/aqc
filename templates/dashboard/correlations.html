@@ -10,7 +10,8 @@
             <h1 class="text-4xl sm:text-5xl font-bold text-white tracking-tighter">Correlations</h1>
             <p class="text-slate-400 mt-2 max-w-2xl">
                 Pick any rooms and parameters, then a time window. Each room × parameter
-                pair becomes a series; the matrix shows how those series move together.
+                pair becomes a series. Add individual series when you only need a few
+                combinations instead of the full cross product.
             </p>
         </div>
         <div class="text-xs text-slate-500">
@@ -93,6 +94,43 @@
                     <span id="series-warn" class="hidden text-amber-400"> (over the {{ max_series }} limit)</span>
                 </p>
             </div>
+        </div>
+
+        <div class="glass rounded-3xl p-6">
+            <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-3">
+                <label class="text-sm font-medium text-slate-200">
+                    <i class="fas fa-plus-circle mr-1.5 text-emerald-400"></i> Individual series
+                </label>
+                <span class="text-[11px] text-slate-500">Adds one room/parameter pair, not the full cross product</span>
+            </div>
+            <div class="flex flex-wrap gap-3 items-end">
+                <select id="add-room" class="bg-slate-900 border border-slate-700 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:border-blue-500 min-w-[180px]">
+                    <option value="">Room</option>
+                    {% for room in rooms %}
+                    <option value="{{ room.id }}">{{ room.name }}</option>
+                    {% endfor %}
+                </select>
+                <select id="add-parameter" class="bg-slate-900 border border-slate-700 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:border-blue-500 min-w-[180px]">
+                    <option value="">Parameter</option>
+                    {% for p in parameters %}
+                    <option value="{{ p.id }}">{{ p.name }}{% if p.unit %} ({{ p.unit }}){% endif %}</option>
+                    {% endfor %}
+                </select>
+                <button type="button" id="add-series-btn"
+                        class="bg-emerald-600 hover:bg-emerald-500 px-5 py-3 rounded-2xl text-sm font-medium transition-all">
+                    Add series
+                </button>
+            </div>
+            <div id="explicit-series" class="flex flex-wrap gap-2 mt-4">
+                {% for pair in selected_series %}
+                <span class="series-chip inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-800 border border-slate-700 text-sm text-slate-200" data-key="{{ pair.key }}">
+                    <input type="hidden" name="series" value="{{ pair.key }}">
+                    <span>{{ pair.room_name }} · {{ pair.parameter_name }}{% if pair.unit %} <span class="text-slate-500 text-xs">{{ pair.unit }}</span>{% endif %}</span>
+                    <button type="button" class="series-remove text-slate-400 hover:text-rose-400 leading-none" aria-label="Remove">&times;</button>
+                </span>
+                {% endfor %}
+            </div>
+            <p id="explicit-empty" class="text-[11px] text-slate-500 mt-3 {% if selected_series %}hidden{% endif %}">No individual series yet.</p>
         </div>
 
         <!-- Time range + resampling -->
@@ -324,18 +362,57 @@ function checkedCount(selector) {
     return document.querySelectorAll(selector + ':checked').length;
 }
 
+function seriesPairCount() {
+    const rooms = [...document.querySelectorAll('.room-cb:checked')].map(cb => cb.value);
+    const params = [...document.querySelectorAll('.param-cb:checked')].map(cb => cb.value);
+    const keys = new Set();
+    rooms.forEach(roomId => params.forEach(paramId => keys.add(roomId + ':' + paramId)));
+    document.querySelectorAll('#explicit-series input[name="series"]').forEach(el => keys.add(el.value));
+    return keys.size;
+}
+
 function updateCounts() {
     const rooms = checkedCount('.room-cb');
     const params = checkedCount('.param-cb');
-    const series = rooms * params;
+    const series = seriesPairCount();
     const roomEl = document.getElementById('room-count');
     const paramEl = document.getElementById('param-count');
     const seriesEl = document.getElementById('series-preview');
     const warnEl = document.getElementById('series-warn');
+    const emptyEl = document.getElementById('explicit-empty');
     if (roomEl) roomEl.textContent = rooms;
     if (paramEl) paramEl.textContent = params;
     if (seriesEl) seriesEl.textContent = series;
     if (warnEl) warnEl.classList.toggle('hidden', series <= MAX_SERIES);
+    if (emptyEl) emptyEl.classList.toggle('hidden', document.querySelectorAll('#explicit-series .series-chip').length > 0);
+}
+
+function addExplicitSeries() {
+    const roomSel = document.getElementById('add-room');
+    const paramSel = document.getElementById('add-parameter');
+    if (!roomSel || !paramSel || !roomSel.value || !paramSel.value) return;
+    const key = roomSel.value + ':' + paramSel.value;
+    if (document.querySelector('#explicit-series .series-chip[data-key="' + key + '"]')) return;
+    const roomName = roomSel.selectedOptions[0].textContent.trim();
+    const paramName = paramSel.selectedOptions[0].textContent.trim();
+    const wrap = document.getElementById('explicit-series');
+    const chip = document.createElement('span');
+    chip.className = 'series-chip inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-800 border border-slate-700 text-sm text-slate-200';
+    chip.dataset.key = key;
+    const input = document.createElement('input');
+    input.type = 'hidden';
+    input.name = 'series';
+    input.value = key;
+    const label = document.createElement('span');
+    label.textContent = roomName + ' · ' + paramName;
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'series-remove text-slate-400 hover:text-rose-400 leading-none';
+    remove.setAttribute('aria-label', 'Remove');
+    remove.textContent = '×';
+    chip.append(input, label, remove);
+    wrap.appendChild(chip);
+    updateCounts();
 }
 
 function toggleAll(kind, on) {
@@ -537,6 +614,18 @@ document.addEventListener('DOMContentLoaded', () => {
     document.querySelectorAll('.room-cb, .param-cb').forEach(cb => {
         cb.addEventListener('change', updateCounts);
     });
+    const seriesWrap = document.getElementById('explicit-series');
+    if (seriesWrap) {
+        seriesWrap.addEventListener('click', (e) => {
+            const btn = e.target.closest('.series-remove');
+            if (!btn) return;
+            const chip = btn.closest('.series-chip');
+            if (chip) chip.remove();
+            updateCounts();
+        });
+    }
+    const addBtn = document.getElementById('add-series-btn');
+    if (addBtn) addBtn.addEventListener('click', addExplicitSeries);
     document.querySelectorAll('.quick-date-btn').forEach(btn => {
         btn.addEventListener('click', (e) => {
             e.preventDefault();
