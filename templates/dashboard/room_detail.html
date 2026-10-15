@@ -91,6 +91,7 @@
             <label class="block text-xs text-slate-400 mb-1.5">Resampling</label>
             <div class="flex gap-3">
                 <select name="interval" id="interval" class="flex-1 bg-slate-900 border border-slate-700 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:border-blue-500">
+                    <option value="0"   {% if interval == 0 %}selected{% endif %}>All recorded values</option>
                     <option value="1"   {% if interval == 1 %}selected{% endif %}>1 min</option>
                     <option value="5"   {% if interval == 5 %}selected{% endif %}>5 min</option>
                     <option value="15"  {% if interval == 15 %}selected{% endif %}>15 min</option>
@@ -105,6 +106,9 @@
                     <option value="zero"       {% if fill_method == 'zero' %}selected{% endif %}>0</option>
                 </select>
             </div>
+            <p id="raw-interval-hint" class="text-xs text-slate-500 mt-1.5 {% if interval != 0 %}hidden{% endif %}">
+                Plots every recorded value, with no time-bin averaging. Narrow the time range if the chart is slow.
+            </p>
         </div>
 
         <!-- Actions -->
@@ -705,11 +709,22 @@ document.addEventListener('DOMContentLoaded', () => {
         el.addEventListener('change', () => scheduleLoadGraph({ immediate: true }));
     });
 
+    function syncRawIntervalUi() {
+        const intervalEl = document.getElementById('interval');
+        const fill = document.getElementById('fill_method');
+        const hint = document.getElementById('raw-interval-hint');
+        const raw = !!(intervalEl && intervalEl.value === '0');
+        if (fill) fill.disabled = raw;
+        if (hint) hint.classList.toggle('hidden', !raw);
+    }
+    syncRawIntervalUi();
+
     // Selects (including spike aggressiveness)
     ['interval', 'fill_method', 'spike_factor'].forEach(id => {
         const el = document.getElementById(id);
         if (!el) return;
         el.addEventListener('change', () => {
+            if (id === 'interval') syncRawIntervalUi();
             lastLoadGraphKey = '';
             scheduleLoadGraph({ immediate: true, force: true });
         });

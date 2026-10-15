@@ -204,7 +204,7 @@ def export_room_csv(request, room_id):
         resampled['timestamp'] = pd.to_datetime(resampled['timestamp']).dt.strftime('%Y-%m-%d %H:%M:%S')
 
     safe_name = "".join(c if c.isalnum() or c in ('-', '_') else '_' for c in room.name.replace(' ', '_'))
-    filename = f"{safe_name}_measurements_{interval_minutes}min.csv"
+    filename = f"{safe_name}_measurements_{interval_file_label(interval_minutes)}.csv"
 
     response = HttpResponse(content_type='text/csv')
     response['Content-Disposition'] = f'attachment; filename="{filename}"'
@@ -531,8 +531,43 @@ def set_pressure_offset_api(request):
     
 import pandas as pd
 from django.utils import timezone
+
+
+def is_raw_interval(interval_minutes):
+    """Interval 0 plots every recorded sample, with no time binning."""
+    try:
+        return int(interval_minutes) <= 0
+    except (TypeError, ValueError):
+        return False
+
+
+def parse_interval_minutes(value, default=15):
+    """Parse a resampling interval in minutes.
+
+    0 means every recorded value (no resampling). Empty or invalid input
+    falls back to ``default``. A numeric 0 must not be treated as missing.
+    """
+    if value is None or value == "":
+        return int(default)
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return int(default)
+
+
+def interval_file_label(interval_minutes):
+    """Filename fragment for a resampling interval."""
+    if is_raw_interval(interval_minutes):
+        return "all_points"
+    return f"{int(interval_minutes)}min"
+
+
 def resample_measurements(df, interval_minutes=15, fill_method='ffill', ignore_spikes=False, spike_factor=None):
     """Resample measurements and optionally remove outliers using IQR method.
+
+    interval_minutes: bin size. 0 (or negative) skips resampling and returns
+    every recorded timestamp. Duplicate timestamps for the same series are
+    averaged. Missing bins are not filled in that mode.
 
     spike_factor: IQR multiplier for outlier bounds. Higher = milder filtering.
       0 or None + ignore_spikes=False => no filtering
@@ -548,14 +583,22 @@ def resample_measurements(df, interval_minutes=15, fill_method='ffill', ignore_s
         df['timestamp'] = df['timestamp'].dt.tz_convert('Europe/Ljubljana').dt.tz_localize(None)
     df = df.set_index('timestamp')
 
-    # Pivot
+    # Pivot. Same timestamp + series collapses to the mean (one sensor reading
+    # per stamp stays as recorded).
     pivot = df.pivot_table(index=df.index, columns='parameter' if 'parameter' in df.columns else 'room',
                           values='value', aggfunc='mean')
 
-    # Resampling
-    freq_map = {1: '1min', 5: '5min', 15: '15min', 60: 'h', 1440: 'D'}
-    freq = freq_map.get(interval_minutes, '15min')
-    resampled = pivot.resample(freq).mean()
+    try:
+        interval_minutes = int(interval_minutes)
+    except (TypeError, ValueError):
+        interval_minutes = 15
+
+    if interval_minutes <= 0:
+        resampled = pivot.sort_index()
+    else:
+        freq_map = {1: '1min', 5: '5min', 15: '15min', 60: 'h', 1440: 'D'}
+        freq = freq_map.get(interval_minutes, '15min')
+        resampled = pivot.resample(freq).mean()
 
     # Resolve spike_factor (IQR multiplier). Higher value = less aggressive filtering.
     if spike_factor is None:
@@ -578,17 +621,52 @@ def resample_measurements(df, interval_minutes=15, fill_method='ffill', ignore_s
             rolling_median = series.rolling(window=5, center=True, min_periods=1).median()
             resampled[col] = series.where((series >= lower_bound) & (series <= upper_bound), rolling_median)
 
-    # Fill missing values
-    if fill_method == 'ffill':
-        resampled = resampled.ffill()
-    elif fill_method == 'bfill':
-        resampled = resampled.bfill()
-    elif fill_method == 'interpolate':
-        resampled = resampled.interpolate(method='linear')
-    elif fill_method == 'zero':
-        resampled = resampled.fillna(0)
+    # Fill missing bins only when the series was resampled. Raw mode keeps
+    # gaps so the chart does not invent values between real samples.
+    if interval_minutes > 0:
+        if fill_method == 'ffill':
+            resampled = resampled.ffill()
+        elif fill_method == 'bfill':
+            resampled = resampled.bfill()
+        elif fill_method == 'interpolate':
+            resampled = resampled.interpolate(method='linear')
+        elif fill_method == 'zero':
+            resampled = resampled.fillna(0)
 
     return resampled
+
+
+def build_time_series_figure(frame, title, height=700, raw=False):
+    """Line chart from a wide time-indexed frame.
+
+    Raw mode plots each column on its own timestamps. A shared index would
+    insert the other series' sample times as gaps and break the line.
+    """
+    import plotly.graph_objects as go
+
+    if frame is None or getattr(frame, "empty", True):
+        fig = go.Figure()
+        fig.update_layout(title=title, height=height)
+        return fig
+
+    if raw:
+        fig = go.Figure()
+        for col in frame.columns:
+            series = frame[col].dropna()
+            if series.empty:
+                continue
+            fig.add_trace(go.Scattergl(
+                x=list(series.index),
+                y=[float(value) for value in series.to_numpy()],
+                name=str(col),
+                mode="lines",
+                connectgaps=True,
+                line=dict(width=2.2),
+            ))
+        fig.update_layout(title=title, height=height, hovermode="x unified")
+        return fig
+
+    return px.line(frame, x=frame.index, y=frame.columns, title=title, height=height)
 
 import plotly.graph_objects as go
 
@@ -723,9 +801,13 @@ def chart_data(request):
 
     resampled = resample_measurements(df, interval_minutes, fill_method, spike_factor=spike_factor)
     if not resampled.empty:
-        fig = px.line(resampled, x=resampled.index, y=resampled.columns,
-                     title=f'Time trend',
-                     height=700)
+        raw = is_raw_interval(interval_minutes)
+        fig = build_time_series_figure(
+            resampled,
+            title="Time trend — all recorded values" if raw else "Time trend",
+            height=700,
+            raw=raw,
+        )
 
         for trace in fig.data:
             if trace.name.lower() not in show_params and '*' not in show_params:
@@ -1180,10 +1262,11 @@ def parameter_detail(request, parameter_id):
 
         if view_type == 'trend':
             resampled = resample_measurements(df, interval_minutes, fill_method, spike_factor=spike_factor)
-
-            fig = px.line(resampled, x=resampled.index, y=resampled.columns,
-                         title=f'Time trend - {parameter.name}',
-                         height=700)
+            raw = is_raw_interval(interval_minutes)
+            title = f'Time trend - {parameter.name}'
+            if raw:
+                title += ' (all recorded values)'
+            fig = build_time_series_figure(resampled, title=title, height=700, raw=raw)
             fig = apply_dark_theme(fig)
 
             events = Event.objects.filter(
@@ -1228,12 +1311,17 @@ def parameter_detail(request, parameter_id):
             else:
                 corr_matrix = resampled.corr().round(2)
                 
+                bin_label = (
+                    "all recorded points"
+                    if is_raw_interval(interval_minutes)
+                    else f"interval: {interval_minutes} min"
+                )
                 fig = px.imshow(
                     corr_matrix,
                     text_auto=True,
                     aspect="auto",
                     color_continuous_scale='RdBu_r',
-                    title=f'Parameter correlation - {parameter.name} (interval: {interval_minutes} min)'
+                    title=f'Parameter correlation - {parameter.name} ({bin_label})'
                 )
                 fig.update_layout(height=650)
                 fig = apply_dark_theme(fig)
@@ -1336,7 +1424,7 @@ def export_parameter_csv(request, parameter_id):
         resampled['timestamp'] = pd.to_datetime(resampled['timestamp']).dt.strftime('%Y-%m-%d %H:%M:%S')
 
     # Filename
-    filename = f"{parameter.name.replace(' ', '_')}_{interval_minutes}min.csv"
+    filename = f"{parameter.name.replace(' ', '_')}_{interval_file_label(interval_minutes)}.csv"
 
     response = HttpResponse(content_type='text/csv')
     response['Content-Disposition'] = f'attachment; filename="{filename}"'
@@ -1538,12 +1626,10 @@ def correlations_view(request):
         request.session["chart_start_date"] = context_start
         request.session["chart_end_date"] = context_end
 
-    try:
-        interval_minutes = int(
-            request.GET.get("interval", request.session.get("resample_interval", 15)) or 15
-        )
-    except (TypeError, ValueError):
-        interval_minutes = 15
+    interval_raw = request.GET.get("interval", None)
+    if interval_raw is None:
+        interval_raw = request.session.get("resample_interval", 15)
+    interval_minutes = parse_interval_minutes(interval_raw, default=15)
     fill_method = request.GET.get(
         "fill_method", request.session.get("resample_fill_method", "ffill")
     )
@@ -1647,7 +1733,11 @@ def correlations_view(request):
                 df, interval_minutes, fill_method, spike_factor=spike_factor
             )
             if resampled is None or resampled.empty:
-                compute_error = "No overlapping samples after resampling."
+                compute_error = (
+                    "No recorded samples in this period."
+                    if is_raw_interval(interval_minutes)
+                    else "No overlapping samples after resampling."
+                )
             else:
                 resampled = resampled.dropna(axis=1, how="all")
                 series_count = len(resampled.columns)
@@ -1675,6 +1765,11 @@ def correlations_view(request):
                             "Not enough overlapping samples to compute correlations."
                         )
                     else:
+                        bin_label = (
+                            "all recorded points"
+                            if is_raw_interval(interval_minutes)
+                            else f"{interval_minutes} min bins"
+                        )
                         fig = px.imshow(
                             corr_matrix,
                             text_auto=".2f",
@@ -1682,9 +1777,7 @@ def correlations_view(request):
                             color_continuous_scale="RdBu_r",
                             zmin=-1,
                             zmax=1,
-                            title=(
-                                f"{title} ({method_label}, {interval_minutes} min bins)"
-                            ),
+                            title=f"{title} ({method_label}, {bin_label})",
                         )
                         height = min(1100, max(420, 90 + 34 * series_count))
                         fig.update_layout(
@@ -1708,7 +1801,7 @@ def correlations_view(request):
 
                         if request.GET.get("format") == "csv":
                             response = HttpResponse(content_type="text/csv")
-                            filename = f"correlations_{method}_{interval_minutes}min.csv"
+                            filename = f"correlations_{method}_{interval_file_label(interval_minutes)}.csv"
                             response["Content-Disposition"] = (
                                 f'attachment; filename="{filename}"'
                             )
@@ -1753,6 +1846,7 @@ def correlations_view(request):
         "has_query_selection": has_query_selection,
         "series_count": series_count,
         "sample_count": sample_count,
+        "sample_label": "timestamps" if is_raw_interval(interval_minutes) else "bins",
         "pair_count": len(pairs),
         "skipped_constant": skipped_constant,
         "period_label": period_label,
@@ -1856,6 +1950,14 @@ def patterns_view(request):
         context_start = start_date.strftime("%Y-%m-%d") if start_date else ""
         context_end = end_date.strftime("%Y-%m-%d") if end_date else ""
 
+    if "interval" in request.GET:
+        interval_minutes = parse_interval_minutes(request.GET.get("interval"), default=15)
+        request.session["resample_interval"] = interval_minutes
+    else:
+        interval_minutes = parse_interval_minutes(
+            request.session.get("resample_interval", 15), default=15
+        )
+
     if "spike_factor" in request.GET:
         spike_factor = parse_spike_factor(request.GET.get("spike_factor"))
     elif "ignore_spikes" in request.GET:
@@ -1898,7 +2000,7 @@ def patterns_view(request):
             df["timestamp"] = pd.to_datetime(df["timestamp"])
             df = df.rename(columns={"parameter__name": "parameter"})
             resampled = resample_measurements(
-                df, 15, "none", spike_factor=spike_factor
+                df, interval_minutes, "none", spike_factor=spike_factor
             )
             if resampled is None or resampled.empty:
                 source = df[["timestamp", "value"]]
@@ -2101,6 +2203,7 @@ def patterns_view(request):
         "end_date": context_end,
         "all_data": all_data,
         "spike_factor": spike_factor,
+        "interval": interval_minutes,
         "fig_hourly": fig_hourly,
         "fig_weekly": fig_weekly,
         "fig_heat": fig_heat,

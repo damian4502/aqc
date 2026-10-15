@@ -62,6 +62,21 @@
                        class="bg-slate-800 border border-slate-700 rounded-2xl px-4 py-3 text-white focus:outline-none focus:border-blue-500">
             </div>
             <div>
+                <label class="block text-xs text-slate-400 mb-1.5">Resampling</label>
+                <select name="interval" id="interval"
+                        class="bg-slate-900 border border-slate-700 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:border-blue-500 min-w-[180px]">
+                    <option value="0"    {% if interval == 0 %}selected{% endif %}>All recorded values</option>
+                    <option value="1"    {% if interval == 1 %}selected{% endif %}>1 min</option>
+                    <option value="5"    {% if interval == 5 %}selected{% endif %}>5 min</option>
+                    <option value="15"   {% if interval == 15 %}selected{% endif %}>15 min</option>
+                    <option value="60"   {% if interval == 60 %}selected{% endif %}>1 hour</option>
+                    <option value="1440" {% if interval == 1440 %}selected{% endif %}>1 day</option>
+                </select>
+                <p id="raw-interval-hint" class="text-xs text-slate-500 mt-1.5 {% if interval != 0 %}hidden{% endif %}">
+                    Hourly and weekday averages use every recorded sample, with no time-bin averaging first.
+                </p>
+            </div>
+            <div>
                 <label class="block text-xs text-slate-400 mb-1.5">Ignore spikes</label>
                 <select name="spike_factor" id="spike_factor"
                         class="bg-slate-900 border border-slate-700 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:border-blue-500 min-w-[140px]">
@@ -229,6 +244,12 @@ function toLocalInput(date) {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
+    const intervalEl = document.getElementById('interval');
+    const hint = document.getElementById('raw-interval-hint');
+    const syncRaw = () => {
+        if (hint && intervalEl) hint.classList.toggle('hidden', intervalEl.value !== '0');
+    };
+    if (intervalEl) intervalEl.addEventListener('change', syncRaw);
     const form = document.getElementById('pattern-form');
     document.querySelectorAll('.quick-date-btn').forEach(btn => {
         btn.addEventListener('click', (e) => {

@@ -166,6 +166,7 @@
                     <div class="flex gap-3">
                         <select name="interval" id="interval"
                                 class="flex-1 bg-slate-900 border border-slate-700 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:border-blue-500">
+                            <option value="0"    {% if interval == 0 %}selected{% endif %}>All recorded values</option>
                             <option value="1"    {% if interval == 1 %}selected{% endif %}>1 min</option>
                             <option value="5"    {% if interval == 5 %}selected{% endif %}>5 min</option>
                             <option value="15"   {% if interval == 15 %}selected{% endif %}>15 min</option>
@@ -180,6 +181,9 @@
                             <option value="zero"        {% if fill_method == 'zero' %}selected{% endif %}>Fill with 0</option>
                         </select>
                     </div>
+                    <p id="raw-interval-hint" class="text-xs text-slate-500 mt-1.5 {% if interval != 0 %}hidden{% endif %}">
+                        Uses every recorded timestamp. Series that do not share timestamps have less overlap than a time bin.
+                    </p>
                 </div>
 
                 <div>
@@ -261,7 +265,7 @@
     <div class="flex flex-wrap gap-3 text-xs">
         <span class="px-3 py-1.5 rounded-full bg-slate-800 text-slate-300">{{ series_count }} series</span>
         <span class="px-3 py-1.5 rounded-full bg-slate-800 text-slate-300">{{ pair_count }} pairs</span>
-        <span class="px-3 py-1.5 rounded-full bg-slate-800 text-slate-300">{{ sample_count }} bins</span>
+        <span class="px-3 py-1.5 rounded-full bg-slate-800 text-slate-300">{{ sample_count }} {{ sample_label|default:"bins" }}</span>
         {% if period_label %}
         <span class="px-3 py-1.5 rounded-full bg-slate-800 text-slate-300">{{ period_label }}</span>
         {% endif %}
@@ -609,7 +613,19 @@ function showScatter(aName, bName, rValue) {
     Plotly.react(plot, [trace], layout, { responsive: true });
 }
 
+function syncRawIntervalUi() {
+    const intervalEl = document.getElementById('interval');
+    const fill = document.getElementById('fill_method');
+    const hint = document.getElementById('raw-interval-hint');
+    const raw = !!(intervalEl && intervalEl.value === '0');
+    if (fill) fill.disabled = raw;
+    if (hint) hint.classList.toggle('hidden', !raw);
+}
+
 document.addEventListener('DOMContentLoaded', () => {
+    syncRawIntervalUi();
+    const intervalEl = document.getElementById('interval');
+    if (intervalEl) intervalEl.addEventListener('change', syncRawIntervalUi);
     updateCounts();
     document.querySelectorAll('.room-cb, .param-cb').forEach(cb => {
         cb.addEventListener('change', updateCounts);

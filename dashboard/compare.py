@@ -205,8 +205,13 @@ def build_compare_figure(
     mode="minmax",
     events=None,
     title="Compare series",
+    individual_timeline=False,
 ):
-    """Dark overlay of selected series. Hover always includes the raw value."""
+    """Dark overlay of selected series. Hover always includes the raw value.
+
+    individual_timeline plots each series on its own timestamps (no shared
+    bin index), which is what "all recorded values" needs.
+    """
     if plotted is None or plotted.empty:
         return go.Figure()
 
@@ -223,17 +228,24 @@ def build_compare_figure(
     primary_unit = unique_units[0] if unique_units else ""
 
     fig = go.Figure()
-    x_values = list(plotted.index)
     for index, col in enumerate(plotted.columns):
         label = str(col)
         raw_col = raw_frame[col] if col in getattr(raw_frame, "columns", []) else plotted[col]
+        series_y = plotted[col]
+        if individual_timeline:
+            series_y = series_y.dropna()
+            if hasattr(raw_col, "reindex"):
+                raw_col = raw_col.reindex(series_y.index)
+            x_values = list(series_y.index)
+        else:
+            x_values = list(plotted.index)
         unit = units_by_label.get(label, "") or ""
         color = SERIES_COLORS[index % len(SERIES_COLORS)]
         custom = [[_fmt_hover_raw(value), unit] for value in raw_col]
         fig.add_trace(
             go.Scattergl(
                 x=x_values,
-                y=[_as_float(value) for value in plotted[col]],
+                y=[_as_float(value) for value in series_y],
                 name=label,
                 mode="lines",
                 line=dict(width=2.4, color=color),
@@ -305,7 +317,13 @@ def compare_view(request):
     import json
 
     from dashboard.chart_range import resolve_chart_range, save_chart_range_to_session
-    from dashboard.views import apply_dark_theme, parse_spike_factor, resample_measurements
+    from dashboard.views import (
+        apply_dark_theme,
+        is_raw_interval,
+        parse_interval_minutes,
+        parse_spike_factor,
+        resample_measurements,
+    )
     from measurements.models import Measurement
     from parameters.models import Parameter
     from rooms.models import Event, Room, RoomGroup
@@ -348,12 +366,10 @@ def compare_view(request):
     if start_date and end_date:
         save_chart_range_to_session(request, start_date, end_date)
 
-    try:
-        interval_minutes = int(
-            request.GET.get("interval", request.session.get("resample_interval", 15)) or 15
-        )
-    except (TypeError, ValueError):
-        interval_minutes = 15
+    interval_raw = request.GET.get("interval", None)
+    if interval_raw is None:
+        interval_raw = request.session.get("resample_interval", 15)
+    interval_minutes = parse_interval_minutes(interval_raw, default=15)
     fill_method = request.GET.get(
         "fill_method", request.session.get("resample_fill_method", "ffill")
     )
@@ -459,7 +475,11 @@ def compare_view(request):
                 frame, interval_minutes, fill_method, spike_factor=spike_factor
             )
             if resampled is None or resampled.empty:
-                compute_error = "No samples after resampling."
+                compute_error = (
+                    "No recorded samples in this period."
+                    if is_raw_interval(interval_minutes)
+                    else "No samples after resampling."
+                )
             else:
                 resampled = resampled.dropna(axis=1, how="all")
                 series_count = len(resampled.columns)
@@ -488,7 +508,7 @@ def compare_view(request):
 
         if request.GET.get("format") == "csv":
             response = HttpResponse(content_type="text/csv")
-            filename = f"compare_{normalize}_{interval_minutes}min.csv"
+            filename = f"compare_{normalize}_{'all_points' if is_raw_interval(interval_minutes) else str(interval_minutes) + 'min'}.csv"
             response["Content-Disposition"] = f'attachment; filename="{filename}"'
             export = resampled.copy()
             export.index.name = "timestamp"
@@ -519,8 +539,14 @@ def compare_view(request):
                 )
             event_count = len(events_payload)
 
-        plotted = downsample_frame(normalize_frame(resampled, normalize))
-        raw_plot = downsample_frame(resampled)
+        raw_mode = is_raw_interval(interval_minutes)
+        if raw_mode:
+            plotted = normalize_frame(resampled, normalize)
+            raw_plot = resampled
+            sample_count = int(resampled.notna().sum().sum())
+        else:
+            plotted = downsample_frame(normalize_frame(resampled, normalize))
+            raw_plot = downsample_frame(resampled)
 
         if include_room and include_parameter:
             title = "Compare series"
@@ -530,6 +556,8 @@ def compare_view(request):
             title = f"Compare parameters — {pair_rooms[0].name}"
         else:
             title = "Compare series"
+        if raw_mode:
+            title = f"{title} (all recorded values)"
 
         fig = build_compare_figure(
             plotted,
@@ -538,6 +566,7 @@ def compare_view(request):
             mode=normalize,
             events=events_payload,
             title=title,
+            individual_timeline=raw_mode,
         )
         fig = apply_dark_theme(fig, animate=False)
         # Theme helper is tuned for single-series room charts: restore overlay
@@ -589,6 +618,7 @@ def compare_view(request):
         "has_query_selection": has_query_selection,
         "series_count": series_count,
         "sample_count": sample_count,
+        "sample_label": "points" if is_raw_interval(interval_minutes) else "bins",
         "event_count": event_count,
         "dual_axis": dual_axis,
         "period_label": period_label,
