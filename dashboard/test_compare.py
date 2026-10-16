@@ -103,6 +103,11 @@ class AxisAndStatsTests(SimpleTestCase):
         self.assertEqual(rows[0]["n"], 10)
         self.assertEqual(rows[0]["min"], 10)
         self.assertEqual(rows[0]["max"], 20)
+        self.assertAlmostEqual(rows[0]["mean"], 15.0)
+        self.assertAlmostEqual(rows[0]["std"], float(np.std(frame["a"], ddof=1)))
+        single = series_stats(pd.DataFrame({"a": [3.0]}))
+        self.assertIsNone(single[0]["std"])
+        self.assertEqual(single[0]["mean"], 3.0)
         thinned = downsample_frame(pd.DataFrame({"a": range(10000)}), max_points=100)
         self.assertLessEqual(len(thinned), 101)
 

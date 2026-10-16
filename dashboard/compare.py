@@ -67,7 +67,10 @@ def parse_normalize(value, default=DEFAULT_NORMALIZE) -> str:
 
 
 def series_stats(frame: pd.DataFrame) -> list:
-    """Per-column min / max / mean / last / n from a raw (unnormalized) frame."""
+    """Per-column min / max / mean / std / last / n from a raw (unnormalized) frame.
+
+    std is the sample standard deviation (n − 1). A single sample has no std.
+    """
     rows = []
     if frame is None or frame.empty:
         return rows
@@ -75,6 +78,9 @@ def series_stats(frame: pd.DataFrame) -> list:
         series = pd.to_numeric(frame[col], errors="coerce")
         valid = series.dropna()
         last = valid.iloc[-1] if not valid.empty else None
+        std = None
+        if valid.shape[0] >= 2:
+            std = float(valid.std(ddof=1))
         rows.append(
             {
                 "label": str(col),
@@ -82,6 +88,7 @@ def series_stats(frame: pd.DataFrame) -> list:
                 "min": None if valid.empty else float(valid.min()),
                 "max": None if valid.empty else float(valid.max()),
                 "mean": None if valid.empty else float(valid.mean()),
+                "std": std,
                 "last": None if last is None else float(last),
             }
         )

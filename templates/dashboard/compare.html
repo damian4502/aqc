@@ -294,6 +294,7 @@
                         <th class="py-2 pr-4 font-medium text-right">Min</th>
                         <th class="py-2 pr-4 font-medium text-right">Max</th>
                         <th class="py-2 pr-4 font-medium text-right">Mean</th>
+                        <th class="py-2 pr-4 font-medium text-right" title="Sample standard deviation">Std</th>
                         <th class="py-2 font-medium text-right">Last</th>
                     </tr>
                 </thead>
@@ -306,6 +307,7 @@
                         <td class="py-2.5 pr-4 text-right text-slate-300 tabular-nums">{% if row.min != None %}{{ row.min|floatformat:2 }}{% else %}—{% endif %}</td>
                         <td class="py-2.5 pr-4 text-right text-slate-300 tabular-nums">{% if row.max != None %}{{ row.max|floatformat:2 }}{% else %}—{% endif %}</td>
                         <td class="py-2.5 pr-4 text-right text-slate-300 tabular-nums">{% if row.mean != None %}{{ row.mean|floatformat:2 }}{% else %}—{% endif %}</td>
+                        <td class="py-2.5 pr-4 text-right text-slate-300 tabular-nums">{% if row.std != None %}{{ row.std|floatformat:2 }}{% else %}—{% endif %}</td>
                         <td class="py-2.5 text-right text-slate-300 tabular-nums">{% if row.last != None %}{{ row.last|floatformat:2 }}{% else %}—{% endif %}</td>
                     </tr>
                     {% endfor %}
