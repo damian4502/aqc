@@ -2000,7 +2000,7 @@ def patterns_view(request):
             df["timestamp"] = pd.to_datetime(df["timestamp"])
             df = df.rename(columns={"parameter__name": "parameter"})
             resampled = resample_measurements(
-                df, interval_minutes, "none", spike_factor=spike_factor
+                df, interval_minutes, "ffill", spike_factor=spike_factor
             )
             if resampled is None or resampled.empty:
                 source = df[["timestamp", "value"]]
