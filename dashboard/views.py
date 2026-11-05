@@ -2032,11 +2032,12 @@ def patterns_view(request):
                 hourly_plot["weekdays"] = hourly_wd["mean"]
                 hourly_plot["weekend"] = hourly_we["mean"]
                 fig_h = go.Figure()
-                fig_h.add_trace(go.Bar(
+                fig_h.add_trace(go.Scatter(
                     x=hourly_plot["hour"],
                     y=hourly_plot["mean"],
                     name="All days",
-                    marker_color="#38bdf8",
+                    mode="lines+markers",
+                    line=dict(color="#38bdf8", width=3),
                     customdata=hourly_plot["count"],
                     hovertemplate="Hour %{x}:00<br>Mean: %{y:.2f} "
                     + unit
@@ -2071,18 +2072,21 @@ def patterns_view(request):
                         range=[-0.5, 23.5],
                     ),
                     yaxis=dict(title=unit or "Mean"),
-                    barmode="overlay",
                     height=420,
                     legend=dict(orientation="h", y=1.08),
                 )
                 fig_h = apply_dark_theme(fig_h, animate=False)
+                fig_h.update_traces(line_color="#38bdf8", selector=dict(name="All days"))
+                fig_h.update_traces(line_color="#34d399", selector=dict(name="Mon–Fri"))
+                fig_h.update_traces(line_color="#f59e0b", selector=dict(name="Sat–Sun"))
                 fig_hourly = fig_h.to_html(full_html=False, include_plotlyjs="cdn")
 
                 fig_w = go.Figure()
-                fig_w.add_trace(go.Bar(
+                fig_w.add_trace(go.Scatter(
                     x=weekly["day_name"],
                     y=weekly["mean"],
-                    marker_color="#818cf8",
+                    mode="lines+markers",
+                    line=dict(color="#818cf8", width=3),
                     customdata=weekly["count"],
                     hovertemplate="%{x}<br>Mean: %{y:.2f} "
                     + unit
@@ -2104,6 +2108,7 @@ def patterns_view(request):
                     showlegend=False,
                 )
                 fig_w = apply_dark_theme(fig_w, animate=False)
+                fig_w.update_traces(line_color="#818cf8")
                 fig_weekly = fig_w.to_html(full_html=False, include_plotlyjs="cdn")
 
                 z = heat_mean.values.astype(float)
