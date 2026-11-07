@@ -122,12 +122,12 @@
                 {% for pair in selected_series %}
                 <span class="series-chip inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-800 border border-slate-700 text-sm text-slate-200" data-key="{{ pair.key }}">
                     <input type="hidden" name="series" value="{{ pair.key }}">
-                    <span>{{ pair.room_name }} · {{ pair.parameter_name }}{% if pair.unit %} <span class="text-slate-500 text-xs">{{ pair.unit }}</span>{% endif %}</span>
+                    <button type="button" class="series-load text-left text-sky-300 hover:text-sky-200 underline decoration-sky-400/40 hover:decoration-sky-300" title="Load into the dropdowns">{{ pair.room_name }} · {{ pair.parameter_name }}{% if pair.unit %} <span class="text-slate-500 text-xs no-underline">{{ pair.unit }}</span>{% endif %}</button>
                     <button type="button" class="series-remove text-slate-400 hover:text-rose-400 leading-none" aria-label="Remove">&times;</button>
                 </span>
                 {% endfor %}
             </div>
-            <p id="explicit-empty" class="text-[11px] text-slate-500 mt-3 {% if selected_series %}hidden{% endif %}">No individual series yet.</p>
+            <p id="explicit-empty" class="text-[11px] text-slate-500 mt-3 {% if selected_series %}hidden{% endif %}">No individual series yet. Click a series to load it into the dropdowns.</p>
         </div>
 
         <div class="glass rounded-3xl p-6">
@@ -172,12 +172,12 @@
                 {% for diff in selected_diffs %}
                 <span class="series-chip inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-800 border border-slate-700 text-sm text-slate-200" data-key="{{ diff.key }}">
                     <input type="hidden" name="diff" value="{{ diff.key }}">
-                    <span>{{ diff.left }} − {{ diff.right }}</span>
+                    <button type="button" class="series-load text-left text-sky-300 hover:text-sky-200 underline decoration-sky-400/40 hover:decoration-sky-300" title="Load into the dropdowns">{{ diff.left }} − {{ diff.right }}</button>
                     <button type="button" class="series-remove text-slate-400 hover:text-rose-400 leading-none" aria-label="Remove">&times;</button>
                 </span>
                 {% endfor %}
             </div>
-            <p id="diff-empty" class="text-[11px] text-slate-500 mt-3 {% if selected_diffs %}hidden{% endif %}">No differences yet. The two pairs do not have to be checked above.</p>
+            <p id="diff-empty" class="text-[11px] text-slate-500 mt-3 {% if selected_diffs %}hidden{% endif %}">No differences yet. The two pairs do not have to be checked above. Click a difference to load it into the dropdowns.</p>
             <p class="text-[11px] text-slate-500 mt-1">Raw values show the actual difference. Min-max and Z-score scale its shape like the other series. With all recorded values, samples are paired within 2 minutes.</p>
         </div>
 
@@ -409,6 +409,54 @@ function updateCounts() {
     if (diffEmptyEl) diffEmptyEl.classList.toggle('hidden', document.querySelectorAll('#diff-series .series-chip').length > 0);
 }
 
+function seriesLoadButton(text) {
+    const label = document.createElement('button');
+    label.type = 'button';
+    label.className = 'series-load text-left text-sky-300 hover:text-sky-200 underline decoration-sky-400/40 hover:decoration-sky-300';
+    label.title = 'Load into the dropdowns';
+    label.textContent = text;
+    return label;
+}
+
+function setSelectValue(id, value) {
+    const el = document.getElementById(id);
+    if (el) el.value = String(value);
+}
+
+function loadChipIntoDropdowns(chip) {
+    const key = chip.dataset.key || '';
+    if (chip.closest('#diff-series')) {
+        const halves = key.split('|');
+        if (halves.length !== 2) return;
+        const left = halves[0].split(':');
+        const right = halves[1].split(':');
+        if (left.length !== 2 || right.length !== 2) return;
+        setSelectValue('diff-room-a', left[0]);
+        setSelectValue('diff-param-a', left[1]);
+        setSelectValue('diff-room-b', right[0]);
+        setSelectValue('diff-param-b', right[1]);
+        return;
+    }
+    const parts = key.split(':');
+    if (parts.length !== 2) return;
+    setSelectValue('add-room', parts[0]);
+    setSelectValue('add-parameter', parts[1]);
+}
+
+function bindSeriesList(wrap) {
+    if (!wrap) return;
+    wrap.addEventListener('click', (e) => {
+        const removeBtn = e.target.closest('.series-remove');
+        if (removeBtn) {
+            const chip = removeBtn.closest('.series-chip');
+            if (chip) chip.remove();
+            updateCounts();
+            return;
+        }
+        const chip = e.target.closest('.series-chip');
+        if (chip) loadChipIntoDropdowns(chip);
+    });
+}
 function addExplicitSeries() {
     const roomSel = document.getElementById('add-room');
     const paramSel = document.getElementById('add-parameter');
@@ -425,8 +473,7 @@ function addExplicitSeries() {
     input.type = 'hidden';
     input.name = 'series';
     input.value = key;
-    const label = document.createElement('span');
-    label.textContent = roomName + ' · ' + paramName;
+    const label = seriesLoadButton(roomName + ' · ' + paramName);
     const remove = document.createElement('button');
     remove.type = 'button';
     remove.className = 'series-remove text-slate-400 hover:text-rose-400 leading-none';
@@ -457,8 +504,7 @@ function addDifference() {
     input.type = 'hidden';
     input.name = 'diff';
     input.value = key;
-    const label = document.createElement('span');
-    label.textContent = left + ' − ' + right;
+    const label = seriesLoadButton(left + ' − ' + right);
     const remove = document.createElement('button');
     remove.type = 'button';
     remove.className = 'series-remove text-slate-400 hover:text-rose-400 leading-none';
@@ -623,28 +669,10 @@ document.addEventListener('DOMContentLoaded', () => {
     document.querySelectorAll('.room-cb, .param-cb').forEach(cb => {
         cb.addEventListener('change', updateCounts);
     });
-    const seriesWrap = document.getElementById('explicit-series');
-    if (seriesWrap) {
-        seriesWrap.addEventListener('click', (e) => {
-            const btn = e.target.closest('.series-remove');
-            if (!btn) return;
-            const chip = btn.closest('.series-chip');
-            if (chip) chip.remove();
-            updateCounts();
-        });
-    }
+    bindSeriesList(document.getElementById('explicit-series'));
     const addBtn = document.getElementById('add-series-btn');
     if (addBtn) addBtn.addEventListener('click', addExplicitSeries);
-    const diffWrap = document.getElementById('diff-series');
-    if (diffWrap) {
-        diffWrap.addEventListener('click', (e) => {
-            const btn = e.target.closest('.series-remove');
-            if (!btn) return;
-            const chip = btn.closest('.series-chip');
-            if (chip) chip.remove();
-            updateCounts();
-        });
-    }
+    bindSeriesList(document.getElementById('diff-series'));
     const addDiffBtn = document.getElementById('add-diff-btn');
     if (addDiffBtn) addDiffBtn.addEventListener('click', addDifference);
     document.querySelectorAll('.quick-date-btn').forEach(btn => {

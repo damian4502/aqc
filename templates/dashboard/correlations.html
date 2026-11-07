@@ -125,12 +125,12 @@
                 {% for pair in selected_series %}
                 <span class="series-chip inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-800 border border-slate-700 text-sm text-slate-200" data-key="{{ pair.key }}">
                     <input type="hidden" name="series" value="{{ pair.key }}">
-                    <span>{{ pair.room_name }} · {{ pair.parameter_name }}{% if pair.unit %} <span class="text-slate-500 text-xs">{{ pair.unit }}</span>{% endif %}</span>
+                    <button type="button" class="series-load text-left text-sky-300 hover:text-sky-200 underline decoration-sky-400/40 hover:decoration-sky-300" title="Load into the dropdowns">{{ pair.room_name }} · {{ pair.parameter_name }}{% if pair.unit %} <span class="text-slate-500 text-xs no-underline">{{ pair.unit }}</span>{% endif %}</button>
                     <button type="button" class="series-remove text-slate-400 hover:text-rose-400 leading-none" aria-label="Remove">&times;</button>
                 </span>
                 {% endfor %}
             </div>
-            <p id="explicit-empty" class="text-[11px] text-slate-500 mt-3 {% if selected_series %}hidden{% endif %}">No individual series yet.</p>
+            <p id="explicit-empty" class="text-[11px] text-slate-500 mt-3 {% if selected_series %}hidden{% endif %}">No individual series yet. Click a series to load it into the dropdowns.</p>
         </div>
 
         <!-- Time range + resampling -->
@@ -391,6 +391,24 @@ function updateCounts() {
     if (emptyEl) emptyEl.classList.toggle('hidden', document.querySelectorAll('#explicit-series .series-chip').length > 0);
 }
 
+function seriesLoadButton(text) {
+    const label = document.createElement('button');
+    label.type = 'button';
+    label.className = 'series-load text-left text-sky-300 hover:text-sky-200 underline decoration-sky-400/40 hover:decoration-sky-300';
+    label.title = 'Load into the dropdowns';
+    label.textContent = text;
+    return label;
+}
+
+function loadChipIntoDropdowns(chip) {
+    const parts = (chip.dataset.key || '').split(':');
+    if (parts.length !== 2) return;
+    const roomSel = document.getElementById('add-room');
+    const paramSel = document.getElementById('add-parameter');
+    if (roomSel) roomSel.value = parts[0];
+    if (paramSel) paramSel.value = parts[1];
+}
+
 function addExplicitSeries() {
     const roomSel = document.getElementById('add-room');
     const paramSel = document.getElementById('add-parameter');
@@ -407,8 +425,7 @@ function addExplicitSeries() {
     input.type = 'hidden';
     input.name = 'series';
     input.value = key;
-    const label = document.createElement('span');
-    label.textContent = roomName + ' · ' + paramName;
+    const label = seriesLoadButton(roomName + ' · ' + paramName);
     const remove = document.createElement('button');
     remove.type = 'button';
     remove.className = 'series-remove text-slate-400 hover:text-rose-400 leading-none';
@@ -633,11 +650,15 @@ document.addEventListener('DOMContentLoaded', () => {
     const seriesWrap = document.getElementById('explicit-series');
     if (seriesWrap) {
         seriesWrap.addEventListener('click', (e) => {
-            const btn = e.target.closest('.series-remove');
-            if (!btn) return;
-            const chip = btn.closest('.series-chip');
-            if (chip) chip.remove();
-            updateCounts();
+            const removeBtn = e.target.closest('.series-remove');
+            if (removeBtn) {
+                const chip = removeBtn.closest('.series-chip');
+                if (chip) chip.remove();
+                updateCounts();
+                return;
+            }
+            const chip = e.target.closest('.series-chip');
+            if (chip) loadChipIntoDropdowns(chip);
         });
     }
     const addBtn = document.getElementById('add-series-btn');
