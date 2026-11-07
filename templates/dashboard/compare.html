@@ -131,6 +131,57 @@
         </div>
 
         <div class="glass rounded-3xl p-6">
+            <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-3">
+                <label class="text-sm font-medium text-slate-200">
+                    <i class="fas fa-minus-circle mr-1.5 text-amber-400"></i> Difference
+                </label>
+                <span class="text-[11px] text-slate-500">Plots A − B as a dashed series on the same graph</span>
+            </div>
+            <div class="flex flex-wrap gap-3 items-end">
+                <select id="diff-room-a" class="bg-slate-900 border border-slate-700 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:border-blue-500 min-w-[160px]">
+                    <option value="">Room A</option>
+                    {% for room in rooms %}
+                    <option value="{{ room.id }}">{{ room.name }}</option>
+                    {% endfor %}
+                </select>
+                <select id="diff-param-a" class="bg-slate-900 border border-slate-700 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:border-blue-500 min-w-[160px]">
+                    <option value="">Parameter A</option>
+                    {% for p in parameters %}
+                    <option value="{{ p.id }}">{{ p.name }}{% if p.unit %} ({{ p.unit }}){% endif %}</option>
+                    {% endfor %}
+                </select>
+                <span class="text-slate-500 text-sm pb-3">minus</span>
+                <select id="diff-room-b" class="bg-slate-900 border border-slate-700 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:border-blue-500 min-w-[160px]">
+                    <option value="">Room B</option>
+                    {% for room in rooms %}
+                    <option value="{{ room.id }}">{{ room.name }}</option>
+                    {% endfor %}
+                </select>
+                <select id="diff-param-b" class="bg-slate-900 border border-slate-700 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:border-blue-500 min-w-[160px]">
+                    <option value="">Parameter B</option>
+                    {% for p in parameters %}
+                    <option value="{{ p.id }}">{{ p.name }}{% if p.unit %} ({{ p.unit }}){% endif %}</option>
+                    {% endfor %}
+                </select>
+                <button type="button" id="add-diff-btn"
+                        class="bg-amber-600 hover:bg-amber-500 px-5 py-3 rounded-2xl text-sm font-medium transition-all">
+                    Add difference
+                </button>
+            </div>
+            <div id="diff-series" class="flex flex-wrap gap-2 mt-4">
+                {% for diff in selected_diffs %}
+                <span class="series-chip inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-800 border border-slate-700 text-sm text-slate-200" data-key="{{ diff.key }}">
+                    <input type="hidden" name="diff" value="{{ diff.key }}">
+                    <span>{{ diff.left }} − {{ diff.right }}</span>
+                    <button type="button" class="series-remove text-slate-400 hover:text-rose-400 leading-none" aria-label="Remove">&times;</button>
+                </span>
+                {% endfor %}
+            </div>
+            <p id="diff-empty" class="text-[11px] text-slate-500 mt-3 {% if selected_diffs %}hidden{% endif %}">No differences yet. The two pairs do not have to be checked above.</p>
+            <p class="text-[11px] text-slate-500 mt-1">Raw values show the actual difference. Min-max and Z-score scale its shape like the other series. With all recorded values, samples are paired within 2 minutes.</p>
+        </div>
+
+        <div class="glass rounded-3xl p-6">
             <div class="flex flex-wrap items-end gap-5">
 
                 <div class="flex gap-4 items-end">
@@ -336,7 +387,8 @@ function seriesPairCount() {
     const keys = new Set();
     rooms.forEach(roomId => params.forEach(paramId => keys.add(roomId + ':' + paramId)));
     document.querySelectorAll('#explicit-series input[name="series"]').forEach(el => keys.add(el.value));
-    return keys.size;
+    const diffs = document.querySelectorAll('#diff-series input[name="diff"]').length;
+    return keys.size + diffs;
 }
 
 function updateCounts() {
@@ -348,11 +400,13 @@ function updateCounts() {
     const seriesEl = document.getElementById('series-preview');
     const warnEl = document.getElementById('series-warn');
     const emptyEl = document.getElementById('explicit-empty');
+    const diffEmptyEl = document.getElementById('diff-empty');
     if (roomEl) roomEl.textContent = rooms;
     if (paramEl) paramEl.textContent = params;
     if (seriesEl) seriesEl.textContent = series;
     if (warnEl) warnEl.classList.toggle('hidden', series <= MAX_SERIES);
     if (emptyEl) emptyEl.classList.toggle('hidden', document.querySelectorAll('#explicit-series .series-chip').length > 0);
+    if (diffEmptyEl) diffEmptyEl.classList.toggle('hidden', document.querySelectorAll('#diff-series .series-chip').length > 0);
 }
 
 function addExplicitSeries() {
@@ -373,6 +427,38 @@ function addExplicitSeries() {
     input.value = key;
     const label = document.createElement('span');
     label.textContent = roomName + ' · ' + paramName;
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'series-remove text-slate-400 hover:text-rose-400 leading-none';
+    remove.setAttribute('aria-label', 'Remove');
+    remove.textContent = '×';
+    chip.append(input, label, remove);
+    wrap.appendChild(chip);
+    updateCounts();
+}
+
+function addDifference() {
+    const roomA = document.getElementById('diff-room-a');
+    const paramA = document.getElementById('diff-param-a');
+    const roomB = document.getElementById('diff-room-b');
+    const paramB = document.getElementById('diff-param-b');
+    if (!roomA || !paramA || !roomB || !paramB) return;
+    if (!roomA.value || !paramA.value || !roomB.value || !paramB.value) return;
+    const key = roomA.value + ':' + paramA.value + '|' + roomB.value + ':' + paramB.value;
+    if (roomA.value === roomB.value && paramA.value === paramB.value) return;
+    if (document.querySelector('#diff-series .series-chip[data-key="' + key + '"]')) return;
+    const left = roomA.selectedOptions[0].textContent.trim() + ' · ' + paramA.selectedOptions[0].textContent.trim();
+    const right = roomB.selectedOptions[0].textContent.trim() + ' · ' + paramB.selectedOptions[0].textContent.trim();
+    const wrap = document.getElementById('diff-series');
+    const chip = document.createElement('span');
+    chip.className = 'series-chip inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-800 border border-slate-700 text-sm text-slate-200';
+    chip.dataset.key = key;
+    const input = document.createElement('input');
+    input.type = 'hidden';
+    input.name = 'diff';
+    input.value = key;
+    const label = document.createElement('span');
+    label.textContent = left + ' − ' + right;
     const remove = document.createElement('button');
     remove.type = 'button';
     remove.className = 'series-remove text-slate-400 hover:text-rose-400 leading-none';
@@ -549,6 +635,18 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     const addBtn = document.getElementById('add-series-btn');
     if (addBtn) addBtn.addEventListener('click', addExplicitSeries);
+    const diffWrap = document.getElementById('diff-series');
+    if (diffWrap) {
+        diffWrap.addEventListener('click', (e) => {
+            const btn = e.target.closest('.series-remove');
+            if (!btn) return;
+            const chip = btn.closest('.series-chip');
+            if (chip) chip.remove();
+            updateCounts();
+        });
+    }
+    const addDiffBtn = document.getElementById('add-diff-btn');
+    if (addDiffBtn) addDiffBtn.addEventListener('click', addDifference);
     document.querySelectorAll('.quick-date-btn').forEach(btn => {
         btn.addEventListener('click', (e) => {
             e.preventDefault();

@@ -17,9 +17,12 @@ from django.utils import timezone
 from dashboard.correlations import make_series_label
 from dashboard.series_selection import (
     expand_series_pairs,
+    pair_key,
     pairs_filter,
+    parse_difference_specs,
     parse_id_list,
     parse_series_pairs,
+    subtract_aligned,
 )
 
 MAX_SERIES = 24
@@ -213,6 +216,7 @@ def build_compare_figure(
     events=None,
     title="Compare series",
     individual_timeline=False,
+    dash_labels=None,
 ):
     """Dark overlay of selected series. Hover always includes the raw value.
 
@@ -226,6 +230,7 @@ def build_compare_figure(
     units_by_label = units_by_label or {str(col): "" for col in plotted.columns}
     axis_by_label, axis_titles, dual = unit_axis_map(units_by_label, mode)
     raw_frame = raw if raw is not None else plotted
+    dashed = set(dash_labels or ())
 
     unique_units = []
     for unit in units_by_label.values():
@@ -255,7 +260,7 @@ def build_compare_figure(
                 y=[_as_float(value) for value in series_y],
                 name=label,
                 mode="lines",
-                line=dict(width=2.4, color=color),
+                line=dict(width=2.4, color=color, dash="dash" if label in dashed else "solid"),
                 yaxis=axis_by_label.get(label, "y"),
                 customdata=custom,
                 hovertemplate=(
@@ -346,19 +351,30 @@ def compare_view(request):
     explicit_pairs = parse_series_pairs(
         request.GET.getlist("series"), valid_room_ids, valid_parameter_ids
     )
+    difference_specs = parse_difference_specs(
+        request.GET.getlist("diff"), valid_room_ids, valid_parameter_ids
+    )
 
     has_query_selection = bool(
-        selected_room_ids or selected_parameter_ids or explicit_pairs
+        selected_room_ids or selected_parameter_ids or explicit_pairs or difference_specs
     )
     if has_query_selection:
         request.session["compare_rooms"] = selected_room_ids
         request.session["compare_parameters"] = selected_parameter_ids
         request.session["compare_series"] = [f"{room_id}:{param_id}" for room_id, param_id in explicit_pairs]
+        request.session["compare_diffs"] = [
+            f"{pair_key(*left)}|{pair_key(*right)}" for left, right in difference_specs
+        ]
     elif not request.GET:
         selected_room_ids = parse_id_list(request.session.get("compare_rooms") or [])
         selected_parameter_ids = parse_id_list(request.session.get("compare_parameters") or [])
         explicit_pairs = parse_series_pairs(
             request.session.get("compare_series") or [],
+            valid_room_ids,
+            valid_parameter_ids,
+        )
+        difference_specs = parse_difference_specs(
+            request.session.get("compare_diffs") or [],
             valid_room_ids,
             valid_parameter_ids,
         )
@@ -404,7 +420,7 @@ def compare_view(request):
     pair_parameters = [param for param in parameters if param.id in pair_parameter_ids]
     include_room = len(pair_rooms) != 1
     include_parameter = len(pair_parameters) != 1
-    n_series_selected = len(series_pairs)
+    n_series_selected = len(series_pairs) + len(difference_specs)
     selected_series = [
         {
             "room_id": room_id,
@@ -416,6 +432,31 @@ def compare_view(request):
         }
         for room_id, param_id in explicit_pairs
     ]
+
+    def _pair_title(pair):
+        room = room_by_id[pair[0]]
+        param = parameter_by_id[pair[1]]
+        unit = f" ({param.unit})" if param.unit else ""
+        return f"{room.name} · {param.name}{unit}"
+
+    selected_diffs = [
+        {
+            "key": f"{pair_key(*left)}|{pair_key(*right)}",
+            "left": _pair_title(left),
+            "right": _pair_title(right),
+        }
+        for left, right in difference_specs
+    ]
+    query_pairs = list(series_pairs)
+    seen_pairs = set(series_pairs)
+    event_room_ids = set(pair_room_ids)
+    for left, right in difference_specs:
+        event_room_ids.add(left[0])
+        event_room_ids.add(right[0])
+        for pair in (left, right):
+            if pair not in seen_pairs:
+                seen_pairs.add(pair)
+                query_pairs.append(pair)
 
     compute_error = None
     unit_notice = None
@@ -439,9 +480,10 @@ def compare_view(request):
 
     resampled = None
     units_by_label = {}
+    dash_labels = set()
 
     if should_compute:
-        query = Measurement.objects.filter(pairs_filter(series_pairs)).select_related(
+        query = Measurement.objects.filter(pairs_filter(query_pairs)).select_related(
             "sensor__room", "parameter"
         )
         if start_date and end_date:
@@ -456,27 +498,17 @@ def compare_view(request):
                     measurements.values(
                         "timestamp",
                         "value",
-                        "sensor__room__name",
-                        "parameter__name",
+                        "sensor__room_id",
+                        "parameter_id",
                         "parameter__unit",
                     )
                 )
             )
             frame["timestamp"] = pd.to_datetime(frame["timestamp"])
-            labels = [
-                make_series_label(
-                    room_name,
-                    param_name,
-                    include_room=include_room,
-                    include_parameter=include_parameter,
-                )
-                for room_name, param_name in zip(
-                    frame["sensor__room__name"], frame["parameter__name"]
-                )
+            frame["parameter"] = [
+                pair_key(room_id, param_id)
+                for room_id, param_id in zip(frame["sensor__room_id"], frame["parameter_id"])
             ]
-            frame["parameter"] = labels
-            for label, unit in zip(labels, frame["parameter__unit"]):
-                units_by_label[label] = unit or ""
 
             resampled = resample_measurements(
                 frame, interval_minutes, fill_method, spike_factor=spike_factor
@@ -488,7 +520,59 @@ def compare_view(request):
                     else "No samples after resampling."
                 )
             else:
-                resampled = resampled.dropna(axis=1, how="all")
+                keyed = resampled.dropna(axis=1, how="all")
+                display = pd.DataFrame(index=keyed.index)
+                used_labels = set()
+                for room_id, param_id in series_pairs:
+                    key = pair_key(room_id, param_id)
+                    if key not in keyed.columns:
+                        continue
+                    label = make_series_label(
+                        room_by_id[room_id].name,
+                        parameter_by_id[param_id].name,
+                        include_room=include_room,
+                        include_parameter=include_parameter,
+                    )
+                    if label in used_labels:
+                        label = f"{label} ({key})"
+                    used_labels.add(label)
+                    display[label] = keyed[key]
+                    units_by_label[label] = parameter_by_id[param_id].unit or ""
+
+                raw_mode = is_raw_interval(interval_minutes)
+                missing_diffs = []
+                for left, right in difference_specs:
+                    left_key = pair_key(*left)
+                    right_key = pair_key(*right)
+                    left_name = f"{room_by_id[left[0]].name} · {parameter_by_id[left[1]].name}"
+                    right_name = f"{room_by_id[right[0]].name} · {parameter_by_id[right[1]].name}"
+                    label = f"Δ {left_name} − {right_name}"
+                    if left_key not in keyed.columns or right_key not in keyed.columns:
+                        missing_diffs.append(label)
+                        continue
+                    series = subtract_aligned(
+                        keyed[left_key],
+                        keyed[right_key],
+                        tolerance="2min" if raw_mode else None,
+                    )
+                    if series.dropna().empty:
+                        missing_diffs.append(label)
+                        continue
+                    if label in used_labels:
+                        label = f"{label} ({left_key}|{right_key})"
+                    used_labels.add(label)
+                    display = display.reindex(display.index.union(series.index))
+                    display[label] = series.reindex(display.index)
+                    unit_left = parameter_by_id[left[1]].unit or ""
+                    unit_right = parameter_by_id[right[1]].unit or ""
+                    units_by_label[label] = unit_left if unit_left and unit_left == unit_right else "Δ"
+                    dash_labels.add(label)
+
+                display = display.dropna(axis=1, how="all")
+                if missing_diffs:
+                    note = "No overlapping samples for " + "; ".join(missing_diffs) + "."
+                    unit_notice = f"{unit_notice} {note}".strip() if unit_notice else note
+                resampled = display
                 series_count = len(resampled.columns)
                 sample_count = int(len(resampled))
                 if series_count < 1:
@@ -501,10 +585,11 @@ def compare_view(request):
             if unit not in unique_units:
                 unique_units.append(unit)
         if normalize == "off" and len(unique_units) >= 3:
-            unit_notice = (
+            mixed = (
                 "Three or more units share one axis. Switch to Min-max or "
                 "Z-score to compare shapes across different scales."
             )
+            unit_notice = f"{unit_notice} {mixed}".strip() if unit_notice else mixed
         _, _, dual_axis = unit_axis_map(
             {str(col): units_by_label.get(str(col), "") for col in resampled.columns},
             normalize,
@@ -523,10 +608,10 @@ def compare_view(request):
             return response
 
         events_payload = []
-        if pair_room_ids and start_date and end_date:
+        if event_room_ids and start_date and end_date:
             event_qs = (
                 Event.objects.filter(
-                    rooms__in=pair_room_ids,
+                    rooms__in=event_room_ids,
                     timestamp__gte=start_date,
                     timestamp__lte=end_date,
                 )
@@ -574,6 +659,7 @@ def compare_view(request):
             events=events_payload,
             title=title,
             individual_timeline=raw_mode,
+            dash_labels=dash_labels,
         )
         fig = apply_dark_theme(fig, animate=False)
         # Theme helper is tuned for single-series room charts: restore overlay
@@ -581,9 +667,16 @@ def compare_view(request):
         for trace in fig.data:
             if getattr(trace, "type", None) in ("scatter", "scattergl"):
                 color = None
+                dash = None
                 if getattr(trace, "line", None) is not None:
                     color = getattr(trace.line, "color", None)
-                trace.update(line=dict(width=2.4, color=color) if color else dict(width=2.4))
+                    dash = getattr(trace.line, "dash", None)
+                line = {"width": 2.4}
+                if color:
+                    line["color"] = color
+                if dash and dash != "solid":
+                    line["dash"] = dash
+                trace.update(line=line)
         fig.update_layout(margin=dict(l=60, r=70 if dual_axis else 40, t=90, b=50))
         fig_html = fig.to_html(full_html=False, include_plotlyjs="cdn")
 
@@ -611,6 +704,7 @@ def compare_view(request):
         "selected_room_ids": set(selected_room_ids),
         "selected_parameter_ids": set(selected_parameter_ids),
         "selected_series": selected_series,
+        "selected_diffs": selected_diffs,
         "normalize": normalize,
         "start": start_date,
         "end": end_date,
