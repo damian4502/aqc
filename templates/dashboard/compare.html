@@ -198,6 +198,7 @@
             </div>
             <div class="flex flex-wrap gap-3 items-end">
                 <input type="text" name="template_name" id="template-name" maxlength="60" placeholder="Template name"
+                       value="{{ active_template }}"
                        class="bg-slate-900 border border-slate-700 rounded-2xl px-4 py-3 text-sm text-white focus:outline-none focus:border-violet-500 min-w-[220px]">
                 <button type="submit" name="template_action" value="save"
                         class="bg-violet-600 hover:bg-violet-500 px-5 py-3 rounded-2xl text-sm font-medium transition-all">
@@ -207,7 +208,7 @@
             {% if templates %}
             <div class="flex flex-wrap gap-2 mt-4">
                 {% for item in templates %}
-                <span class="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-800 border border-slate-700 text-sm">
+                <span class="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl text-sm {% if item.name == active_template %}bg-violet-950/50 border border-violet-500{% else %}bg-slate-800 border border-slate-700{% endif %}">
                     <button type="submit" name="load_template" value="{{ item.name }}" class="text-violet-300 hover:text-violet-200 text-left">{{ item.name }}</button>
                     <button type="submit" name="template_delete" value="{{ item.name }}" class="text-slate-400 hover:text-rose-400 leading-none" aria-label="Delete template" title="Delete template">&times;</button>
                 </span>

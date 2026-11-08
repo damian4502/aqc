@@ -83,3 +83,22 @@ def url_for_selection(request, rooms, parameters, series_values, diff_values, ke
     encoded = query.urlencode()
     return request.path + (f"?{encoded}" if encoded else "")
 
+
+def remember_active_template(session, key, name) -> str:
+    """Remember which template name is being edited on this page."""
+    name = clean_template_name(name)
+    session[key] = name
+    session.modified = True
+    return name
+
+
+def active_template_name(request, key) -> str:
+    """Name to show in the template field.
+
+    A submitted field wins, including a cleared one. Otherwise the last
+    loaded or saved name is restored.
+    """
+    if "template_name" in request.GET:
+        return remember_active_template(request.session, key, request.GET.get("template_name"))
+    return clean_template_name(request.session.get(key))
+

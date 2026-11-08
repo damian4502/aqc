@@ -1535,10 +1535,12 @@ def correlations_view(request):
         parse_series_entries,
     )
     from dashboard.chart_templates import (
+        active_template_name,
         clean_template_name,
         delete_named_template,
         find_named_template,
         list_templates,
+        remember_active_template,
         save_named_template,
         url_for_selection,
         url_without,
@@ -1558,6 +1560,7 @@ def correlations_view(request):
     )
 
     TEMPLATE_KEY = "corr_templates"
+    ACTIVE_TEMPLATE_KEY = "corr_active_template"
     KEEP_WITH_TEMPLATE = (
         "start",
         "end",
@@ -1586,14 +1589,18 @@ def correlations_view(request):
                     "diffs": [],
                 },
             )
+            remember_active_template(request.session, ACTIVE_TEMPLATE_KEY, save_name)
         return redirect(url_without(request))
     if delete_name:
         delete_named_template(request.session, TEMPLATE_KEY, delete_name)
+        if clean_template_name(request.session.get(ACTIVE_TEMPLATE_KEY)) == delete_name:
+            remember_active_template(request.session, ACTIVE_TEMPLATE_KEY, "")
         return redirect(url_without(request))
     if load_name:
         stored = find_named_template(request.session, TEMPLATE_KEY, load_name)
         if not stored:
             return redirect(url_without(request))
+        remember_active_template(request.session, ACTIVE_TEMPLATE_KEY, load_name)
         selected_room_ids = parse_id_list(stored.get("rooms") or [])
         selected_parameter_ids = parse_id_list(stored.get("parameters") or [])
         series_entries = parse_series_entries(
@@ -1881,6 +1888,7 @@ def correlations_view(request):
         "n_series_selected": n_series_selected,
         "max_series": MAX_SERIES,
         "templates": list_templates(request.session, TEMPLATE_KEY),
+        "active_template": active_template_name(request, ACTIVE_TEMPLATE_KEY),
         "active_quick": active_quick_key(start_date, end_date, all_data),
     }
     return render(request, "dashboard/correlations.html", context)
