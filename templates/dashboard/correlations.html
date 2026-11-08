@@ -103,7 +103,13 @@
                 </label>
                 <div class="flex items-center gap-3">
                     <span class="text-[11px] text-slate-500">Adds one room/parameter pair, not the full cross product</span>
-                    <button type="button" id="clear-series-btn" class="text-xs text-slate-400 hover:text-rose-300">Clear all</button>
+                    <div class="flex items-center gap-2 text-xs">
+                        <button type="button" onclick="setSeriesEnabled('explicit-series', true)" class="text-emerald-400 hover:underline">All</button>
+                        <span class="text-slate-600">|</span>
+                        <button type="button" onclick="setSeriesEnabled('explicit-series', false)" class="text-slate-400 hover:underline">None</button>
+                        <span class="text-slate-600">|</span>
+                        <button type="button" id="clear-series-btn" class="text-slate-400 hover:text-rose-300">Clear all</button>
+                    </div>
                 </div>
             </div>
             <div class="flex flex-wrap gap-3 items-end">
@@ -504,6 +510,17 @@ function addExplicitSeries() {
 function toggleAll(kind, on) {
     const sel = kind === 'room' ? '.room-cb' : '.param-cb';
     document.querySelectorAll(sel).forEach(cb => { cb.checked = on; });
+    updateCounts();
+}
+
+function setSeriesEnabled(containerId, on) {
+    const wrap = document.getElementById(containerId);
+    if (!wrap) return;
+    wrap.querySelectorAll('.series-chip').forEach(chip => {
+        const box = chip.querySelector('.series-enabled');
+        if (box) box.checked = on;
+        syncSeriesToken(chip);
+    });
     updateCounts();
 }
 
