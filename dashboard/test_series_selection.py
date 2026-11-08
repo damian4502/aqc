@@ -4,8 +4,12 @@ from django.test import SimpleTestCase
 import pandas as pd
 
 from dashboard.series_selection import (
+    encode_diff_entry,
+    encode_series_entry,
     expand_series_pairs,
+    parse_difference_entries,
     parse_difference_specs,
+    parse_series_entries,
     parse_series_pairs,
     subtract_aligned,
 )
@@ -19,6 +23,35 @@ class SeriesSelectionTests(SimpleTestCase):
             valid_parameter_ids={5},
         )
         self.assertEqual(pairs, [(2, 5), (1, 5)])
+
+    def test_disabled_token_stays_listed_but_is_not_plotted(self):
+        entries = parse_series_entries(
+            ["1:5", "2:5:0", "2:5"],
+            valid_room_ids={1, 2},
+            valid_parameter_ids={5},
+        )
+        self.assertEqual(entries, [((1, 5), True), ((2, 5), False)])
+        self.assertEqual(
+            parse_series_pairs(["1:5", "2:5:0"], {1, 2}, {5}),
+            [(1, 5)],
+        )
+        self.assertEqual(encode_series_entry((2, 5), False), "2:5:0")
+
+    def test_disabled_difference_token(self):
+        entries = parse_difference_entries(
+            ["1:5|2:5|0", "1:5|3:5"],
+            valid_room_ids={1, 2, 3},
+            valid_parameter_ids={5},
+        )
+        self.assertEqual(
+            entries,
+            [(((1, 5), (2, 5)), False), (((1, 5), (3, 5)), True)],
+        )
+        self.assertEqual(
+            parse_difference_specs(["1:5|2:5|0", "1:5|3:5"], {1, 2, 3}, {5}),
+            [((1, 5), (3, 5))],
+        )
+        self.assertEqual(encode_diff_entry(((1, 5), (2, 5)), False), "1:5|2:5|0")
 
     def test_expand_unions_cross_product_with_extra_pairs(self):
         pairs = expand_series_pairs(

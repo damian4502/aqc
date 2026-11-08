@@ -39,6 +39,7 @@ from django.http import JsonResponse
 from django.shortcuts import get_object_or_404
 from rooms.models import Room, Event
 from dashboard.chart_range import (
+    active_quick_key,
     load_chart_range_from_session,
     parse_chart_datetime,
     resolve_chart_range,
@@ -269,6 +270,7 @@ def room_detail(request, room_id):
         'all_data': all_data,
         'start': start_date,
         'end': end_date,
+        'active_quick': active_quick_key(start_date, end_date, all_data),
     }
 
     interval_minutes = int(request.GET.get('interval', request.session.get('resample_interval', 15)))
@@ -1210,7 +1212,8 @@ def parameter_detail(request, parameter_id):
         'all_data': all_data,
         'start': start_date,
         'end': end_date,
-        'rooms':Room.objects.all()
+        'rooms':Room.objects.all(),
+        'active_quick': active_quick_key(start_date, end_date, all_data),
     }
 
     # === Save / read resampling settings from session ===
@@ -1515,7 +1518,6 @@ def correlations_view(request):
     Each (room, parameter) pair becomes a resampled series; Pearson or
     Spearman r is then computed between every pair of series.
     """
-    from django.utils.dateparse import parse_datetime
     from rooms.models import RoomGroup
     import json
     from dashboard.correlations import (
@@ -1526,11 +1528,22 @@ def correlations_view(request):
         pairwise_correlations,
     )
     from dashboard.series_selection import (
+        encode_series_entry,
         expand_series_pairs,
         pairs_filter,
         parse_id_list,
-        parse_series_pairs,
+        parse_series_entries,
     )
+    from dashboard.chart_templates import (
+        clean_template_name,
+        delete_named_template,
+        find_named_template,
+        list_templates,
+        save_named_template,
+        url_for_selection,
+        url_without,
+    )
+    from django.shortcuts import redirect
 
     rooms = list(Room.objects.all().order_by("order", "name"))
     parameters = list(Parameter.objects.all().order_by("order", "name"))
@@ -1540,27 +1553,86 @@ def correlations_view(request):
 
     selected_room_ids = parse_id_list(request.GET.getlist("room"))
     selected_parameter_ids = parse_id_list(request.GET.getlist("parameter"))
-    explicit_pairs = parse_series_pairs(
+    series_entries = parse_series_entries(
         request.GET.getlist("series"), valid_room_ids, valid_parameter_ids
     )
 
+    TEMPLATE_KEY = "corr_templates"
+    KEEP_WITH_TEMPLATE = (
+        "start",
+        "end",
+        "all",
+        "interval",
+        "fill_method",
+        "spike_factor",
+        "method",
+        "min_overlap",
+    )
+    save_name = clean_template_name(request.GET.get("template_name"))
+    delete_name = clean_template_name(request.GET.get("template_delete"))
+    load_name = clean_template_name(request.GET.get("load_template"))
+    if request.GET.get("template_action") == "save":
+        if save_name:
+            save_named_template(
+                request.session,
+                TEMPLATE_KEY,
+                save_name,
+                {
+                    "rooms": selected_room_ids,
+                    "parameters": selected_parameter_ids,
+                    "series": [
+                        encode_series_entry(pair, enabled) for pair, enabled in series_entries
+                    ],
+                    "diffs": [],
+                },
+            )
+        return redirect(url_without(request))
+    if delete_name:
+        delete_named_template(request.session, TEMPLATE_KEY, delete_name)
+        return redirect(url_without(request))
+    if load_name:
+        stored = find_named_template(request.session, TEMPLATE_KEY, load_name)
+        if not stored:
+            return redirect(url_without(request))
+        selected_room_ids = parse_id_list(stored.get("rooms") or [])
+        selected_parameter_ids = parse_id_list(stored.get("parameters") or [])
+        series_entries = parse_series_entries(
+            stored.get("series") or [], valid_room_ids, valid_parameter_ids
+        )
+        return redirect(
+            url_for_selection(
+                request,
+                selected_room_ids,
+                selected_parameter_ids,
+                [encode_series_entry(pair, enabled) for pair, enabled in series_entries],
+                [],
+                KEEP_WITH_TEMPLATE,
+            )
+        )
+
+    enabled_explicit = [pair for pair, enabled in series_entries if enabled]
     # Remember last checkbox set, but only auto-compute when the query
     # string actually carries a selection (shareable URLs still work).
+    # selection=1 is the form itself, so Clear all can store an empty set.
     has_query_selection = bool(
-        selected_room_ids or selected_parameter_ids or explicit_pairs
+        selected_room_ids or selected_parameter_ids or series_entries
     )
-    if has_query_selection:
+    explicit_form = has_query_selection or request.GET.get("selection") == "1"
+    if explicit_form:
         request.session["corr_rooms"] = selected_room_ids
         request.session["corr_parameters"] = selected_parameter_ids
-        request.session["corr_series"] = [f"{room_id}:{param_id}" for room_id, param_id in explicit_pairs]
+        request.session["corr_series"] = [
+            encode_series_entry(pair, enabled) for pair, enabled in series_entries
+        ]
     elif not request.GET:
         selected_room_ids = parse_id_list(request.session.get("corr_rooms") or [])
         selected_parameter_ids = parse_id_list(request.session.get("corr_parameters") or [])
-        explicit_pairs = parse_series_pairs(
+        series_entries = parse_series_entries(
             request.session.get("corr_series") or [],
             valid_room_ids,
             valid_parameter_ids,
         )
+        enabled_explicit = [pair for pair, enabled in series_entries if enabled]
 
     method = (request.GET.get("method") or "pearson").strip().lower()
     if method not in ("pearson", "spearman"):
@@ -1572,59 +1644,11 @@ def correlations_view(request):
         min_overlap = MIN_OVERLAP
     min_overlap = max(5, min(min_overlap, 500))
 
-    all_data = request.GET.get("all") == "true"
-    start_date_str = request.GET.get("start")
-    end_date_str = request.GET.get("end")
-    quick_days = request.GET.get("quick")
-    quick_hours = request.GET.get("quickh")
-
-    if all_data:
-        start_date = None
-        end_date = timezone.now()
-        context_start = ""
-        context_end = ""
-    else:
-        if quick_days:
-            try:
-                days = int(quick_days)
-                start_date = timezone.now() - timedelta(days=days)
-                end_date = timezone.now()
-            except (TypeError, ValueError):
-                start_date = timezone.now() - timedelta(days=7)
-                end_date = timezone.now()
-        elif quick_hours:
-            try:
-                hours = int(quick_hours)
-                start_date = timezone.now() - timedelta(hours=hours)
-                end_date = timezone.now()
-            except (TypeError, ValueError):
-                start_date = timezone.now() - timedelta(days=7)
-                end_date = timezone.now()
-        elif start_date_str and end_date_str:
-            try:
-                start_date = parse_datetime(start_date_str)
-                end_date = parse_datetime(end_date_str)
-                if start_date is None:
-                    start_date = datetime.strptime(start_date_str[:10], "%Y-%m-%d")
-                if end_date is None:
-                    end_date = datetime.strptime(end_date_str[:10], "%Y-%m-%d").replace(
-                        hour=23, minute=59, second=59
-                    )
-                if timezone.is_naive(start_date):
-                    start_date = timezone.make_aware(start_date)
-                if timezone.is_naive(end_date):
-                    end_date = timezone.make_aware(end_date)
-            except (ValueError, TypeError):
-                start_date = timezone.now() - timedelta(days=7)
-                end_date = timezone.now()
-        else:
-            start_date = timezone.now() - timedelta(days=7)
-            end_date = timezone.now()
-
-        context_start = start_date.strftime("%Y-%m-%d") if start_date else ""
-        context_end = end_date.strftime("%Y-%m-%d") if end_date else ""
-        request.session["chart_start_date"] = context_start
-        request.session["chart_end_date"] = context_end
+    start_date, end_date, all_data = resolve_chart_range(request, default_hours=168)
+    if start_date and end_date:
+        save_chart_range_to_session(request, start_date, end_date)
+    context_start = start_date.strftime("%Y-%m-%d") if start_date and not all_data else ""
+    context_end = end_date.strftime("%Y-%m-%d") if end_date and not all_data else ""
 
     interval_raw = request.GET.get("interval", None)
     if interval_raw is None:
@@ -1649,7 +1673,7 @@ def correlations_view(request):
     room_by_id = {room.id: room for room in rooms}
     parameter_by_id = {param.id: param for param in parameters}
     series_pairs = expand_series_pairs(
-        selected_room_ids, selected_parameter_ids, explicit_pairs
+        selected_room_ids, selected_parameter_ids, enabled_explicit
     )
     pair_room_ids = {room_id for room_id, _param_id in series_pairs}
     pair_parameter_ids = {param_id for _room_id, param_id in series_pairs}
@@ -1666,8 +1690,9 @@ def correlations_view(request):
             "parameter_name": parameter_by_id[param_id].name,
             "unit": parameter_by_id[param_id].unit or "",
             "key": f"{room_id}:{param_id}",
+            "enabled": enabled,
         }
-        for room_id, param_id in explicit_pairs
+        for (room_id, param_id), enabled in series_entries
     ]
     truncated = False
     compute_error = None
@@ -1690,6 +1715,8 @@ def correlations_view(request):
             "or add only the individual series you need."
         )
         should_compute = False
+    elif has_query_selection and n_series_selected == 0 and series_entries:
+        compute_error = "Every individual series is disabled."
     elif has_query_selection and n_series_selected == 1:
         compute_error = "Need at least two series — add another room, parameter, or combination."
     elif has_query_selection and n_series_selected == 0:
@@ -1853,6 +1880,8 @@ def correlations_view(request):
         "title": title,
         "n_series_selected": n_series_selected,
         "max_series": MAX_SERIES,
+        "templates": list_templates(request.session, TEMPLATE_KEY),
+        "active_quick": active_quick_key(start_date, end_date, all_data),
     }
     return render(request, "dashboard/correlations.html", context)
 

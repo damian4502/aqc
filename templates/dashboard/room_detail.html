@@ -116,37 +116,37 @@
             <!-- Quick range buttons -->
             <a href="#"
 				data-hours="1"
-               class="quick-date-btn px-5 py-3 text-sm rounded-2xl transition-all {% if request.GET.quickh == '1' %}bg-blue-600 text-white{% else %}bg-slate-800 hover:bg-slate-700{% endif %}">
+               class="quick-date-btn px-5 py-3 text-sm rounded-2xl transition-all {% if active_quick == '1h' %}bg-blue-600 text-white{% else %}bg-slate-800 hover:bg-slate-700{% endif %}">
                 1h
             </a>
             <a href="#"
 				data-hours="4"
-               class="quick-date-btn px-5 py-3 text-sm rounded-2xl transition-all {% if request.GET.quickh == '4' %}bg-blue-600 text-white{% else %}bg-slate-800 hover:bg-slate-700{% endif %}">
+               class="quick-date-btn px-5 py-3 text-sm rounded-2xl transition-all {% if active_quick == '4h' %}bg-blue-600 text-white{% else %}bg-slate-800 hover:bg-slate-700{% endif %}">
                 4h
             </a>
             <a href="#"
 				data-hours="8"
-               class="quick-date-btn px-5 py-3 text-sm rounded-2xl transition-all {% if request.GET.quickh == '8' %}bg-blue-600 text-white{% else %}bg-slate-800 hover:bg-slate-700{% endif %}">
+               class="quick-date-btn px-5 py-3 text-sm rounded-2xl transition-all {% if active_quick == '8h' %}bg-blue-600 text-white{% else %}bg-slate-800 hover:bg-slate-700{% endif %}">
                 8h
             </a>
             <a href="#"
 				data-days="1"
-               class="quick-date-btn px-5 py-3 text-sm rounded-2xl transition-all {% if request.GET.quick == '1' %}bg-blue-600 text-white{% else %}bg-slate-800 hover:bg-slate-700{% endif %}">
+               class="quick-date-btn px-5 py-3 text-sm rounded-2xl transition-all {% if active_quick == '24h' %}bg-blue-600 text-white{% else %}bg-slate-800 hover:bg-slate-700{% endif %}">
                 24h
             </a>
             <a href="#"
 				data-days="7"
-               class="quick-date-btn px-5 py-3 text-sm rounded-2xl transition-all {% if request.GET.quick == '7' %}bg-blue-600 text-white{% else %}bg-slate-800 hover:bg-slate-700{% endif %}">
+               class="quick-date-btn px-5 py-3 text-sm rounded-2xl transition-all {% if active_quick == '7d' %}bg-blue-600 text-white{% else %}bg-slate-800 hover:bg-slate-700{% endif %}">
                 7d
             </a>
             <a href="#"
 				data-days="30"
-               class="quick-date-btn px-5 py-3 text-sm rounded-2xl transition-all {% if request.GET.quick == '30' %}bg-blue-600 text-white{% else %}bg-slate-800 hover:bg-slate-700{% endif %}">
+               class="quick-date-btn px-5 py-3 text-sm rounded-2xl transition-all {% if active_quick == '30d' %}bg-blue-600 text-white{% else %}bg-slate-800 hover:bg-slate-700{% endif %}">
                 30d
             </a>
             <a href="#"
 				data-days="0"
-               class="quick-date-btn px-5 py-3 text-sm rounded-2xl transition-all {% if all_data %}bg-blue-600 text-white{% else %}bg-slate-800 hover:bg-slate-700{% endif %}">
+               class="quick-date-btn px-5 py-3 text-sm rounded-2xl transition-all {% if active_quick == 'all' %}bg-blue-600 text-white{% else %}bg-slate-800 hover:bg-slate-700{% endif %}">
                 All
             </a>
             <button type="button"
@@ -522,9 +522,10 @@ function getFilterKey() {
 }
 
 function clearQuickDateHighlight() {
-    document.querySelectorAll('.quick-date-btn, #apply-zoom-btn').forEach(b =>
-        b.classList.remove('!bg-blue-600', 'text-white')
-    );
+    document.querySelectorAll('.quick-date-btn, #apply-zoom-btn').forEach(b => {
+        b.classList.remove('!bg-blue-600', 'bg-blue-600', 'text-white');
+        if (!b.classList.contains('bg-slate-800')) b.classList.add('bg-slate-800');
+    });
 }
 
 function parseDateTimeLocalValue(value) {

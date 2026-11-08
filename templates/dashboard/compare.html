@@ -98,7 +98,10 @@
                 <label class="text-sm font-medium text-slate-200">
                     <i class="fas fa-plus-circle mr-1.5 text-emerald-400"></i> Individual series
                 </label>
-                <span class="text-[11px] text-slate-500">Adds one room/parameter pair, not the full cross product</span>
+                <div class="flex items-center gap-3">
+                    <span class="text-[11px] text-slate-500">Adds one room/parameter pair, not the full cross product</span>
+                    <button type="button" id="clear-series-btn" class="text-xs text-slate-400 hover:text-rose-300">Clear all</button>
+                </div>
             </div>
             <div class="flex flex-wrap gap-3 items-end">
                 <select id="add-room" class="bg-slate-900 border border-slate-700 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:border-blue-500 min-w-[180px]">
@@ -120,14 +123,15 @@
             </div>
             <div id="explicit-series" class="flex flex-wrap gap-2 mt-4">
                 {% for pair in selected_series %}
-                <span class="series-chip inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-800 border border-slate-700 text-sm text-slate-200" data-key="{{ pair.key }}">
-                    <input type="hidden" name="series" value="{{ pair.key }}">
+                <span class="series-chip inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-800 border border-slate-700 text-sm text-slate-200{% if not pair.enabled %} opacity-50{% endif %}" data-key="{{ pair.key }}">
+                    <input type="checkbox" class="series-enabled accent-emerald-500 w-4 h-4 shrink-0" {% if pair.enabled %}checked{% endif %} title="Include this series" aria-label="Include this series">
+                    <input type="hidden" name="series" data-base="{{ pair.key }}" value="{% if pair.enabled %}{{ pair.key }}{% else %}{{ pair.key }}:0{% endif %}">
                     <button type="button" class="series-load text-left text-sky-300 hover:text-sky-200 underline decoration-sky-400/40 hover:decoration-sky-300" title="Load into the dropdowns">{{ pair.room_name }} · {{ pair.parameter_name }}{% if pair.unit %} <span class="text-slate-500 text-xs no-underline">{{ pair.unit }}</span>{% endif %}</button>
                     <button type="button" class="series-remove text-slate-400 hover:text-rose-400 leading-none" aria-label="Remove">&times;</button>
                 </span>
                 {% endfor %}
             </div>
-            <p id="explicit-empty" class="text-[11px] text-slate-500 mt-3 {% if selected_series %}hidden{% endif %}">No individual series yet. Click a series to load it into the dropdowns.</p>
+            <p id="explicit-empty" class="text-[11px] text-slate-500 mt-3 {% if selected_series %}hidden{% endif %}">No individual series yet. Click a name to load the dropdowns. Uncheck a series to leave it off the next chart.</p>
         </div>
 
         <div class="glass rounded-3xl p-6">
@@ -135,7 +139,10 @@
                 <label class="text-sm font-medium text-slate-200">
                     <i class="fas fa-minus-circle mr-1.5 text-amber-400"></i> Difference
                 </label>
-                <span class="text-[11px] text-slate-500">Plots A − B as a dashed series on the same graph</span>
+                <div class="flex items-center gap-3">
+                    <span class="text-[11px] text-slate-500">Plots A − B as a dashed series on the same graph</span>
+                    <button type="button" id="clear-diff-btn" class="text-xs text-slate-400 hover:text-rose-300">Clear all</button>
+                </div>
             </div>
             <div class="flex flex-wrap gap-3 items-end">
                 <select id="diff-room-a" class="bg-slate-900 border border-slate-700 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:border-blue-500 min-w-[160px]">
@@ -170,15 +177,45 @@
             </div>
             <div id="diff-series" class="flex flex-wrap gap-2 mt-4">
                 {% for diff in selected_diffs %}
-                <span class="series-chip inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-800 border border-slate-700 text-sm text-slate-200" data-key="{{ diff.key }}">
-                    <input type="hidden" name="diff" value="{{ diff.key }}">
+                <span class="series-chip inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-800 border border-slate-700 text-sm text-slate-200{% if not diff.enabled %} opacity-50{% endif %}" data-key="{{ diff.key }}">
+                    <input type="checkbox" class="series-enabled accent-amber-500 w-4 h-4 shrink-0" {% if diff.enabled %}checked{% endif %} title="Include this difference" aria-label="Include this difference">
+                    <input type="hidden" name="diff" data-base="{{ diff.key }}" value="{% if diff.enabled %}{{ diff.key }}{% else %}{{ diff.key }}|0{% endif %}">
                     <button type="button" class="series-load text-left text-sky-300 hover:text-sky-200 underline decoration-sky-400/40 hover:decoration-sky-300" title="Load into the dropdowns">{{ diff.left }} − {{ diff.right }}</button>
                     <button type="button" class="series-remove text-slate-400 hover:text-rose-400 leading-none" aria-label="Remove">&times;</button>
                 </span>
                 {% endfor %}
             </div>
-            <p id="diff-empty" class="text-[11px] text-slate-500 mt-3 {% if selected_diffs %}hidden{% endif %}">No differences yet. The two pairs do not have to be checked above. Click a difference to load it into the dropdowns.</p>
+            <p id="diff-empty" class="text-[11px] text-slate-500 mt-3 {% if selected_diffs %}hidden{% endif %}">No differences yet. The two pairs do not have to be checked above. Click a difference to load it into the dropdowns. Uncheck to leave it off the next chart.</p>
             <p class="text-[11px] text-slate-500 mt-1">Raw values show the actual difference. Min-max and Z-score scale its shape like the other series. With all recorded values, samples are paired within 2 minutes.</p>
+        </div>
+
+        <div class="glass rounded-3xl p-6">
+            <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-3">
+                <label class="text-sm font-medium text-slate-200">
+                    <i class="fas fa-bookmark mr-1.5 text-violet-400"></i> Templates
+                </label>
+                <span class="text-[11px] text-slate-500">Saves rooms, parameters, and series. Not the time range.</span>
+            </div>
+            <div class="flex flex-wrap gap-3 items-end">
+                <input type="text" name="template_name" id="template-name" maxlength="60" placeholder="Template name"
+                       class="bg-slate-900 border border-slate-700 rounded-2xl px-4 py-3 text-sm text-white focus:outline-none focus:border-violet-500 min-w-[220px]">
+                <button type="submit" name="template_action" value="save"
+                        class="bg-violet-600 hover:bg-violet-500 px-5 py-3 rounded-2xl text-sm font-medium transition-all">
+                    Save template
+                </button>
+            </div>
+            {% if templates %}
+            <div class="flex flex-wrap gap-2 mt-4">
+                {% for item in templates %}
+                <span class="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-800 border border-slate-700 text-sm">
+                    <button type="submit" name="load_template" value="{{ item.name }}" class="text-violet-300 hover:text-violet-200 text-left">{{ item.name }}</button>
+                    <button type="submit" name="template_delete" value="{{ item.name }}" class="text-slate-400 hover:text-rose-400 leading-none" aria-label="Delete template" title="Delete template">&times;</button>
+                </span>
+                {% endfor %}
+            </div>
+            {% else %}
+            <p class="text-[11px] text-slate-500 mt-3">No templates yet. Saving overwrites a template with the same name.</p>
+            {% endif %}
         </div>
 
         <div class="glass rounded-3xl p-6">
@@ -247,12 +284,12 @@
             </div>
 
             <div class="flex flex-wrap items-center gap-3 mt-5">
-                <button type="button" data-hours="1"  class="quick-date-btn px-4 py-2.5 text-sm rounded-2xl {% if request.GET.quickh == '1' %}bg-blue-600 text-white{% else %}bg-slate-800 hover:bg-slate-700{% endif %}">1h</button>
-                <button type="button" data-hours="8"  class="quick-date-btn px-4 py-2.5 text-sm rounded-2xl {% if request.GET.quickh == '8' %}bg-blue-600 text-white{% else %}bg-slate-800 hover:bg-slate-700{% endif %}">8h</button>
-                <button type="button" data-days="1"   class="quick-date-btn px-4 py-2.5 text-sm rounded-2xl {% if request.GET.quick == '1' %}bg-blue-600 text-white{% else %}bg-slate-800 hover:bg-slate-700{% endif %}">24h</button>
-                <button type="button" data-days="7"   class="quick-date-btn px-4 py-2.5 text-sm rounded-2xl {% if request.GET.quick == '7' %}bg-blue-600 text-white{% else %}bg-slate-800 hover:bg-slate-700{% endif %}">7d</button>
-                <button type="button" data-days="30"  class="quick-date-btn px-4 py-2.5 text-sm rounded-2xl {% if request.GET.quick == '30' %}bg-blue-600 text-white{% else %}bg-slate-800 hover:bg-slate-700{% endif %}">30d</button>
-                <button type="button" data-days="0"   class="quick-date-btn px-4 py-2.5 text-sm rounded-2xl {% if all_data %}bg-blue-600 text-white{% else %}bg-slate-800 hover:bg-slate-700{% endif %}">All</button>
+                <button type="button" data-hours="1"  class="quick-date-btn px-4 py-2.5 text-sm rounded-2xl {% if active_quick == '1h' %}bg-blue-600 text-white{% else %}bg-slate-800 hover:bg-slate-700{% endif %}">1h</button>
+                <button type="button" data-hours="8"  class="quick-date-btn px-4 py-2.5 text-sm rounded-2xl {% if active_quick == '8h' %}bg-blue-600 text-white{% else %}bg-slate-800 hover:bg-slate-700{% endif %}">8h</button>
+                <button type="button" data-days="1"   class="quick-date-btn px-4 py-2.5 text-sm rounded-2xl {% if active_quick == '24h' %}bg-blue-600 text-white{% else %}bg-slate-800 hover:bg-slate-700{% endif %}">24h</button>
+                <button type="button" data-days="7"   class="quick-date-btn px-4 py-2.5 text-sm rounded-2xl {% if active_quick == '7d' %}bg-blue-600 text-white{% else %}bg-slate-800 hover:bg-slate-700{% endif %}">7d</button>
+                <button type="button" data-days="30"  class="quick-date-btn px-4 py-2.5 text-sm rounded-2xl {% if active_quick == '30d' %}bg-blue-600 text-white{% else %}bg-slate-800 hover:bg-slate-700{% endif %}">30d</button>
+                <button type="button" data-days="0"   class="quick-date-btn px-4 py-2.5 text-sm rounded-2xl {% if active_quick == 'all' %}bg-blue-600 text-white{% else %}bg-slate-800 hover:bg-slate-700{% endif %}">All</button>
                 <button type="button" id="apply-zoom-btn"
                         title="Set From/To to the current chart zoom"
                         {% if not fig %}disabled{% endif %}
@@ -261,6 +298,7 @@
                     Zoom
                 </button>
 
+                <input type="hidden" name="selection" value="1">
                 <input type="hidden" name="all" id="all_data" value="{% if all_data %}true{% endif %}">
                 <input type="hidden" name="quick" id="quick" value="{{ request.GET.quick|default:'' }}">
                 <input type="hidden" name="quickh" id="quickh" value="{{ request.GET.quickh|default:'' }}">
@@ -381,14 +419,23 @@ function checkedCount(selector) {
     return document.querySelectorAll(selector + ':checked').length;
 }
 
+function enabledChipKeys(containerId) {
+    const keys = [];
+    document.querySelectorAll('#' + containerId + ' .series-chip').forEach(chip => {
+        const box = chip.querySelector('.series-enabled');
+        if (box && !box.checked) return;
+        if (chip.dataset.key) keys.push(chip.dataset.key);
+    });
+    return keys;
+}
+
 function seriesPairCount() {
     const rooms = [...document.querySelectorAll('.room-cb:checked')].map(cb => cb.value);
     const params = [...document.querySelectorAll('.param-cb:checked')].map(cb => cb.value);
     const keys = new Set();
     rooms.forEach(roomId => params.forEach(paramId => keys.add(roomId + ':' + paramId)));
-    document.querySelectorAll('#explicit-series input[name="series"]').forEach(el => keys.add(el.value));
-    const diffs = document.querySelectorAll('#diff-series input[name="diff"]').length;
-    return keys.size + diffs;
+    enabledChipKeys('explicit-series').forEach(key => keys.add(key));
+    return keys.size + enabledChipKeys('diff-series').length;
 }
 
 function updateCounts() {
@@ -443,9 +490,50 @@ function loadChipIntoDropdowns(chip) {
     setSelectValue('add-parameter', parts[1]);
 }
 
+function syncSeriesToken(chip) {
+    const input = chip.querySelector('input[type="hidden"]');
+    const box = chip.querySelector('.series-enabled');
+    if (!input || !box) return;
+    const base = input.dataset.base || chip.dataset.key || '';
+    const off = input.name === 'diff' ? '|0' : ':0';
+    input.value = box.checked ? base : base + off;
+    chip.classList.toggle('opacity-50', !box.checked);
+}
+
+function buildSeriesChip(name, key, text) {
+    const chip = document.createElement('span');
+    chip.className = 'series-chip inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-800 border border-slate-700 text-sm text-slate-200';
+    chip.dataset.key = key;
+    const box = document.createElement('input');
+    box.type = 'checkbox';
+    box.className = 'series-enabled ' + (name === 'diff' ? 'accent-amber-500' : 'accent-emerald-500') + ' w-4 h-4 shrink-0';
+    box.checked = true;
+    box.title = 'Include this series';
+    box.setAttribute('aria-label', 'Include this series');
+    const input = document.createElement('input');
+    input.type = 'hidden';
+    input.name = name;
+    input.dataset.base = key;
+    input.value = key;
+    const label = seriesLoadButton(text);
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'series-remove text-slate-400 hover:text-rose-400 leading-none';
+    remove.setAttribute('aria-label', 'Remove');
+    remove.textContent = '×';
+    chip.append(box, input, label, remove);
+    return chip;
+}
+
 function bindSeriesList(wrap) {
     if (!wrap) return;
     wrap.addEventListener('click', (e) => {
+        if (e.target.closest('.series-enabled')) {
+            const chip = e.target.closest('.series-chip');
+            if (chip) syncSeriesToken(chip);
+            updateCounts();
+            return;
+        }
         const removeBtn = e.target.closest('.series-remove');
         if (removeBtn) {
             const chip = removeBtn.closest('.series-chip');
@@ -466,21 +554,7 @@ function addExplicitSeries() {
     const roomName = roomSel.selectedOptions[0].textContent.trim();
     const paramName = paramSel.selectedOptions[0].textContent.trim();
     const wrap = document.getElementById('explicit-series');
-    const chip = document.createElement('span');
-    chip.className = 'series-chip inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-800 border border-slate-700 text-sm text-slate-200';
-    chip.dataset.key = key;
-    const input = document.createElement('input');
-    input.type = 'hidden';
-    input.name = 'series';
-    input.value = key;
-    const label = seriesLoadButton(roomName + ' · ' + paramName);
-    const remove = document.createElement('button');
-    remove.type = 'button';
-    remove.className = 'series-remove text-slate-400 hover:text-rose-400 leading-none';
-    remove.setAttribute('aria-label', 'Remove');
-    remove.textContent = '×';
-    chip.append(input, label, remove);
-    wrap.appendChild(chip);
+    wrap.appendChild(buildSeriesChip('series', key, roomName + ' · ' + paramName));
     updateCounts();
 }
 
@@ -497,21 +571,7 @@ function addDifference() {
     const left = roomA.selectedOptions[0].textContent.trim() + ' · ' + paramA.selectedOptions[0].textContent.trim();
     const right = roomB.selectedOptions[0].textContent.trim() + ' · ' + paramB.selectedOptions[0].textContent.trim();
     const wrap = document.getElementById('diff-series');
-    const chip = document.createElement('span');
-    chip.className = 'series-chip inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-800 border border-slate-700 text-sm text-slate-200';
-    chip.dataset.key = key;
-    const input = document.createElement('input');
-    input.type = 'hidden';
-    input.name = 'diff';
-    input.value = key;
-    const label = seriesLoadButton(left + ' − ' + right);
-    const remove = document.createElement('button');
-    remove.type = 'button';
-    remove.className = 'series-remove text-slate-400 hover:text-rose-400 leading-none';
-    remove.setAttribute('aria-label', 'Remove');
-    remove.textContent = '×';
-    chip.append(input, label, remove);
-    wrap.appendChild(chip);
+    wrap.appendChild(buildSeriesChip('diff', key, left + ' − ' + right));
     updateCounts();
 }
 
@@ -661,6 +721,13 @@ function syncRawIntervalUi() {
     if (hint) hint.classList.toggle('hidden', !raw);
 }
 
+function clearChipList(id) {
+    const wrap = document.getElementById(id);
+    if (!wrap) return;
+    wrap.querySelectorAll('.series-chip').forEach(chip => chip.remove());
+    updateCounts();
+}
+
 document.addEventListener('DOMContentLoaded', () => {
     syncRawIntervalUi();
     const intervalEl = document.getElementById('interval');
@@ -675,6 +742,10 @@ document.addEventListener('DOMContentLoaded', () => {
     bindSeriesList(document.getElementById('diff-series'));
     const addDiffBtn = document.getElementById('add-diff-btn');
     if (addDiffBtn) addDiffBtn.addEventListener('click', addDifference);
+    const clearSeriesBtn = document.getElementById('clear-series-btn');
+    if (clearSeriesBtn) clearSeriesBtn.addEventListener('click', () => clearChipList('explicit-series'));
+    const clearDiffBtn = document.getElementById('clear-diff-btn');
+    if (clearDiffBtn) clearDiffBtn.addEventListener('click', () => clearChipList('diff-series'));
     document.querySelectorAll('.quick-date-btn').forEach(btn => {
         btn.addEventListener('click', (e) => {
             e.preventDefault();
@@ -684,6 +755,7 @@ document.addEventListener('DOMContentLoaded', () => {
     ['start_date', 'end_date'].forEach(id => {
         const el = document.getElementById(id);
         if (!el) return;
+        el.addEventListener('input', clearPeriodFlags);
         el.addEventListener('change', clearPeriodFlags);
     });
     const zoomBtn = document.getElementById('apply-zoom-btn');
@@ -692,6 +764,12 @@ document.addEventListener('DOMContentLoaded', () => {
             e.preventDefault();
             e.stopPropagation();
             applyChartZoomToPeriod();
+        });
+    }
+    const form = document.getElementById('compare-form');
+    if (form) {
+        form.addEventListener('submit', () => {
+            document.querySelectorAll('.series-chip').forEach(syncSeriesToken);
         });
     }
 });

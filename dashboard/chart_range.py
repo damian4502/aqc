@@ -102,7 +102,10 @@ def resolve_chart_range(request, default_hours=24):
         # Keep the historical all_data flag for templates; start stays usable.
         return start, end, True
 
-    if quick_days not in (None, ""):
+    elif start_str and end_str:
+        start = parse_chart_datetime(start_str)
+        end = parse_chart_datetime(end_str)
+    elif quick_days not in (None, ""):
         try:
             days = int(quick_days)
             if days == 0:
@@ -119,9 +122,6 @@ def resolve_chart_range(request, default_hours=24):
             end = timezone.now()
         except (TypeError, ValueError):
             start = end = None
-    elif start_str and end_str:
-        start = parse_chart_datetime(start_str)
-        end = parse_chart_datetime(end_str)
 
     if start and end and start <= end:
         save_chart_range_to_session(request, start, end)
@@ -134,3 +134,41 @@ def resolve_chart_range(request, default_hours=24):
     end = timezone.now()
     start = end - timedelta(hours=default_hours)
     return start, end, False
+
+
+# Presets shown on the quick-range buttons. Tolerance covers minute rounding.
+_QUICK_PRESETS = (
+    ("1h", 1 * 3600),
+    ("4h", 4 * 3600),
+    ("8h", 8 * 3600),
+    ("24h", 24 * 3600),
+    ("7d", 7 * 24 * 3600),
+    ("30d", 30 * 24 * 3600),
+    ("90d", 90 * 24 * 3600),
+)
+
+
+def active_quick_key(start, end, all_data=False) -> str:
+    """Which quick button matches the resolved window, or '' if none does.
+
+    Highlighting follows the actual From/To span, not a sticky ``quick`` flag.
+    """
+    if all_data:
+        return "all"
+    if not start or not end:
+        return ""
+    try:
+        seconds = abs((end - start).total_seconds())
+    except (TypeError, ValueError, AttributeError):
+        return ""
+    best_key = ""
+    best_delta = None
+    for key, expected in _QUICK_PRESETS:
+        # Day buttons can be an hour off across a daylight-saving change.
+        tolerance = 90 * 60 if expected >= 24 * 3600 else 90
+        delta = abs(seconds - expected)
+        if delta <= tolerance and (best_delta is None or delta < best_delta):
+            best_key = key
+            best_delta = delta
+    return best_key
+

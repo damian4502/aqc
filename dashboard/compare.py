@@ -11,19 +11,11 @@ import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 from django.http import HttpResponse
-from django.shortcuts import render
+from django.shortcuts import redirect, render
 from django.utils import timezone
 
 from dashboard.correlations import make_series_label
-from dashboard.series_selection import (
-    expand_series_pairs,
-    pair_key,
-    pairs_filter,
-    parse_difference_specs,
-    parse_id_list,
-    parse_series_pairs,
-    subtract_aligned,
-)
+
 
 MAX_SERIES = 24
 MAX_EVENTS = 30
@@ -328,7 +320,27 @@ def compare_view(request):
     """Plot any room × parameter combination on a single overlay chart."""
     import json
 
-    from dashboard.chart_range import resolve_chart_range, save_chart_range_to_session
+    from dashboard.chart_range import active_quick_key, resolve_chart_range, save_chart_range_to_session
+    from dashboard.chart_templates import (
+        clean_template_name,
+        delete_named_template,
+        find_named_template,
+        list_templates,
+        save_named_template,
+        url_for_selection,
+        url_without,
+    )
+    from dashboard.series_selection import (
+        encode_diff_entry,
+        encode_series_entry,
+        expand_series_pairs,
+        pair_key,
+        pairs_filter,
+        parse_difference_entries,
+        parse_id_list,
+        parse_series_entries,
+        subtract_aligned,
+    )
     from dashboard.views import (
         apply_dark_theme,
         is_raw_interval,
@@ -346,38 +358,100 @@ def compare_view(request):
     valid_room_ids = {room.id for room in rooms}
     valid_parameter_ids = {param.id for param in parameters}
 
+    TEMPLATE_KEY = "compare_templates"
+    KEEP_WITH_TEMPLATE = (
+        "start",
+        "end",
+        "all",
+        "interval",
+        "fill_method",
+        "spike_factor",
+        "normalize",
+    )
+
     selected_room_ids = parse_id_list(request.GET.getlist("room"))
     selected_parameter_ids = parse_id_list(request.GET.getlist("parameter"))
-    explicit_pairs = parse_series_pairs(
+    series_entries = parse_series_entries(
         request.GET.getlist("series"), valid_room_ids, valid_parameter_ids
     )
-    difference_specs = parse_difference_specs(
+    diff_entries = parse_difference_entries(
         request.GET.getlist("diff"), valid_room_ids, valid_parameter_ids
     )
 
+    save_name = clean_template_name(request.GET.get("template_name"))
+    delete_name = clean_template_name(request.GET.get("template_delete"))
+    load_name = clean_template_name(request.GET.get("load_template"))
+    if request.GET.get("template_action") == "save":
+        if save_name:
+            save_named_template(
+                request.session,
+                TEMPLATE_KEY,
+                save_name,
+                {
+                    "rooms": selected_room_ids,
+                    "parameters": selected_parameter_ids,
+                    "series": [encode_series_entry(pair, enabled) for pair, enabled in series_entries],
+                    "diffs": [encode_diff_entry(spec, enabled) for spec, enabled in diff_entries],
+                },
+            )
+        return redirect(url_without(request))
+    if delete_name:
+        delete_named_template(request.session, TEMPLATE_KEY, delete_name)
+        return redirect(url_without(request))
+    if load_name:
+        stored = find_named_template(request.session, TEMPLATE_KEY, load_name)
+        if not stored:
+            return redirect(url_without(request))
+        selected_room_ids = parse_id_list(stored.get("rooms") or [])
+        selected_parameter_ids = parse_id_list(stored.get("parameters") or [])
+        series_entries = parse_series_entries(
+            stored.get("series") or [], valid_room_ids, valid_parameter_ids
+        )
+        diff_entries = parse_difference_entries(
+            stored.get("diffs") or [], valid_room_ids, valid_parameter_ids
+        )
+        return redirect(
+            url_for_selection(
+                request,
+                selected_room_ids,
+                selected_parameter_ids,
+                [encode_series_entry(pair, enabled) for pair, enabled in series_entries],
+                [encode_diff_entry(spec, enabled) for spec, enabled in diff_entries],
+                KEEP_WITH_TEMPLATE,
+            )
+        )
+
+    enabled_explicit = [pair for pair, enabled in series_entries if enabled]
+    enabled_diffs = [spec for spec, enabled in diff_entries if enabled]
+
     has_query_selection = bool(
-        selected_room_ids or selected_parameter_ids or explicit_pairs or difference_specs
+        selected_room_ids or selected_parameter_ids or series_entries or diff_entries
     )
-    if has_query_selection:
+    explicit_form = has_query_selection or request.GET.get("selection") == "1"
+    if explicit_form:
         request.session["compare_rooms"] = selected_room_ids
         request.session["compare_parameters"] = selected_parameter_ids
-        request.session["compare_series"] = [f"{room_id}:{param_id}" for room_id, param_id in explicit_pairs]
+        request.session["compare_series"] = [
+            encode_series_entry(pair, enabled) for pair, enabled in series_entries
+        ]
         request.session["compare_diffs"] = [
-            f"{pair_key(*left)}|{pair_key(*right)}" for left, right in difference_specs
+            encode_diff_entry(spec, enabled) for spec, enabled in diff_entries
         ]
     elif not request.GET:
         selected_room_ids = parse_id_list(request.session.get("compare_rooms") or [])
         selected_parameter_ids = parse_id_list(request.session.get("compare_parameters") or [])
-        explicit_pairs = parse_series_pairs(
+        series_entries = parse_series_entries(
             request.session.get("compare_series") or [],
             valid_room_ids,
             valid_parameter_ids,
         )
-        difference_specs = parse_difference_specs(
+        diff_entries = parse_difference_entries(
             request.session.get("compare_diffs") or [],
             valid_room_ids,
             valid_parameter_ids,
         )
+        enabled_explicit = [pair for pair, enabled in series_entries if enabled]
+        enabled_diffs = [spec for spec, enabled in diff_entries if enabled]
 
     if "normalize" in request.GET:
         normalize = parse_normalize(request.GET.get("normalize"))
@@ -412,7 +486,7 @@ def compare_view(request):
     room_by_id = {room.id: room for room in rooms}
     parameter_by_id = {param.id: param for param in parameters}
     series_pairs = expand_series_pairs(
-        selected_room_ids, selected_parameter_ids, explicit_pairs
+        selected_room_ids, selected_parameter_ids, enabled_explicit
     )
     pair_room_ids = {room_id for room_id, _param_id in series_pairs}
     pair_parameter_ids = {param_id for _room_id, param_id in series_pairs}
@@ -420,6 +494,7 @@ def compare_view(request):
     pair_parameters = [param for param in parameters if param.id in pair_parameter_ids]
     include_room = len(pair_rooms) != 1
     include_parameter = len(pair_parameters) != 1
+    difference_specs = enabled_diffs
     n_series_selected = len(series_pairs) + len(difference_specs)
     selected_series = [
         {
@@ -428,9 +503,10 @@ def compare_view(request):
             "room_name": room_by_id[room_id].name,
             "parameter_name": parameter_by_id[param_id].name,
             "unit": parameter_by_id[param_id].unit or "",
-            "key": f"{room_id}:{param_id}",
+            "key": pair_key(room_id, param_id),
+            "enabled": enabled,
         }
-        for room_id, param_id in explicit_pairs
+        for (room_id, param_id), enabled in series_entries
     ]
 
     def _pair_title(pair):
@@ -444,8 +520,9 @@ def compare_view(request):
             "key": f"{pair_key(*left)}|{pair_key(*right)}",
             "left": _pair_title(left),
             "right": _pair_title(right),
+            "enabled": enabled,
         }
-        for left, right in difference_specs
+        for (left, right), enabled in diff_entries
     ]
     query_pairs = list(series_pairs)
     seen_pairs = set(series_pairs)
@@ -475,6 +552,8 @@ def compare_view(request):
             "or add only the individual series you need."
         )
         should_compute = False
+    elif has_query_selection and n_series_selected == 0 and (series_entries or diff_entries):
+        compute_error = "Every individual series is disabled."
     elif has_query_selection and n_series_selected == 0:
         compute_error = "Select at least one room and one parameter, or add an individual series."
 
@@ -725,5 +804,7 @@ def compare_view(request):
         "period_label": period_label,
         "n_series_selected": n_series_selected,
         "max_series": MAX_SERIES,
+        "templates": list_templates(request.session, TEMPLATE_KEY),
+        "active_quick": active_quick_key(start_date, end_date, all_data),
     }
     return render(request, "dashboard/compare.html", context)

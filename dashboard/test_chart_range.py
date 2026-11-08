@@ -7,6 +7,7 @@ from django.utils import timezone
 
 from dashboard.chart_range import (
     SESSION_START_KEY,
+    active_quick_key,
     format_chart_datetime,
     load_chart_range_from_session,
     parse_chart_datetime,
@@ -77,3 +78,26 @@ class ChartRangeTests(SimpleTestCase):
         self.assertIsNotNone(start)
         self.assertIsNotNone(end)
         self.assertNotIn(SESSION_START_KEY, request.session)
+
+    def test_explicit_start_end_beats_sticky_quick_flag(self):
+        request = SimpleNamespace(
+            session={},
+            GET={
+                "start": "2026-09-01T00:00",
+                "end": "2026-09-08T00:00",
+                "quick": "1",
+            },
+        )
+        start, end, all_data = resolve_chart_range(request)
+        self.assertFalse(all_data)
+        self.assertEqual(format_chart_datetime(start), "2026-09-01T00:00")
+        self.assertEqual(format_chart_datetime(end), "2026-09-08T00:00")
+        self.assertEqual(active_quick_key(start, end, all_data), "7d")
+
+    def test_active_quick_key_follows_the_span(self):
+        start = parse_chart_datetime("2026-09-01T00:00")
+        day = parse_chart_datetime("2026-09-02T00:00")
+        custom = parse_chart_datetime("2026-09-01T10:00")
+        self.assertEqual(active_quick_key(start, day), "24h")
+        self.assertEqual(active_quick_key(start, custom), "")
+        self.assertEqual(active_quick_key(start, day, all_data=True), "all")

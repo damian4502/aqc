@@ -2,7 +2,8 @@
 
 Checked rooms and parameters still expand to every combination. Extra
 ``series=room_id:parameter_id`` values add only that pair, so a few
-specific traces do not require the full cross product.
+specific traces do not require the full cross product. A trailing ``:0``
+(or ``|0`` on a difference) keeps the chip but leaves it out of the chart.
 """
 
 from __future__ import annotations
@@ -19,29 +20,83 @@ def parse_id_list(values) -> list[int]:
 
 
 def parse_series_pairs(values, valid_room_ids, valid_parameter_ids) -> list[tuple[int, int]]:
-    """Parse ``room:parameter`` tokens into unique, known pairs (input order)."""
+    """Parse enabled ``room:parameter`` tokens into unique pairs (input order)."""
+    return [
+        pair
+        for pair, enabled in parse_series_entries(values, valid_room_ids, valid_parameter_ids)
+        if enabled
+    ]
+
+
+def pair_key(room_id, parameter_id) -> str:
+    """Stable column key for one room/parameter pair."""
+    return f"{int(room_id)}:{int(parameter_id)}"
+
+
+def parse_series_entries(values, valid_room_ids, valid_parameter_ids):
+    """Parse ``room:parameter`` or ``room:parameter:0`` into ``(pair, enabled)``."""
     rooms = set(valid_room_ids)
     parameters = set(valid_parameter_ids)
-    pairs = []
+    entries = []
     seen = set()
     for raw in values or []:
-        text = str(raw).strip()
-        if ":" not in text:
+        parts = str(raw).strip().split(":")
+        if len(parts) < 2:
             continue
-        left, right = text.split(":", 1)
         try:
-            room_id = int(left)
-            parameter_id = int(right)
+            room_id = int(parts[0])
+            parameter_id = int(parts[1])
         except (TypeError, ValueError):
             continue
         if room_id not in rooms or parameter_id not in parameters:
             continue
+        enabled = len(parts) < 3 or parts[2] not in ("0", "off", "false")
         key = (room_id, parameter_id)
         if key in seen:
             continue
         seen.add(key)
-        pairs.append(key)
-    return pairs
+        entries.append((key, enabled))
+    return entries
+
+
+def encode_series_entry(pair, enabled=True) -> str:
+    key = pair_key(pair[0], pair[1])
+    return key if enabled else f"{key}:0"
+
+
+def parse_difference_specs(values, valid_room_ids, valid_parameter_ids) -> list[tuple[tuple[int, int], tuple[int, int]]]:
+    """Parse ``room:parameter|room:parameter`` tokens into unique A − B specs."""
+    return [spec for spec, enabled in parse_difference_entries(values, valid_room_ids, valid_parameter_ids) if enabled]
+
+
+def parse_difference_entries(values, valid_room_ids, valid_parameter_ids):
+    """Parse ``a|b`` or ``a|b|0`` into ``(spec, enabled)`` entries."""
+    entries = []
+    seen = set()
+    for raw in values or []:
+        text = str(raw).strip()
+        enabled = True
+        if text.endswith("|0"):
+            enabled = False
+            text = text[:-2]
+        halves = text.split("|")
+        if len(halves) != 2:
+            continue
+        left_pairs = parse_series_entries([halves[0]], valid_room_ids, valid_parameter_ids)
+        right_pairs = parse_series_entries([halves[1]], valid_room_ids, valid_parameter_ids)
+        if len(left_pairs) != 1 or len(right_pairs) != 1:
+            continue
+        spec = (left_pairs[0][0], right_pairs[0][0])
+        if spec[0] == spec[1] or spec in seen:
+            continue
+        seen.add(spec)
+        entries.append((spec, enabled))
+    return entries
+
+
+def encode_diff_entry(spec, enabled=True) -> str:
+    key = f"{pair_key(*spec[0])}|{pair_key(*spec[1])}"
+    return key if enabled else f"{key}|0"
 
 
 def expand_series_pairs(room_ids, parameter_ids, explicit_pairs) -> list[tuple[int, int]]:
@@ -61,32 +116,6 @@ def expand_series_pairs(room_ids, parameter_ids, explicit_pairs) -> list[tuple[i
         seen.add(key)
         pairs.append(key)
     return pairs
-
-
-def pair_key(room_id, parameter_id) -> str:
-    """Stable column key for one room/parameter pair."""
-    return f"{int(room_id)}:{int(parameter_id)}"
-
-
-def parse_difference_specs(values, valid_room_ids, valid_parameter_ids) -> list[tuple[tuple[int, int], tuple[int, int]]]:
-    """Parse ``room:parameter|room:parameter`` tokens into unique A − B specs."""
-    specs = []
-    seen = set()
-    for raw in values or []:
-        text = str(raw).strip()
-        if "|" not in text:
-            continue
-        left, right = text.split("|", 1)
-        left_pairs = parse_series_pairs([left], valid_room_ids, valid_parameter_ids)
-        right_pairs = parse_series_pairs([right], valid_room_ids, valid_parameter_ids)
-        if len(left_pairs) != 1 or len(right_pairs) != 1:
-            continue
-        spec = (left_pairs[0], right_pairs[0])
-        if spec[0] == spec[1] or spec in seen:
-            continue
-        seen.add(spec)
-        specs.append(spec)
-    return specs
 
 
 def subtract_aligned(left, right, tolerance=None):
@@ -136,4 +165,3 @@ def pairs_filter(pairs):
     for room_id, parameter_id in pairs:
         query |= Q(sensor__room_id=room_id, parameter_id=parameter_id)
     return query
-
