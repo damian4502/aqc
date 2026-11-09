@@ -12,6 +12,7 @@ from dashboard.compare import (
     downsample_frame,
     normalize_frame,
     parse_normalize,
+    recorded_averages,
     series_stats,
     unit_axis_map,
 )
@@ -110,6 +111,18 @@ class AxisAndStatsTests(SimpleTestCase):
         self.assertEqual(single[0]["mean"], 3.0)
         thinned = downsample_frame(pd.DataFrame({"a": range(10000)}), max_points=100)
         self.assertLessEqual(len(thinned), 101)
+
+    def test_recorded_average_ignores_duplicate_keys_and_blank_values(self):
+        frame = pd.DataFrame(
+            {
+                "parameter": ["1:5", "1:5", "1:5", "2:5"],
+                "value": [10.0, 20.0, None, 4.0],
+            }
+        )
+        averages = recorded_averages(frame)
+        self.assertEqual(averages["1:5"], 15.0)
+        self.assertEqual(averages["2:5"], 4.0)
+        self.assertEqual(recorded_averages(pd.DataFrame()), {})
 
 
 class FigureTests(SimpleTestCase):

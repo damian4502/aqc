@@ -90,6 +90,24 @@ def series_stats(frame: pd.DataFrame) -> list:
     return rows
 
 
+def recorded_averages(frame, key_column="parameter", value_column="value") -> dict:
+    """Mean of recorded measurements for each series, before resampling and fill.
+
+    Duplicate timestamps both count. Forward-filled gaps do not.
+    """
+    if frame is None or getattr(frame, "empty", True):
+        return {}
+    if key_column not in frame.columns or value_column not in frame.columns:
+        return {}
+    values = pd.to_numeric(frame[value_column], errors="coerce")
+    grouped = values.groupby(frame[key_column]).mean()
+    return {
+        str(key): float(value)
+        for key, value in grouped.items()
+        if pd.notna(value)
+    }
+
+
 def normalize_frame(frame: pd.DataFrame, mode: str = DEFAULT_NORMALIZE) -> pd.DataFrame:
     """Return a copy of `frame` scaled according to `mode`.
 
@@ -566,6 +584,7 @@ def compare_view(request):
 
     resampled = None
     units_by_label = {}
+    sample_average_by_label = {}
     dash_labels = set()
 
     if should_compute:
@@ -595,6 +614,7 @@ def compare_view(request):
                 pair_key(room_id, param_id)
                 for room_id, param_id in zip(frame["sensor__room_id"], frame["parameter_id"])
             ]
+            recorded_mean = recorded_averages(frame)
 
             resampled = resample_measurements(
                 frame, interval_minutes, fill_method, spike_factor=spike_factor
@@ -624,6 +644,8 @@ def compare_view(request):
                     used_labels.add(label)
                     display[label] = keyed[key]
                     units_by_label[label] = parameter_by_id[param_id].unit or ""
+                    if key in recorded_mean:
+                        sample_average_by_label[label] = recorded_mean[key]
 
                 raw_mode = is_raw_interval(interval_minutes)
                 missing_diffs = []
@@ -653,6 +675,9 @@ def compare_view(request):
                     unit_right = parameter_by_id[right[1]].unit or ""
                     units_by_label[label] = unit_left if unit_left and unit_left == unit_right else "Δ"
                     dash_labels.add(label)
+                    diff_mean = series.dropna().mean()
+                    if pd.notna(diff_mean):
+                        sample_average_by_label[label] = float(diff_mean)
 
                 display = display.dropna(axis=1, how="all")
                 if missing_diffs:
@@ -683,6 +708,7 @@ def compare_view(request):
         stats_rows = series_stats(resampled)
         for row in stats_rows:
             row["unit"] = units_by_label.get(row["label"], "") or ""
+            row["average"] = sample_average_by_label.get(row["label"], row["mean"])
 
         if request.GET.get("format") == "csv":
             response = HttpResponse(content_type="text/csv")

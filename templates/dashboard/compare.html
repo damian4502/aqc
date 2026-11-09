@@ -393,9 +393,10 @@
                         <th class="py-2 pr-4 font-medium">Series</th>
                         <th class="py-2 pr-4 font-medium">Unit</th>
                         <th class="py-2 pr-4 font-medium text-right">n</th>
+                        <th class="py-2 pr-4 font-medium text-right" title="Mean of recorded measurements. Filled gaps are not included.">Average</th>
                         <th class="py-2 pr-4 font-medium text-right">Min</th>
                         <th class="py-2 pr-4 font-medium text-right">Max</th>
-                        <th class="py-2 pr-4 font-medium text-right">Mean</th>
+                        <th class="py-2 pr-4 font-medium text-right" title="Mean of the plotted series, including filled gaps">Mean</th>
                         <th class="py-2 pr-4 font-medium text-right" title="Sample standard deviation">Std</th>
                         <th class="py-2 font-medium text-right">Last</th>
                     </tr>
@@ -406,6 +407,7 @@
                         <td class="py-2.5 pr-4 text-slate-200">{{ row.label }}</td>
                         <td class="py-2.5 pr-4 text-slate-400">{{ row.unit }}</td>
                         <td class="py-2.5 pr-4 text-right text-slate-400 tabular-nums">{{ row.n }}</td>
+                        <td class="py-2.5 pr-4 text-right text-slate-300 tabular-nums">{% if row.average != None %}{{ row.average|floatformat:2 }}{% else %}—{% endif %}</td>
                         <td class="py-2.5 pr-4 text-right text-slate-300 tabular-nums">{% if row.min != None %}{{ row.min|floatformat:2 }}{% else %}—{% endif %}</td>
                         <td class="py-2.5 pr-4 text-right text-slate-300 tabular-nums">{% if row.max != None %}{{ row.max|floatformat:2 }}{% else %}—{% endif %}</td>
                         <td class="py-2.5 pr-4 text-right text-slate-300 tabular-nums">{% if row.mean != None %}{{ row.mean|floatformat:2 }}{% else %}—{% endif %}</td>
@@ -415,6 +417,7 @@
                     {% endfor %}
                 </tbody>
             </table>
+            <p class="text-[11px] text-slate-500 mt-3">Average is the mean of recorded measurements. Mean is the mean of the plotted series, so resampled bins and filled gaps count.</p>
         </div>
     </div>
     {% endif %}
