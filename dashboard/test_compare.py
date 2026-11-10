@@ -15,6 +15,8 @@ from dashboard.compare import (
     recorded_averages,
     series_stats,
     unit_axis_map,
+    legend_row_count,
+    compare_chrome,
 )
 
 
@@ -123,6 +125,22 @@ class AxisAndStatsTests(SimpleTestCase):
         self.assertEqual(averages["1:5"], 15.0)
         self.assertEqual(averages["2:5"], 4.0)
         self.assertEqual(recorded_averages(pd.DataFrame()), {})
+
+    def test_long_legend_names_get_their_own_rows(self):
+        short = legend_row_count(["CO2", "Temp", "RH"])
+        long = legend_row_count([
+            "Δ Zehnder pritlicje · Exhaust temperature − Zehnder pritlicje · Outdoor temperature",
+            "Δ Zehnder klet · Exhaust temperature − Zehnder klet · Outdoor temperature",
+        ])
+        self.assertEqual(short, 1)
+        self.assertGreaterEqual(long, 2)
+        top_short, _ = compare_chrome(["CO2"])
+        top_long, height_long = compare_chrome([
+            "Δ Zehnder pritlicje · Exhaust temperature − Zehnder pritlicje · Outdoor temperature",
+            "Δ Zehnder klet · Exhaust temperature − Zehnder klet · Outdoor temperature",
+        ])
+        self.assertGreater(top_long, top_short)
+        self.assertGreater(height_long, 540 + top_long - 1)
 
 
 class FigureTests(SimpleTestCase):

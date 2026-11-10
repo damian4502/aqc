@@ -190,6 +190,38 @@ def _yaxis_title(mode: str, dual: bool, single_unit: str) -> str:
     return single_unit or "Value"
 
 
+def legend_row_count(labels, chars_per_row=64) -> int:
+    """Estimate how many rows a horizontal legend needs.
+
+    Long room/parameter names usually take a whole row, so the title needs
+    margin of its own or it is drawn on top of the first legend item.
+    """
+    if labels is None:
+        labels = []
+    else:
+        labels = list(labels)
+    if not labels:
+        return 1
+    rows = 1
+    used = 0
+    for label in labels:
+        need = min(len(str(label)) + 6, chars_per_row)
+        if used and used + need > chars_per_row:
+            rows += 1
+            used = need
+        else:
+            used += need
+    return rows
+
+
+def compare_chrome(labels) -> tuple[int, int]:
+    """Top margin and figure height that keep the title above the legend."""
+    rows = legend_row_count(labels)
+    top = 72 + 36 * rows
+    height = 540 + top
+    return top, height
+
+
 def _as_float(value):
     """JSON/Plotly-safe float. NaN and None become None."""
     if value is None:
@@ -301,12 +333,22 @@ def build_compare_figure(
             zeroline=False,
         )
 
+    top, height = compare_chrome(plotted.columns)
     fig.update_layout(
-        title=title,
-        height=650,
+        title=dict(
+            text=title,
+            x=0,
+            xanchor="left",
+            xref="container",
+            y=1,
+            yanchor="top",
+            yref="container",
+            pad=dict(t=8, l=4, b=0),
+        ),
+        height=height,
         hovermode="x unified",
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0),
-        margin=dict(l=60, r=70 if dual else 40, t=90, b=50),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0, xanchor="left"),
+        margin=dict(l=60, r=70 if dual else 40, t=top, b=50),
         **layout_axes,
     )
 
@@ -789,7 +831,20 @@ def compare_view(request):
                 if dash and dash != "solid":
                     line["dash"] = dash
                 trace.update(line=line)
-        fig.update_layout(margin=dict(l=60, r=70 if dual_axis else 40, t=90, b=50))
+        top, height = compare_chrome([getattr(trace, "name", "") for trace in fig.data])
+        fig.update_layout(
+            height=height,
+            margin=dict(l=60, r=70 if dual_axis else 40, t=top, b=50),
+            title=dict(
+                x=0,
+                xanchor="left",
+                xref="container",
+                y=1,
+                yanchor="top",
+                yref="container",
+                pad=dict(t=8, l=4, b=0),
+            ),
+        )
         fig_html = fig.to_html(full_html=False, include_plotlyjs="cdn")
 
     period_label = "all data" if all_data else None
