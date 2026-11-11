@@ -409,6 +409,7 @@ def compare_view(request):
         parse_interval_minutes,
         parse_spike_factor,
         resample_measurements,
+        want_chart_events,
     )
     from measurements.models import Measurement
     from parameters.models import Parameter
@@ -526,6 +527,7 @@ def compare_view(request):
     else:
         normalize = parse_normalize(request.session.get("compare_normalize"))
 
+    show_events = want_chart_events(request)
     start_date, end_date, all_data = resolve_chart_range(request, default_hours=168)
     if start_date and end_date:
         save_chart_range_to_session(request, start_date, end_date)
@@ -762,7 +764,7 @@ def compare_view(request):
             return response
 
         events_payload = []
-        if event_room_ids and start_date and end_date:
+        if show_events and event_room_ids and start_date and end_date:
             event_qs = (
                 Event.objects.filter(
                     rooms__in=event_room_ids,
@@ -894,6 +896,7 @@ def compare_view(request):
         "max_series": MAX_SERIES,
         "templates": list_templates(request.session, TEMPLATE_KEY),
         "active_template": active_template_name(request, ACTIVE_TEMPLATE_KEY),
+        "show_events": show_events,
         "active_quick": active_quick_key(start_date, end_date, all_data),
     }
     return render(request, "dashboard/compare.html", context)

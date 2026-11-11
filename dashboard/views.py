@@ -271,6 +271,7 @@ def room_detail(request, room_id):
         'start': start_date,
         'end': end_date,
         'active_quick': active_quick_key(start_date, end_date, all_data),
+        'show_events': want_chart_events(request),
     }
 
     interval_minutes = int(request.GET.get('interval', request.session.get('resample_interval', 15)))
@@ -352,7 +353,7 @@ def room_detail(request, room_id):
                 rooms=room,
                 timestamp__gte=start_date,
                 timestamp__lte=end_date
-            ).distinct()
+            ).distinct() if context.get('show_events', True) else []
 
 
             for event in events:
@@ -680,6 +681,21 @@ def parse_bool_flag(value, default=False):
     return str(value).strip().lower() in ('1', 'true', 'yes', 'on', 'y')
 
 
+def want_chart_events(request, default=True) -> bool:
+    """Whether time-series charts should draw event markers.
+
+    ``events`` in the query wins and is stored on the session, so room,
+    parameter, and compare pages share the same on/off choice.
+    """
+    if request.GET.get("events") not in (None, ""):
+        enabled = parse_bool_flag(request.GET.get("events"), default=default)
+        request.session["show_events"] = enabled
+        return enabled
+    if "show_events" in request.session:
+        return bool(request.session.get("show_events"))
+    return default
+
+
 def parse_spike_factor(value, default=0.0):
     """Parse spike_factor from query/session. Returns IQR multiplier (0 = off).
 
@@ -829,38 +845,39 @@ def chart_data(request):
     # ... add traces with visible='legendonly' where you want ...
 
     # --- Events as vlines + annotations ---
-    events = Event.objects.filter(
-        timestamp__gte=start,
-        timestamp__lte=end
-    ).distinct()
-    
-    if room:
-        events = events.filter(rooms=room)
-    if parameter:
-        events = events.filter(parameters=parameter)
+    if want_chart_events(request):
+        events = Event.objects.filter(
+            timestamp__gte=start,
+            timestamp__lte=end
+        ).distinct()
 
-    for event in events:
-        event_ts = timezone.localtime(event.timestamp).replace(tzinfo=None)
-        fig.add_vline(
-            x=event_ts,
-            line_width=2.5,
-            line_dash="dashdot",
-            line_color=event.color,
-        )
-        fig.add_annotation(
-            x=event_ts,
-            yref="paper",
-            y=1.06,
-            text=event.title,
-            showarrow=False,
-            xanchor="center",
-            yanchor="bottom",
-            font=dict(size=13, color=event.color),
-            bgcolor="rgba(15, 23, 42, 0.92)",
-            bordercolor=event.color,
-            borderwidth=1,
-            borderpad=4,
-        )
+        if room:
+            events = events.filter(rooms=room)
+        if parameter:
+            events = events.filter(parameters=parameter)
+
+        for event in events:
+            event_ts = timezone.localtime(event.timestamp).replace(tzinfo=None)
+            fig.add_vline(
+                x=event_ts,
+                line_width=2.5,
+                line_dash="dashdot",
+                line_color=event.color,
+            )
+            fig.add_annotation(
+                x=event_ts,
+                yref="paper",
+                y=1.06,
+                text=event.title,
+                showarrow=False,
+                xanchor="center",
+                yanchor="bottom",
+                font=dict(size=13, color=event.color),
+                bgcolor="rgba(15, 23, 42, 0.92)",
+                bordercolor=event.color,
+                borderwidth=1,
+                borderpad=4,
+            )
 
     # --- Key: return pure Plotly JSON ---
     fig = apply_dark_theme(fig)
@@ -1214,6 +1231,7 @@ def parameter_detail(request, parameter_id):
         'end': end_date,
         'rooms':Room.objects.all(),
         'active_quick': active_quick_key(start_date, end_date, all_data),
+        'show_events': want_chart_events(request),
     }
 
     # === Save / read resampling settings from session ===
@@ -1276,7 +1294,7 @@ def parameter_detail(request, parameter_id):
                 parameters=parameter,
                 timestamp__gte=start_date,
                 timestamp__lte=end_date
-            )
+            ) if context.get('show_events', True) else []
 
 
             for event in events:

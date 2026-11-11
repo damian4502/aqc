@@ -181,6 +181,12 @@
 				</select>
 			</div>
 
+			<label class="inline-flex items-center gap-2 h-[46px] px-4 rounded-2xl bg-slate-900 border border-slate-700 text-sm text-slate-200 cursor-pointer self-end">
+				<input type="checkbox" id="show-events" class="accent-emerald-500 w-4 h-4"
+				       {% if show_events %}checked{% endif %}>
+				Events
+			</label>
+
         </div>
     </form>
 </div>
@@ -439,6 +445,7 @@ async function loadGraph(extraParams = {}) {
         'spike_factor',
         document.getElementById('spike_factor')?.value || '0'
     );
+    params.set('events', document.getElementById('show-events')?.checked ? '1' : '0');
 
     // Cancel in-flight request so rapid picker steps keep only the latest range
     if (typeof loadGraphAbortController !== 'undefined' && loadGraphAbortController) {
@@ -518,6 +525,7 @@ function getFilterKey() {
         document.getElementById('interval')?.value || '',
         document.getElementById('fill_method')?.value || '',
         document.getElementById('spike_factor')?.value || '0',
+        document.getElementById('show-events')?.checked ? '1' : '0',
     ].join('|');
 }
 
@@ -721,7 +729,7 @@ document.addEventListener('DOMContentLoaded', () => {
     syncRawIntervalUi();
 
     // Selects (including spike aggressiveness)
-    ['interval', 'fill_method', 'spike_factor'].forEach(id => {
+    ['interval', 'fill_method', 'spike_factor', 'show-events'].forEach(id => {
         const el = document.getElementById(id);
         if (!el) return;
         el.addEventListener('change', () => {
