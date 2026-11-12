@@ -41,8 +41,10 @@ from rooms.models import Room, Event
 from dashboard.chart_range import (
     active_quick_key,
     load_chart_range_from_session,
+    load_chart_range_mode,
     parse_chart_datetime,
     resolve_chart_range,
+    save_chart_range_mode,
     save_chart_range_to_session,
 )
 
@@ -268,9 +270,12 @@ def room_detail(request, room_id):
         'end_date': context_end,
         'view_type': view_type,
         'all_data': all_data,
+        'chart_range_mode': load_chart_range_mode(request),
         'start': start_date,
         'end': end_date,
-        'active_quick': active_quick_key(start_date, end_date, all_data),
+        'active_quick': active_quick_key(
+            start_date, end_date, all_data, live=load_chart_range_mode(request) == 'live'
+        ),
         'show_events': want_chart_events(request),
     }
 
@@ -757,6 +762,10 @@ def chart_data(request):
             end = timezone.now()
             start = end - timedelta(hours=24)
 
+    range_mode = (request.GET.get('range_mode') or '').strip().lower()
+    if range_mode in ('live', 'fixed'):
+        save_chart_range_mode(request, range_mode)
+
     # === Measurements for graphs ===
     qs = Measurement.objects.all()
     if room:
@@ -1227,10 +1236,13 @@ def parameter_detail(request, parameter_id):
         'end_date': context_end,
         'view_type': view_type,
         'all_data': all_data,
+        'chart_range_mode': load_chart_range_mode(request),
         'start': start_date,
         'end': end_date,
         'rooms':Room.objects.all(),
-        'active_quick': active_quick_key(start_date, end_date, all_data),
+        'active_quick': active_quick_key(
+            start_date, end_date, all_data, live=load_chart_range_mode(request) == 'live'
+        ),
         'show_events': want_chart_events(request),
     }
 
@@ -1907,7 +1919,9 @@ def correlations_view(request):
         "max_series": MAX_SERIES,
         "templates": list_templates(request.session, TEMPLATE_KEY),
         "active_template": active_template_name(request, ACTIVE_TEMPLATE_KEY),
-        "active_quick": active_quick_key(start_date, end_date, all_data),
+        "active_quick": active_quick_key(
+            start_date, end_date, all_data, live=load_chart_range_mode(request) == "live"
+        ),
     }
     return render(request, "dashboard/correlations.html", context)
 

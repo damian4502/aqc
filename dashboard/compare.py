@@ -380,7 +380,12 @@ def compare_view(request):
     """Plot any room × parameter combination on a single overlay chart."""
     import json
 
-    from dashboard.chart_range import active_quick_key, resolve_chart_range, save_chart_range_to_session
+    from dashboard.chart_range import (
+        active_quick_key,
+        load_chart_range_mode,
+        resolve_chart_range,
+        save_chart_range_to_session,
+    )
     from dashboard.chart_templates import (
         active_template_name,
         clean_template_name,
@@ -897,6 +902,8 @@ def compare_view(request):
         "templates": list_templates(request.session, TEMPLATE_KEY),
         "active_template": active_template_name(request, ACTIVE_TEMPLATE_KEY),
         "show_events": show_events,
-        "active_quick": active_quick_key(start_date, end_date, all_data),
+        "active_quick": active_quick_key(
+            start_date, end_date, all_data, live=load_chart_range_mode(request) == "live"
+        ),
     }
     return render(request, "dashboard/compare.html", context)

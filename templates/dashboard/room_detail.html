@@ -67,7 +67,14 @@
             <input type="hidden" name="view" value="{{ view_type }}">
         {% endif %}
 
-<div class="flex gap-4 items-end">
+<div class="flex flex-wrap gap-4 items-end">
+    <div>
+        <label class="block text-sm text-slate-400 mb-1">Period</label>
+        <div id="range-mode" data-initial="{{ chart_range_mode|default:'fixed' }}" class="inline-flex rounded-2xl bg-slate-900 border border-slate-700 p-1">
+            <button type="button" data-range-mode="fixed" class="range-mode-btn px-4 py-2.5 text-sm rounded-xl transition-all {% if chart_range_mode != 'live' %}bg-blue-600 text-white{% else %}text-slate-300 hover:text-white{% endif %}">From – To</button>
+            <button type="button" data-range-mode="live" class="range-mode-btn px-4 py-2.5 text-sm rounded-xl transition-all {% if chart_range_mode == 'live' %}bg-blue-600 text-white{% else %}text-slate-300 hover:text-white{% endif %}">From – Now</button>
+        </div>
+    </div>
     <div>
         <label class="block text-sm text-slate-400 mb-1">From</label>
         <input type="datetime-local"
@@ -76,7 +83,7 @@
                value="{{ start|date:'Y-m-d\TH:i' }}"
                class="bg-slate-800 border border-slate-700 rounded-2xl px-4 py-3 text-white focus:outline-none focus:border-blue-500">
     </div>
-    <div>
+    <div id="end-date-wrap" class="{% if chart_range_mode == 'live' %}hidden{% endif %}">
         <label class="block text-sm text-slate-400 mb-1">To</label>
         <input type="datetime-local"
                name="end"
@@ -434,6 +441,7 @@ async function loadGraph(extraParams = {}) {
         interval: document.getElementById('interval')?.value || '60',
         fill: document.getElementById('fill_method')?.value || 'ffill'
     });
+    params.set('range_mode', getRangeMode());
 
     const showParams = getShowParamsForRequest();
     if (showParams !== null) {
@@ -526,6 +534,7 @@ function getFilterKey() {
         document.getElementById('fill_method')?.value || '',
         document.getElementById('spike_factor')?.value || '0',
         document.getElementById('show-events')?.checked ? '1' : '0',
+        getRangeMode(),
     ].join('|');
 }
 
@@ -545,6 +554,55 @@ function parseDateTimeLocalValue(value) {
         Number(m[1]), Number(m[2]) - 1, Number(m[3]),
         Number(m[4]), Number(m[5]), 0, 0
     );
+}
+
+let chartRangeMode = 'fixed';
+
+function getRangeMode() {
+    return chartRangeMode === 'live' ? 'live' : 'fixed';
+}
+
+function liveEndDate() {
+    return new Date(Date.now() + 365 * 24 * 60 * 60 * 1000);
+}
+
+function paintRangeMode() {
+    document.querySelectorAll('[data-range-mode]').forEach((btn) => {
+        const on = btn.dataset.rangeMode === chartRangeMode;
+        btn.classList.toggle('bg-blue-600', on);
+        btn.classList.toggle('text-white', on);
+        btn.classList.toggle('text-slate-300', !on);
+        btn.classList.toggle('hover:text-white', !on);
+    });
+    const wrap = document.getElementById('end-date-wrap');
+    if (wrap) wrap.classList.toggle('hidden', chartRangeMode === 'live');
+}
+
+function ensureLiveHorizon() {
+    if (chartRangeMode !== 'live') return false;
+    const endInput = document.getElementById('end_date');
+    if (!endInput) return false;
+    const end = parseDateTimeLocalValue(endInput.value);
+    const soon = Date.now() + 24 * 60 * 60 * 1000;
+    if (end && end.getTime() > soon) return false;
+    endInput.value = formatForDateTimeLocal(liveEndDate());
+    return true;
+}
+
+// fixed = show To. live = hide To and keep the end one year ahead.
+function setRangeMode(mode, options = {}) {
+    const { reload = true, adjustEnd = true } = options;
+    chartRangeMode = mode === 'live' ? 'live' : 'fixed';
+    paintRangeMode();
+    const endInput = document.getElementById('end_date');
+    if (adjustEnd && endInput) {
+        const next = chartRangeMode === 'live' ? liveEndDate() : new Date();
+        endInput.value = formatForDateTimeLocal(next);
+    }
+    if (reload) {
+        lastLoadGraphKey = '';
+        scheduleLoadGraph({ immediate: true, force: true });
+    }
 }
 
 /**
@@ -660,6 +718,7 @@ function applyChartZoomToPeriod() {
         end = new Date(start.getTime() + 60 * 1000);
     }
 
+    setRangeMode('fixed', { reload: false, adjustEnd: false });
     startInput.value = formatForDateTimeLocal(start);
     endInput.value = formatForDateTimeLocal(end);
 
@@ -695,7 +754,7 @@ document.querySelectorAll('.quick-date-btn').forEach(btn => {
         }
 
         document.getElementById('start_date').value = formatForDateTimeLocal(startDate);
-        document.getElementById('end_date').value = formatForDateTimeLocal(now);
+        setRangeMode('live', { reload: false, adjustEnd: true });
 
         clearQuickDateHighlight();
         btn.classList.add('!bg-blue-600', 'text-white');
@@ -707,6 +766,20 @@ document.querySelectorAll('.quick-date-btn').forEach(btn => {
 
 // Init on page load
 document.addEventListener('DOMContentLoaded', () => {
+    const modeEl = document.getElementById('range-mode');
+    chartRangeMode = modeEl && modeEl.dataset.initial === 'live' ? 'live' : 'fixed';
+    paintRangeMode();
+    ensureLiveHorizon();
+
+    document.querySelectorAll('[data-range-mode]').forEach((btn) => {
+        btn.addEventListener('click', (e) => {
+            e.preventDefault();
+            if (btn.dataset.rangeMode === chartRangeMode) return;
+            clearQuickDateHighlight();
+            setRangeMode(btn.dataset.rangeMode, { reload: true, adjustEnd: true });
+        });
+    });
+
     lastLoadGraphKey = '';
     scheduleLoadGraph({ immediate: true, clearQuick: false, force: true });
 

@@ -12,11 +12,14 @@ from django.utils.dateparse import parse_datetime
 
 SESSION_START_KEY = "chart_start_datetime"
 SESSION_END_KEY = "chart_end_datetime"
+SESSION_MODE_KEY = "chart_range_mode"
 LEGACY_START_KEY = "chart_start_date"
 LEGACY_END_KEY = "chart_end_date"
 
 # Matches the "All" quick button on the detail pages.
 ALL_DATA_START = "2020-01-01T00:00"
+# Live mode keeps the query window open so the chart can keep polling.
+LIVE_HORIZON = timedelta(days=365)
 
 
 def format_chart_datetime(dt):
@@ -48,6 +51,28 @@ def parse_chart_datetime(value):
     if timezone.is_naive(dt):
         dt = timezone.make_aware(dt, timezone.get_current_timezone())
     return dt
+
+
+def normalize_range_mode(value):
+    """Return 'live' or 'fixed'. Anything else is a fixed From/To range."""
+    return "live" if str(value or "").strip().lower() == "live" else "fixed"
+
+
+def save_chart_range_mode(request, mode):
+    request.session[SESSION_MODE_KEY] = normalize_range_mode(mode)
+
+
+def load_chart_range_mode(request):
+    session = getattr(request, "session", None) or {}
+    raw = session.get(SESSION_MODE_KEY)
+    if raw in ("live", "fixed"):
+        return raw
+    return "fixed"
+
+
+def live_horizon_end(now=None):
+    """End timestamp used by From–Now so the chart stays in the future."""
+    return (now or timezone.now()) + LIVE_HORIZON
 
 
 def save_chart_range_to_session(request, start, end):
@@ -96,15 +121,18 @@ def resolve_chart_range(request, default_hours=24):
     start = end = None
 
     if all_data:
-        end = timezone.now()
+        end = live_horizon_end()
         start = parse_chart_datetime(ALL_DATA_START)
         save_chart_range_to_session(request, start, end)
-        # Keep the historical all_data flag for templates; start stays usable.
+        save_chart_range_mode(request, "live")
         return start, end, True
 
     elif start_str and end_str:
         start = parse_chart_datetime(start_str)
         end = parse_chart_datetime(end_str)
+        mode = get.get("range_mode")
+        if mode:
+            save_chart_range_mode(request, mode)
     elif quick_days not in (None, ""):
         try:
             days = int(quick_days)
@@ -112,14 +140,16 @@ def resolve_chart_range(request, default_hours=24):
                 start = parse_chart_datetime(ALL_DATA_START)
             else:
                 start = timezone.now() - timedelta(days=days)
-            end = timezone.now()
+            end = live_horizon_end()
+            save_chart_range_mode(request, "live")
         except (TypeError, ValueError):
             start = end = None
     elif quick_hours not in (None, ""):
         try:
             hours = int(quick_hours)
             start = timezone.now() - timedelta(hours=hours)
-            end = timezone.now()
+            end = live_horizon_end()
+            save_chart_range_mode(request, "live")
         except (TypeError, ValueError):
             start = end = None
 
@@ -148,15 +178,21 @@ _QUICK_PRESETS = (
 )
 
 
-def active_quick_key(start, end, all_data=False) -> str:
+def active_quick_key(start, end, all_data=False, live=False) -> str:
     """Which quick button matches the resolved window, or '' if none does.
 
     Highlighting follows the actual From/To span, not a sticky ``quick`` flag.
+    In live mode the stored end is one year ahead, so the span is measured
+    back from that horizon to the moment the range was chosen.
     """
     if all_data:
         return "all"
     if not start or not end:
         return ""
+    if live:
+        end = end - LIVE_HORIZON
+        if end <= start:
+            return ""
     try:
         seconds = abs((end - start).total_seconds())
     except (TypeError, ValueError, AttributeError):
