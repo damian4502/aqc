@@ -430,7 +430,7 @@ function adjustYAxisToVisibleRangeWithData(gd, xRangeFromEvent = null) {
     }
 }
 // Main graph loader
-async function loadGraph(extraParams = {}) {
+async function loadGraph(extraParams = {override: true}) {
     const params = new URLSearchParams({
 		parameter_id: {{parameter.id}},
         start: document.getElementById('start_date')?.value || '',
@@ -454,6 +454,8 @@ async function loadGraph(extraParams = {}) {
 
     // Cancel in-flight request so rapid picker steps keep only the latest range
     if (typeof loadGraphAbortController !== 'undefined' && loadGraphAbortController) {
+		console.log((!extraParams['override']));
+		if (!extraParams['override']) return;
         loadGraphAbortController.abort();
     }
     loadGraphAbortController = new AbortController();
@@ -508,6 +510,8 @@ async function loadGraph(extraParams = {}) {
                 Plotly.relayout(currentGraphDiv, { 'yaxis.autorange': true });
             }
         });
+		
+		loadGraphAbortController = null;
 
         // After a successful load, (re)start live polling if end is in the future
         setupLiveRefresh();
@@ -618,7 +622,7 @@ function setupLiveRefresh() {
     const now = new Date();
     if (endDate.getTime() <= now.getTime()) return;
 
-    const intervalMin = Math.max(1, parseInt(document.getElementById('interval')?.value || '60', 10) || 60);
+    const intervalMin = Math.max(0.1, parseInt(document.getElementById('interval')?.value || '0', 10) || 0);
     const periodMs = intervalMin * 60 * 1000;
 
     liveRefreshTimer = setInterval(() => {
@@ -629,12 +633,12 @@ function setupLiveRefresh() {
             liveRefreshTimer = null;
             return;
         }
-        scheduleLoadGraph({ immediate: true, force: true, clearQuick: false });
+        scheduleLoadGraph({ immediate: true, force: true, clearQuick: false, override: false });
     }, periodMs);
 }
 
 function scheduleLoadGraph(options = {}) {
-    const { immediate = false, clearQuick = true, force = false } = options;
+    const { immediate = false, clearQuick = true, force = false, override = true } = options;
     if (clearQuick) clearQuickDateHighlight();
 
     if (loadGraphTimer) {
@@ -654,7 +658,7 @@ function scheduleLoadGraph(options = {}) {
         // Skip identical requests unless forced (e.g. explicit refresh button)
         if (!force && key === lastLoadGraphKey) return;
         lastLoadGraphKey = key;
-        loadGraph();
+        loadGraph({override: override});
     };
 
     if (immediate) {
