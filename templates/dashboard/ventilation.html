@@ -3,6 +3,28 @@
 {% block title %}Ventilation (ACH) - Air Quality Control{% endblock %}
 
 {% block content %}
+<style>
+    .help-btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 1rem;
+        height: 1rem;
+        border-radius: 9999px;
+        border: 1px solid rgb(71 85 105);
+        font-size: 10px;
+        font-weight: 600;
+        line-height: 1;
+        color: rgb(148 163 184);
+        flex: none;
+    }
+    .help-btn:hover,
+    .help-btn:focus-visible {
+        color: white;
+        border-color: rgb(148 163 184);
+        outline: none;
+    }
+</style>
 <div class="max-w-7xl mx-auto space-y-8">
 
     <div class="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
@@ -97,7 +119,11 @@
             <div class="flex flex-wrap items-end gap-5">
                 <div class="flex gap-4 items-end">
                     <div>
-                        <label class="block text-sm text-slate-400 mb-1">From</label>
+                        <label class="flex items-center gap-1.5 text-sm text-slate-400 mb-1">
+                            From
+                            <button type="button" class="help-btn" aria-label="About the time range"
+                                    data-help="From and To bound the measurements that are searched. The buttons below fill a recent range. All ignores the two dates and uses every stored sample.">?</button>
+                        </label>
                         <input type="datetime-local" name="start" id="start_date"
                                value="{{ start|date:'Y-m-d\TH:i' }}"
                                class="bg-slate-800 border border-slate-700 rounded-2xl px-4 py-3 text-white focus:outline-none focus:border-blue-500">
@@ -111,7 +137,11 @@
                 </div>
 
                 <div class="min-w-[220px] flex-1">
-                    <label class="block text-xs text-slate-400 mb-1.5">Resampling</label>
+                    <label class="flex items-center gap-1.5 text-xs text-slate-400 mb-1.5">
+                        Resampling
+                        <button type="button" class="help-btn" aria-label="About resampling"
+                                data-help="The first box is the bin width. All recorded values keeps every sample. A wider bin smooths noise but can hide a short decay. The second box is empty bins: Keep gaps leaves holes, and a decay stops when a gap is too long. Interpolation and forward fill invent values across those holes.">?</button>
+                    </label>
                     <div class="flex gap-3">
                         <select name="interval" id="interval"
                                 class="flex-1 bg-slate-900 border border-slate-700 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:border-blue-500">
@@ -131,7 +161,11 @@
                 </div>
 
                 <div>
-                    <label class="block text-xs text-slate-400 mb-1.5">Ignore spikes</label>
+                    <label class="flex items-center gap-1.5 text-xs text-slate-400 mb-1.5">
+                        Ignore spikes
+                        <button type="button" class="help-btn" aria-label="About spike removal"
+                                data-help="Drops samples that jump far from their neighbours before a decay is looked for. Mild removes only the largest jumps. Aggressive removes smaller ones too. Off keeps every sample.">?</button>
+                    </label>
                     <select name="spike_factor"
                             class="bg-slate-900 border border-slate-700 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:border-blue-500 min-w-[140px]">
                         <option value="0"   {% if not spike_factor or spike_factor == 0 %}selected{% endif %}>Off</option>
@@ -144,31 +178,51 @@
 
             <div class="flex flex-wrap items-end gap-5 mt-5">
                 <div>
-                    <label class="block text-xs text-slate-400 mb-1.5">Baseline percentile</label>
+                    <label class="flex items-center gap-1.5 text-xs text-slate-400 mb-1.5">
+                        Baseline percentile
+                        <button type="button" class="help-btn" aria-label="About baseline percentile"
+                                data-help="Used only to decide which peaks are tall enough to start a decay. It is not the fitted floor — the curve estimates its own baseline. A higher percentile asks for a taller peak.">?</button>
+                    </label>
                     <input type="number" name="baseline_pct" min="1" max="40" step="1"
                            value="{{ baseline_pct }}"
                            class="w-28 bg-slate-900 border border-slate-700 rounded-2xl px-4 py-3 text-sm text-white focus:outline-none focus:border-blue-500">
                 </div>
                 <div>
-                    <label class="block text-xs text-slate-400 mb-1.5">Min. rise</label>
+                    <label class="flex items-center gap-1.5 text-xs text-slate-400 mb-1.5">
+                        Min. rise
+                        <button type="button" class="help-btn" aria-label="About minimum rise"
+                                data-help="Smallest climb, in the parameter's own units, that counts as a real peak. Leave it empty and the threshold is taken from the spread and the noise of that series.">?</button>
+                    </label>
                     <input type="number" name="min_rise" min="0" step="any" placeholder="Auto"
                            value="{{ min_rise }}"
                            class="w-28 bg-slate-900 border border-slate-700 rounded-2xl px-4 py-3 text-sm text-white focus:outline-none focus:border-blue-500">
                 </div>
                 <div>
-                    <label class="block text-xs text-slate-400 mb-1.5">Min. duration (min)</label>
+                    <label class="flex items-center gap-1.5 text-xs text-slate-400 mb-1.5">
+                        Min. duration (min)
+                        <button type="button" class="help-btn" aria-label="About minimum duration"
+                                data-help="Shortest decay that is kept, in minutes. Anything shorter is ignored, even if the shape looks exponential.">?</button>
+                    </label>
                     <input type="number" name="min_duration" min="10" max="360" step="1"
                            value="{{ min_duration }}"
                            class="w-32 bg-slate-900 border border-slate-700 rounded-2xl px-4 py-3 text-sm text-white focus:outline-none focus:border-blue-500">
                 </div>
                 <div>
-                    <label class="block text-xs text-slate-400 mb-1.5">Min. R²</label>
+                    <label class="flex items-center gap-1.5 text-xs text-slate-400 mb-1.5">
+                        Min. R²
+                        <button type="button" class="help-btn" aria-label="About minimum R squared"
+                                data-help="How closely the samples must follow one exponential. 1 means the curve explains the drop completely. A decay below this value is dropped. R² is the share of the variation that the curve accounts for.">?</button>
+                    </label>
                     <input type="number" name="min_r2" min="0.3" max="0.99" step="0.01"
                            value="{{ min_r2 }}"
                            class="w-28 bg-slate-900 border border-slate-700 rounded-2xl px-4 py-3 text-sm text-white focus:outline-none focus:border-blue-500">
                 </div>
                 <div>
-                    <label class="block text-xs text-slate-400 mb-1.5">Min baseline</label>
+                    <label class="flex items-center gap-1.5 text-xs text-slate-400 mb-1.5">
+                        Min baseline
+                        <button type="button" class="help-btn" aria-label="About minimum baseline"
+                                data-help="Drops a decay whose fitted floor is below this number. Empty means no lower limit. Lowest in period ignores the number and uses the smallest resampled reading of that parameter in the selected range, across the selected rooms. A floor within 0.5% under that reading is still kept, because the curve sits just below the samples.">?</button>
+                    </label>
                     <div class="flex items-center gap-3">
                         <input type="number" name="min_baseline" id="min_baseline" step="any" placeholder="No limit"
                                value="{{ min_baseline }}"
@@ -182,7 +236,11 @@
                     </div>
                 </div>
                 <div>
-                    <label class="block text-xs text-slate-400 mb-1.5">Max baseline</label>
+                    <label class="flex items-center gap-1.5 text-xs text-slate-400 mb-1.5">
+                        Max baseline
+                        <button type="button" class="help-btn" aria-label="About maximum baseline"
+                                data-help="Drops a decay whose fitted floor is above this number. Empty means no upper limit. For CO₂, a value a little above outdoor air removes decays that levelled off too high.">?</button>
+                    </label>
                     <input type="number" name="max_baseline" step="any" placeholder="No limit"
                            value="{{ max_baseline }}"
                            class="w-32 bg-slate-900 border border-slate-700 rounded-2xl px-4 py-3 text-sm text-white focus:outline-none focus:border-blue-500">
@@ -225,6 +283,8 @@
             </p>
         </div>
     </form>
+
+    <div id="help-pop" role="tooltip" class="hidden fixed z-50 w-72 rounded-2xl border border-slate-600 bg-slate-900 px-3 py-2.5 text-xs leading-relaxed text-slate-200 shadow-xl"></div>
 
     {% if compute_error %}
     <div class="glass rounded-3xl p-8 border-l-4 border-amber-500">
@@ -441,6 +501,49 @@ document.addEventListener('DOMContentLoaded', () => {
     });
     const minBaselineAuto = document.getElementById('min_baseline_auto');
     if (minBaselineAuto) minBaselineAuto.addEventListener('change', syncMinBaselineAuto);
+
+    const helpPop = document.getElementById('help-pop');
+    let helpPinned = null;
+    function showHelp(btn) {
+        if (!helpPop) return;
+        helpPop.textContent = btn.getAttribute('data-help') || '';
+        helpPop.classList.remove('hidden');
+        const rect = btn.getBoundingClientRect();
+        const margin = 8;
+        const width = helpPop.offsetWidth;
+        const height = helpPop.offsetHeight;
+        let left = rect.left;
+        let top = rect.bottom + margin;
+        if (left + width > window.innerWidth - margin) left = window.innerWidth - width - margin;
+        if (left < margin) left = margin;
+        if (top + height > window.innerHeight - margin) top = Math.max(margin, rect.top - height - margin);
+        helpPop.style.left = left + 'px';
+        helpPop.style.top = top + 'px';
+    }
+    function hideHelp() {
+        helpPinned = null;
+        if (helpPop) helpPop.classList.add('hidden');
+    }
+    document.querySelectorAll('.help-btn').forEach(btn => {
+        btn.addEventListener('mouseenter', () => { if (!helpPinned) showHelp(btn); });
+        btn.addEventListener('mouseleave', () => { if (!helpPinned) helpPop.classList.add('hidden'); });
+        btn.addEventListener('focus', () => showHelp(btn));
+        btn.addEventListener('blur', () => { if (helpPinned !== btn) helpPop.classList.add('hidden'); });
+        btn.addEventListener('click', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            if (helpPinned === btn) hideHelp();
+            else { helpPinned = btn; showHelp(btn); }
+        });
+    });
+    document.addEventListener('click', (event) => {
+        if (!helpPinned) return;
+        if (event.target.closest('.help-btn') || event.target.closest('#help-pop')) return;
+        hideHelp();
+    });
+    document.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape') hideHelp();
+    });
     document.querySelectorAll('.quick-date-btn').forEach(btn => {
         btn.addEventListener('click', (e) => {
             e.preventDefault();
