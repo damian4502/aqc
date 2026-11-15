@@ -32,6 +32,7 @@ class Room(models.Model):
     order = models.PositiveIntegerField(
         default=999,
     )
+    air_flow = models.ForeignKey(Parameter, null=True, default=None, on_delete=models.SET_NULL)
     
     
     def get_aqi(self):
