@@ -167,6 +167,12 @@
                            value="{{ min_r2 }}"
                            class="w-28 bg-slate-900 border border-slate-700 rounded-2xl px-4 py-3 text-sm text-white focus:outline-none focus:border-blue-500">
                 </div>
+                <div>
+                    <label class="block text-xs text-slate-400 mb-1.5">Max baseline</label>
+                    <input type="number" name="max_baseline" step="any" placeholder="No limit"
+                           value="{{ max_baseline }}"
+                           class="w-32 bg-slate-900 border border-slate-700 rounded-2xl px-4 py-3 text-sm text-white focus:outline-none focus:border-blue-500">
+                </div>
             </div>
 
             <div class="flex flex-wrap items-center gap-3 mt-5">
@@ -199,6 +205,7 @@
                 A segment starts at a peak (or at the beginning of the window if the series is already falling)
                 and ends when the value climbs again. Baseline percentile is only used to decide which peaks
                 are tall enough. The fit estimates its own baseline. Leave min. rise empty to set it from the spread of the series.
+                Max baseline, if set, drops a decay whose fitted floor is above that value. Leave it empty for no limit.
                 Keep gaps avoids inventing samples between readings.
             </p>
         </div>

@@ -156,6 +156,7 @@ def fit_exponential_decay(
     min_r2: float = DEFAULT_MIN_R2,
     min_ach: float = DEFAULT_MIN_ACH,
     max_ach: float = DEFAULT_MAX_ACH,
+    max_baseline: float | None = None,
 ):
     """Fit C_base and λ. Returns None when the curve is not a clean decay.
 
@@ -226,6 +227,8 @@ def fit_exponential_decay(
         best = rescored
 
     if best["r2"] < min_r2 or best["ach"] < min_ach or best["ach"] > max_ach:
+        return None
+    if max_baseline is not None and math.isfinite(max_baseline) and best["c_base"] > max_baseline:
         return None
     best["half_life_h"] = math.log(2.0) / best["ach"]
     return best
@@ -410,6 +413,7 @@ def analyze_series(
     min_r2: float = DEFAULT_MIN_R2,
     min_ach: float = DEFAULT_MIN_ACH,
     max_ach: float = DEFAULT_MAX_ACH,
+    max_baseline: float | None = None,
 ) -> list[dict]:
     """Detect decay spans and keep those with an acceptable exponential fit."""
     spans, cleaned = detect_decay_spans(
@@ -420,7 +424,12 @@ def analyze_series(
         min_duration_min=min_duration_min,
         max_duration_h=max_duration_h,
     )
-    fit_kwargs = {"min_r2": min_r2, "min_ach": min_ach, "max_ach": max_ach}
+    fit_kwargs = {
+        "min_r2": min_r2,
+        "min_ach": min_ach,
+        "max_ach": max_ach,
+        "max_baseline": max_baseline,
+    }
     found = []
     for start, end in spans:
         fitted = _fit_span(cleaned, start, end, **fit_kwargs)
@@ -754,11 +763,24 @@ def ventilation_view(request):
         except (TypeError, ValueError):
             min_rise = None
 
+    raw_max_baseline = request.GET.get("max_baseline", None)
+    if raw_max_baseline is None and not has_query_selection:
+        raw_max_baseline = request.session.get("vent_max_baseline")
+    max_baseline = None
+    if raw_max_baseline not in (None, ""):
+        try:
+            parsed_baseline = float(raw_max_baseline)
+            if math.isfinite(parsed_baseline):
+                max_baseline = parsed_baseline
+        except (TypeError, ValueError):
+            max_baseline = None
+
     if has_query_selection:
         request.session["vent_baseline_pct"] = baseline_percentile
         request.session["vent_min_duration"] = min_duration_min
         request.session["vent_min_r2"] = min_r2
         request.session["vent_min_rise"] = min_rise or ""
+        request.session["vent_max_baseline"] = "" if max_baseline is None else max_baseline
 
     start_date, end_date, all_data = resolve_chart_range(request, default_hours=168)
     if start_date and end_date:
@@ -855,6 +877,7 @@ def ventilation_view(request):
                             min_rise=min_rise,
                             min_duration_min=min_duration_min,
                             min_r2=min_r2,
+                            max_baseline=max_baseline,
                         )
                     )
                 summary = summarize_decays(segments, labels)
@@ -908,6 +931,7 @@ def ventilation_view(request):
         "min_duration": int(round(min_duration_min)),
         "min_r2": f"{min_r2:.2f}",
         "min_rise": "" if min_rise is None else min_rise,
+        "max_baseline": "" if max_baseline is None else max_baseline,
         "compute_error": None if segments else compute_error,
         "submitted": submitted,
         "summary": [present_summary(row) for row in summary],

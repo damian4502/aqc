@@ -75,6 +75,14 @@ class FitTests(unittest.TestCase):
         self.assertAlmostEqual(fit["c_base"], 0.0, delta=1.0)
         self.assertAlmostEqual(fit["ach"], 1.5, delta=0.2)
 
+    def test_max_baseline_rejects_a_higher_floor(self):
+        t, values = _exponential(0.8, 420.0, 1500.0, hours=5, step_min=5)
+        self.assertIsNone(fit_exponential_decay(t, values, min_r2=0.9, max_baseline=400))
+        kept = fit_exponential_decay(t, values, min_r2=0.9, max_baseline=450)
+        self.assertIsNotNone(kept)
+        self.assertLessEqual(kept["c_base"], 450)
+        self.assertIsNotNone(fit_exponential_decay(t, values, min_r2=0.9, max_baseline=None))
+
 
 class DetectTests(unittest.TestCase):
     def test_one_decay_after_a_rise(self):
@@ -125,6 +133,16 @@ class DetectTests(unittest.TestCase):
         found = analyze_series(series, label="Noisy", min_r2=0.8)
         self.assertEqual(len(found), 1)
         self.assertAlmostEqual(found[0]["ach"], 0.9, delta=0.2)
+
+    def test_max_baseline_filters_detected_decays(self):
+        series = _rise_then_decay()
+        self.assertEqual(
+            analyze_series(series, label="Office", min_r2=0.9, max_baseline=400),
+            [],
+        )
+        found = analyze_series(series, label="Office", min_r2=0.9, max_baseline=500)
+        self.assertEqual(len(found), 1)
+        self.assertLessEqual(found[0]["c_base"], 500)
 
 
 class SummaryTests(unittest.TestCase):
