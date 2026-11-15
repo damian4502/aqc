@@ -168,6 +168,20 @@
                            class="w-28 bg-slate-900 border border-slate-700 rounded-2xl px-4 py-3 text-sm text-white focus:outline-none focus:border-blue-500">
                 </div>
                 <div>
+                    <label class="block text-xs text-slate-400 mb-1.5">Min baseline</label>
+                    <div class="flex items-center gap-3">
+                        <input type="number" name="min_baseline" id="min_baseline" step="any" placeholder="No limit"
+                               value="{{ min_baseline }}"
+                               class="w-32 bg-slate-900 border border-slate-700 rounded-2xl px-4 py-3 text-sm text-white focus:outline-none focus:border-blue-500">
+                        <label class="flex items-center gap-2 text-xs text-slate-300 whitespace-nowrap cursor-pointer">
+                            <input type="checkbox" name="min_baseline_auto" id="min_baseline_auto" value="1"
+                                   class="accent-blue-500 w-4 h-4"
+                                   {% if min_baseline_auto %}checked{% endif %}>
+                            Lowest in period
+                        </label>
+                    </div>
+                </div>
+                <div>
                     <label class="block text-xs text-slate-400 mb-1.5">Max baseline</label>
                     <input type="number" name="max_baseline" step="any" placeholder="No limit"
                            value="{{ max_baseline }}"
@@ -206,6 +220,7 @@
                 and ends when the value climbs again. Baseline percentile is only used to decide which peaks
                 are tall enough. The fit estimates its own baseline. Leave min. rise empty to set it from the spread of the series.
                 Max baseline, if set, drops a decay whose fitted floor is above that value. Leave it empty for no limit.
+                Min baseline does the same from below. Lowest in period sets that floor from the smallest resampled reading of each parameter in the selected range, across the selected rooms, and ignores the number. A floor slightly under that reading is still kept.
                 Keep gaps avoids inventing samples between readings.
             </p>
         </div>
@@ -232,6 +247,12 @@
         {% endif %}
         {% if period_label %}
         <span class="px-3 py-1.5 rounded-full bg-slate-800 text-slate-300">{{ period_label }}</span>
+        {% endif %}
+        {% if auto_floors %}
+        <span class="px-3 py-1.5 rounded-full bg-slate-800 text-slate-300">
+            Lowest in period:
+            {% for item in auto_floors %}{{ item.name }} {{ item.value }}{% if not forloop.last %}, {% endif %}{% endfor %}
+        </span>
         {% endif %}
     </div>
 
@@ -404,11 +425,22 @@ function applyQuickRange(btn) {
     form.submit();
 }
 
+function syncMinBaselineAuto() {
+    const auto = document.getElementById('min_baseline_auto');
+    const field = document.getElementById('min_baseline');
+    if (!auto || !field) return;
+    field.readOnly = auto.checked;
+    field.classList.toggle('opacity-40', auto.checked);
+}
+
 document.addEventListener('DOMContentLoaded', () => {
     updateCounts();
+    syncMinBaselineAuto();
     document.querySelectorAll('.room-cb, .param-cb').forEach(cb => {
         cb.addEventListener('change', updateCounts);
     });
+    const minBaselineAuto = document.getElementById('min_baseline_auto');
+    if (minBaselineAuto) minBaselineAuto.addEventListener('change', syncMinBaselineAuto);
     document.querySelectorAll('.quick-date-btn').forEach(btn => {
         btn.addEventListener('click', (e) => {
             e.preventDefault();

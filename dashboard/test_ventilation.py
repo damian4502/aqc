@@ -10,6 +10,7 @@ from dashboard.ventilation import (
     analyze_series,
     detect_decay_spans,
     fit_exponential_decay,
+    period_min_floor,
     summarize_decays,
 )
 
@@ -83,6 +84,26 @@ class FitTests(unittest.TestCase):
         self.assertLessEqual(kept["c_base"], 450)
         self.assertIsNotNone(fit_exponential_decay(t, values, min_r2=0.9, max_baseline=None))
 
+    def test_min_baseline_rejects_a_lower_floor(self):
+        t, values = _exponential(0.8, 420.0, 1500.0, hours=5, step_min=5)
+        self.assertIsNone(fit_exponential_decay(t, values, min_r2=0.9, min_baseline=500))
+        kept = fit_exponential_decay(t, values, min_r2=0.9, min_baseline=400)
+        self.assertIsNotNone(kept)
+        self.assertGreaterEqual(kept["c_base"], 400)
+        self.assertIsNotNone(fit_exponential_decay(t, values, min_r2=0.9, min_baseline=None))
+
+    def test_period_floor_keeps_a_baseline_just_under_the_lowest_sample(self):
+        lowest = 459.0
+        floor = period_min_floor(lowest)
+        self.assertLess(floor, lowest)
+        self.assertGreater(floor, lowest - 5)
+        t, values = _exponential(1.2, 420.0, 1400.0, hours=6, step_min=5)
+        fit = fit_exponential_decay(
+            t, values, min_r2=0.9, min_baseline=period_min_floor(float(np.min(values)))
+        )
+        self.assertIsNotNone(fit)
+        self.assertGreaterEqual(fit["c_base"], period_min_floor(float(np.min(values))))
+
 
 class DetectTests(unittest.TestCase):
     def test_one_decay_after_a_rise(self):
@@ -143,6 +164,16 @@ class DetectTests(unittest.TestCase):
         found = analyze_series(series, label="Office", min_r2=0.9, max_baseline=500)
         self.assertEqual(len(found), 1)
         self.assertLessEqual(found[0]["c_base"], 500)
+
+    def test_min_baseline_filters_detected_decays(self):
+        series = _rise_then_decay()
+        self.assertEqual(
+            analyze_series(series, label="Office", min_r2=0.9, min_baseline=500),
+            [],
+        )
+        found = analyze_series(series, label="Office", min_r2=0.9, min_baseline=400)
+        self.assertEqual(len(found), 1)
+        self.assertGreaterEqual(found[0]["c_base"], 400)
 
 
 class SummaryTests(unittest.TestCase):

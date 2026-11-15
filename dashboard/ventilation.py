@@ -29,6 +29,9 @@ DEFAULT_BASELINE_PERCENTILE = 10
 DEFAULT_MIN_R2 = 0.70
 DEFAULT_MIN_ACH = 0.05
 DEFAULT_MAX_ACH = 30.0
+# The fit is forced to stay under every sample, so an automatic floor taken
+# from the lowest reading has to allow a small gap under that reading.
+PERIOD_MIN_SLACK = 0.005
 
 _PALETTE = (
     "#38bdf8",
@@ -149,6 +152,16 @@ def _score_baseline(t_hours: np.ndarray, values: np.ndarray, c_base: float):
     return {"ach": lam, "c_base": float(c_base), "c_start": c0, "r2": float(r2)}
 
 
+def period_min_floor(lowest: float) -> float:
+    """Acceptance floor when min baseline follows the lowest period reading.
+
+    A fitted baseline sits slightly under the samples, so the bound is a
+    fraction below the lowest measured value. Anything further below is rejected.
+    """
+    lowest = float(lowest)
+    return lowest - max(abs(lowest) * PERIOD_MIN_SLACK, 1e-9)
+
+
 def fit_exponential_decay(
     t_hours,
     values,
@@ -157,6 +170,7 @@ def fit_exponential_decay(
     min_ach: float = DEFAULT_MIN_ACH,
     max_ach: float = DEFAULT_MAX_ACH,
     max_baseline: float | None = None,
+    min_baseline: float | None = None,
 ):
     """Fit C_base and λ. Returns None when the curve is not a clean decay.
 
@@ -229,6 +243,8 @@ def fit_exponential_decay(
     if best["r2"] < min_r2 or best["ach"] < min_ach or best["ach"] > max_ach:
         return None
     if max_baseline is not None and math.isfinite(max_baseline) and best["c_base"] > max_baseline:
+        return None
+    if min_baseline is not None and math.isfinite(min_baseline) and best["c_base"] < min_baseline:
         return None
     best["half_life_h"] = math.log(2.0) / best["ach"]
     return best
@@ -414,6 +430,7 @@ def analyze_series(
     min_ach: float = DEFAULT_MIN_ACH,
     max_ach: float = DEFAULT_MAX_ACH,
     max_baseline: float | None = None,
+    min_baseline: float | None = None,
 ) -> list[dict]:
     """Detect decay spans and keep those with an acceptable exponential fit."""
     spans, cleaned = detect_decay_spans(
@@ -429,6 +446,7 @@ def analyze_series(
         "min_ach": min_ach,
         "max_ach": max_ach,
         "max_baseline": max_baseline,
+        "min_baseline": min_baseline,
     }
     found = []
     for start, end in spans:
@@ -775,12 +793,30 @@ def ventilation_view(request):
         except (TypeError, ValueError):
             max_baseline = None
 
+    raw_min_baseline = request.GET.get("min_baseline", None)
+    if raw_min_baseline is None and not has_query_selection:
+        raw_min_baseline = request.session.get("vent_min_baseline")
+    min_baseline = None
+    if raw_min_baseline not in (None, ""):
+        try:
+            parsed_min_baseline = float(raw_min_baseline)
+            if math.isfinite(parsed_min_baseline):
+                min_baseline = parsed_min_baseline
+        except (TypeError, ValueError):
+            min_baseline = None
+    if has_query_selection:
+        min_baseline_auto = request.GET.get("min_baseline_auto") == "1"
+    else:
+        min_baseline_auto = str(request.session.get("vent_min_baseline_auto") or "") == "1"
+
     if has_query_selection:
         request.session["vent_baseline_pct"] = baseline_percentile
         request.session["vent_min_duration"] = min_duration_min
         request.session["vent_min_r2"] = min_r2
         request.session["vent_min_rise"] = min_rise or ""
         request.session["vent_max_baseline"] = "" if max_baseline is None else max_baseline
+        request.session["vent_min_baseline"] = "" if min_baseline is None else min_baseline
+        request.session["vent_min_baseline_auto"] = "1" if min_baseline_auto else ""
 
     start_date, end_date, all_data = resolve_chart_range(request, default_hours=168)
     if start_date and end_date:
@@ -832,6 +868,7 @@ def ventilation_view(request):
     sample_count = 0
     bar_html = None
     fit_html = None
+    auto_floors = []
 
     if should_compute:
         qs = Measurement.objects.filter(pairs_filter(series_pairs)).select_related("sensor__room", "parameter")
@@ -846,16 +883,19 @@ def ventilation_view(request):
                 ))
             )
             frame["timestamp"] = pd.to_datetime(frame["timestamp"])
+            param_names = frame["parameter__name"].tolist()
             labels_for_rows = [
                 make_series_label(room, param, include_room=include_room, include_parameter=include_parameter)
-                for room, param in zip(frame["sensor__room__name"], frame["parameter__name"])
+                for room, param in zip(frame["sensor__room__name"], param_names)
             ]
             frame["parameter"] = labels_for_rows
             unit_by_label = {}
-            for label, unit in zip(labels_for_rows, frame["parameter__unit"].tolist()):
+            param_by_label = {}
+            for label, unit, param_name in zip(labels_for_rows, frame["parameter__unit"].tolist(), param_names):
                 if not isinstance(unit, str):
                     unit = ""
                 unit_by_label.setdefault(label, unit)
+                param_by_label.setdefault(label, param_name)
 
             resampled = resample_measurements(
                 frame, interval_minutes, fill_method, spike_factor=spike_factor
@@ -864,10 +904,28 @@ def ventilation_view(request):
                 compute_error = "No recorded samples in this period."
             else:
                 sample_count = int(len(resampled))
+                period_minimums = {}
+                if min_baseline_auto:
+                    for column in resampled.columns:
+                        label = str(column)
+                        param_name = param_by_label.get(label, label)
+                        low = float(resampled[column].dropna().min()) if resampled[column].notna().any() else None
+                        if low is None or not math.isfinite(low):
+                            continue
+                        previous = period_minimums.get(param_name)
+                        period_minimums[param_name] = low if previous is None else min(previous, low)
+                    auto_floors = [
+                        {"name": name, "value": f"{value:.4g}"}
+                        for name, value in sorted(period_minimums.items())
+                    ]
                 for column in resampled.columns:
                     label = str(column)
                     labels.append(label)
                     series = resampled[column].dropna()
+                    applied_min = min_baseline
+                    if min_baseline_auto:
+                        low = period_minimums.get(param_by_label.get(label, label))
+                        applied_min = None if low is None else period_min_floor(low)
                     segments.extend(
                         analyze_series(
                             series,
@@ -878,6 +936,7 @@ def ventilation_view(request):
                             min_duration_min=min_duration_min,
                             min_r2=min_r2,
                             max_baseline=max_baseline,
+                            min_baseline=applied_min,
                         )
                     )
                 summary = summarize_decays(segments, labels)
@@ -932,6 +991,9 @@ def ventilation_view(request):
         "min_r2": f"{min_r2:.2f}",
         "min_rise": "" if min_rise is None else min_rise,
         "max_baseline": "" if max_baseline is None else max_baseline,
+        "min_baseline": "" if min_baseline is None else min_baseline,
+        "min_baseline_auto": min_baseline_auto,
+        "auto_floors": auto_floors,
         "compute_error": None if segments else compute_error,
         "submitted": submitted,
         "summary": [present_summary(row) for row in summary],
