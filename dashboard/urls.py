@@ -1,6 +1,7 @@
 from django.urls import path
 from .views import *
 from .compare import compare_view
+from .ventilation import ventilation_view
 
 urlpatterns = [
     path('', dashboard_overview, name='dashboard'),
@@ -17,6 +18,7 @@ urlpatterns = [
     path('correlations/', correlations_view, name='correlations'),
     path('compare/', compare_view, name='compare'),
     path('patterns/', patterns_view, name='patterns'),
+    path('ventilation/', ventilation_view, name='ventilation'),
     path('monitor/', monitor, name='monitor'),
     path('differential-pressure/', differential_pressure_view, name='differential_pressure'),
     path('custom/<int:dashboard_id>/', custom_dashboard, name='custom_dashboard'),

@@ -17,7 +17,7 @@
 
     #console .timestamp {
         display: inline-block;
-        min-width: 72px;           /* enakomerna širina za [sensor] */
+        min-width: 72px;           /* even width for [sensor] */
         color: #67e8f9;
         font-weight: 500;
     }
@@ -41,7 +41,7 @@
         background: transparent;
     }
 
-    /* posamezne log vrstice (če jih dodajaš prek JS) */
+    /* individual log lines (added from JS) */
     .console-line {
         margin-bottom: 3px;
         white-space: pre-wrap;
@@ -144,7 +144,7 @@
                             <span class="font-medium">Differential pressure</span>
                         </a>
 
-                        <!-- DROPDOWN GRUPA -->
+                        <!-- Analysis -->
                         <div class="menu-group mt-6">
                             <button onclick="toggleSubmenu(this)" 
                                     class="w-full flex items-center justify-between px-6 py-4 text-slate-200 hover:bg-slate-800 rounded-2xl transition-all sidebar-link">
@@ -167,10 +167,13 @@
                                 <a href="{% url 'patterns' %}" class="flex items-center gap-3 px-6 py-3 text-slate-300 hover:text-white hover:bg-slate-800 rounded-2xl sidebar-link">
                                     Daily & hourly patterns
                                 </a>
+                                <a href="{% url 'ventilation' %}" class="flex items-center gap-3 px-6 py-3 text-slate-300 hover:text-white hover:bg-slate-800 rounded-2xl sidebar-link">
+                                    Ventilation (ACH)
+                                </a>
                             </div>
                         </div>
 
-                        <!-- DROPDOWN GRUPA -->
+                        <!-- Sensors -->
                         <div class="menu-group mt-6">
                             <button onclick="toggleSubmenu(this)" 
                                     class="w-full flex items-center justify-between px-6 py-4 text-slate-200 hover:bg-slate-800 rounded-2xl transition-all sidebar-link">
@@ -234,7 +237,7 @@
 
                     <!-- Filter chips -->
                     <div id="console-filters" class="flex flex-wrap gap-1 px-4 py-2 bg-slate-900/70 border-b border-slate-700 text-[10px] hidden">
-                        <!-- dinamično se polni prek JS -->
+                        <!-- filled dynamically from JS -->
                     </div>
 
                     <!-- Console body -->
@@ -260,7 +263,7 @@
         <!-- Glavna vsebina -->
         <div class="flex-1 flex flex-col overflow-hidden">
             
-            <!-- Zgornja vrstica s gumbom za skrivanje menija -->
+            <!-- Top row with the button that hides the menu -->
             <div class="h-14 border-b border-slate-700 px-6 flex items-center glass flex-shrink-0" data-outdoor_room_id=6 data-outdoor_mqtt_topic="vila/sentjane/klub" id="top-bar">
                 <button onclick="toggleSidebar()" 
                         class="flex items-center justify-center w-10 h-10 text-slate-400 hover:text-white hover:bg-slate-800/70 rounded-2xl transition-all active:scale-95"
@@ -295,7 +298,7 @@ document.addEventListener('visibilitychange', () => {
     
     if (pageVisible) {
         console.log('%c✅ Page visible', 'color: #10b981; font-weight: bold');
-        // Tukaj lahko po želji tudi reconnectaš WebSocket
+        // Optionally reconnect the WebSocket here
 		//connectMQTT();
 		//for (parameter in parameter_map) client.publish("vila/sentjane/asgard/cmd/all", parameter, { qos: 0 });
 		//client.connect();
@@ -325,22 +328,22 @@ document.addEventListener('visibilitychange', () => {
 
         const MAX_CONSOLE_LINES = 100;
         let shouldAutoScroll = true;
-        let activeFilters = new Set();           // prazna = prikaži vse
+        let activeFilters = new Set();           // empty = show all
         let detectedSensors = new Set();   
 		let items_count = 0;
 
-		// vsi senzorji, ki smo jih videli
+		// sensors seen so far
 
         function logToConsole(topic, message) {
             const consoleEl = document.getElementById('console');
             if (!consoleEl) return;
 
             const sensorName = topic.split('/')[4];
-            detectedSensors.add(sensorName);        // dodamo v seznam senzorjev
+            detectedSensors.add(sensorName);        // add to the sensor list
 
             const line = document.createElement('div');
             line.className = `console-line ` + topic.split('/')[5];
-            line.dataset.sensor = sensorName;       // za filtriranje
+            line.dataset.sensor = sensorName;       // used for filtering
 
             const timestamp = new Date().toLocaleTimeString('sl-SI', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
             
@@ -350,15 +353,15 @@ document.addEventListener('visibilitychange', () => {
 
             consoleEl.appendChild(line);
 
-            // omejitev vrstic
+            // cap the number of lines
             while (consoleEl.children.length > MAX_CONSOLE_LINES) {
                 consoleEl.removeChild(consoleEl.firstChild);
             }
 
-            // filtriramo takoj (če je filter aktiven)
+            // apply the filter immediately when one is active
             applyFilters();
 
-            // pametni auto-scroll
+            // smart auto-scroll
             if (shouldAutoScroll) {
                 consoleEl.scrollTop = consoleEl.scrollHeight;
             }
@@ -403,7 +406,7 @@ document.addEventListener('visibilitychange', () => {
             if (!container) return;
 
             let html = `<button onclick="clearFilters()" class="px-3 py-1 bg-slate-800 hover:bg-slate-700 rounded-2xl text-slate-400 text-[10px] flex items-center gap-1">
-                            <i class="fas fa-times"></i> Vsi
+                            <i class="fas fa-times"></i> All
                         </button>`;
 
             detectedSensors.forEach(sensor => {
@@ -418,7 +421,7 @@ document.addEventListener('visibilitychange', () => {
             });
 
             container.innerHTML = html;
-            // prikažemo filter vrstico samo če imamo vsaj en senzor
+            // show the filter row only when at least one sensor is known
             container.classList.toggle('hidden', detectedSensors.size === 0);
         }
 
@@ -490,7 +493,7 @@ document.addEventListener('visibilitychange', () => {
 		} else if (param.includes('tlak') || param.includes('pressure')) {
 			return val.toFixed(0);
         } else {
-            // Ostali parametri (AQI, CO2, tlak, ...) → cela števila brez .0
+            // Other parameters (AQI, CO2, pressure, ...) → whole numbers without .0
             return val % 1 === 0 ? val.toFixed(0) : val.toFixed(1);
         }
     }
@@ -514,7 +517,7 @@ document.addEventListener('visibilitychange', () => {
 
 
 
-    // Obstoječa funkcija za podmenuje
+    // Existing submenu toggle
     function toggleSubmenu(btn) {
         const submenu = btn.nextElementSibling;
         const icon = btn.querySelector('i.fas.fa-chevron-down');
@@ -531,7 +534,7 @@ document.addEventListener('visibilitychange', () => {
         icon.style.transform = submenu.classList.contains('hidden') ? 'rotate(0deg)' : 'rotate(180deg)';
     }
 
-    // === NOVA FUNKCIONALNOST: Skrivanje levega menija ===
+    // Hide and show the left menu
     function toggleSidebar() {
         const sidebar = document.getElementById('sidebar');
         const inner = document.getElementById('sidebar-inner');
@@ -540,7 +543,7 @@ document.addEventListener('visibilitychange', () => {
         const isCollapsed = sidebar.classList.contains('w-0');
         
         if (isCollapsed) {
-            // Prikaži meni
+            // Show the menu
             sidebar.classList.remove('w-0');
             sidebar.classList.add('w-72');
             inner.style.opacity = '1';
@@ -550,7 +553,7 @@ document.addEventListener('visibilitychange', () => {
             
             localStorage.setItem('sidebarHidden', 'false');
         } else {
-            // Skrij meni
+            // Hide the menu
             sidebar.classList.remove('w-72');
             sidebar.classList.add('w-0');
             inner.style.opacity = '0';

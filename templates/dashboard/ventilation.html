@@ -1,0 +1,419 @@
+{% extends "base.html" %}
+
+{% block title %}Ventilation (ACH) - Air Quality Control{% endblock %}
+
+{% block content %}
+<div class="max-w-7xl mx-auto space-y-8">
+
+    <div class="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
+        <div>
+            <h1 class="text-4xl sm:text-5xl font-bold text-white tracking-tighter">Ventilation (ACH)</h1>
+            <p class="text-slate-400 mt-2 max-w-3xl">
+                Finds falling segments automatically, then fits an exponential clearance curve.
+                The decay constant is an air-change estimate when the parameter behaves like a
+                tracer with no indoor source during the drop — typically CO₂ after people leave.
+                On other parameters it is only a relative clearance rate.
+            </p>
+        </div>
+        <div class="text-xs text-slate-500 max-w-xs">
+            Higher ACH means the excess above the fitted baseline falls faster.
+            Compare rooms on the same parameter.
+        </div>
+    </div>
+
+    <form method="get" id="vent-form" class="space-y-6">
+
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div class="glass rounded-3xl p-6">
+                <div class="flex items-center justify-between mb-3">
+                    <label class="text-sm font-medium text-slate-200">
+                        <i class="fas fa-door-open mr-1.5 text-blue-400"></i> Rooms
+                    </label>
+                    <div class="flex gap-2 text-xs">
+                        <button type="button" onclick="toggleAll('room', true)" class="text-blue-400 hover:underline">All</button>
+                        <span class="text-slate-600">|</span>
+                        <button type="button" onclick="toggleAll('room', false)" class="text-slate-400 hover:underline">None</button>
+                    </div>
+                </div>
+                {% if groups %}
+                <div class="flex flex-wrap gap-2 mb-3">
+                    {% for g in groups %}
+                    <button type="button"
+                            onclick="toggleGroup({{ g.id }})"
+                            class="px-3 py-1.5 rounded-xl text-[11px] bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700">
+                        {{ g.name }}
+                    </button>
+                    {% endfor %}
+                </div>
+                {% endif %}
+                <div class="bg-slate-900/70 border border-slate-700 rounded-2xl p-3 max-h-56 overflow-y-auto space-y-1">
+                    {% for room in rooms %}
+                    <label class="flex items-center gap-3 px-2 py-1.5 rounded-xl hover:bg-slate-800/80 cursor-pointer text-sm">
+                        <input type="checkbox" name="room" value="{{ room.id }}"
+                               class="room-cb accent-blue-500 w-4 h-4"
+                               {% if room.id in selected_room_ids %}checked{% endif %}>
+                        <span class="text-slate-200">{{ room.name }}</span>
+                    </label>
+                    {% empty %}
+                    <p class="text-slate-500 text-sm px-2 py-2">No rooms defined.</p>
+                    {% endfor %}
+                </div>
+                <p class="text-[11px] text-slate-500 mt-2"><span id="room-count">0</span> selected</p>
+            </div>
+
+            <div class="glass rounded-3xl p-6">
+                <div class="flex items-center justify-between mb-3">
+                    <label class="text-sm font-medium text-slate-200">
+                        <i class="fas fa-sliders-h mr-1.5 text-cyan-400"></i> Parameters
+                    </label>
+                    <div class="flex gap-2 text-xs">
+                        <button type="button" onclick="toggleAll('parameter', true)" class="text-blue-400 hover:underline">All</button>
+                        <span class="text-slate-600">|</span>
+                        <button type="button" onclick="toggleAll('parameter', false)" class="text-slate-400 hover:underline">None</button>
+                    </div>
+                </div>
+                <div class="bg-slate-900/70 border border-slate-700 rounded-2xl p-3 max-h-56 overflow-y-auto space-y-1">
+                    {% for p in parameters %}
+                    <label class="flex items-center gap-3 px-2 py-1.5 rounded-xl hover:bg-slate-800/80 cursor-pointer text-sm">
+                        <input type="checkbox" name="parameter" value="{{ p.id }}"
+                               class="param-cb accent-cyan-500 w-4 h-4"
+                               {% if p.id in selected_parameter_ids %}checked{% endif %}>
+                        <span class="text-slate-200">{{ p.name }}</span>
+                        {% if p.unit %}<span class="text-slate-500 text-xs">{{ p.unit }}</span>{% endif %}
+                    </label>
+                    {% empty %}
+                    <p class="text-slate-500 text-sm px-2 py-2">No parameters defined.</p>
+                    {% endfor %}
+                </div>
+                <p class="text-[11px] text-slate-500 mt-2">
+                    <span id="param-count">0</span> selected
+                    · <span id="series-preview">0</span> series
+                    <span id="series-warn" class="hidden text-amber-400"> (over the {{ max_series }} limit)</span>
+                </p>
+            </div>
+        </div>
+
+        <div class="glass rounded-3xl p-6">
+            <div class="flex flex-wrap items-end gap-5">
+                <div class="flex gap-4 items-end">
+                    <div>
+                        <label class="block text-sm text-slate-400 mb-1">From</label>
+                        <input type="datetime-local" name="start" id="start_date"
+                               value="{{ start|date:'Y-m-d\TH:i' }}"
+                               class="bg-slate-800 border border-slate-700 rounded-2xl px-4 py-3 text-white focus:outline-none focus:border-blue-500">
+                    </div>
+                    <div>
+                        <label class="block text-sm text-slate-400 mb-1">To</label>
+                        <input type="datetime-local" name="end" id="end_date"
+                               value="{{ end|date:'Y-m-d\TH:i' }}"
+                               class="bg-slate-800 border border-slate-700 rounded-2xl px-4 py-3 text-white focus:outline-none focus:border-blue-500">
+                    </div>
+                </div>
+
+                <div class="min-w-[220px] flex-1">
+                    <label class="block text-xs text-slate-400 mb-1.5">Resampling</label>
+                    <div class="flex gap-3">
+                        <select name="interval" id="interval"
+                                class="flex-1 bg-slate-900 border border-slate-700 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:border-blue-500">
+                            <option value="0"    {% if interval == 0 %}selected{% endif %}>All recorded values</option>
+                            <option value="1"    {% if interval == 1 %}selected{% endif %}>1 min</option>
+                            <option value="5"    {% if interval == 5 %}selected{% endif %}>5 min</option>
+                            <option value="15"   {% if interval == 15 %}selected{% endif %}>15 min</option>
+                            <option value="60"   {% if interval == 60 %}selected{% endif %}>1 hour</option>
+                        </select>
+                        <select name="fill_method" id="fill_method"
+                                class="flex-1 bg-slate-900 border border-slate-700 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:border-blue-500">
+                            <option value="none"        {% if fill_method == 'none' %}selected{% endif %}>Keep gaps</option>
+                            <option value="interpolate" {% if fill_method == 'interpolate' %}selected{% endif %}>Interpolation</option>
+                            <option value="ffill"       {% if fill_method == 'ffill' %}selected{% endif %}>Forward fill</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div>
+                    <label class="block text-xs text-slate-400 mb-1.5">Ignore spikes</label>
+                    <select name="spike_factor"
+                            class="bg-slate-900 border border-slate-700 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:border-blue-500 min-w-[140px]">
+                        <option value="0"   {% if not spike_factor or spike_factor == 0 %}selected{% endif %}>Off</option>
+                        <option value="3.5" {% if spike_factor == 3.5 %}selected{% endif %}>Mild</option>
+                        <option value="2.5" {% if spike_factor == 2.5 %}selected{% endif %}>Medium</option>
+                        <option value="1.5" {% if spike_factor == 1.5 %}selected{% endif %}>Aggressive</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="flex flex-wrap items-end gap-5 mt-5">
+                <div>
+                    <label class="block text-xs text-slate-400 mb-1.5">Baseline percentile</label>
+                    <input type="number" name="baseline_pct" min="1" max="40" step="1"
+                           value="{{ baseline_pct }}"
+                           class="w-28 bg-slate-900 border border-slate-700 rounded-2xl px-4 py-3 text-sm text-white focus:outline-none focus:border-blue-500">
+                </div>
+                <div>
+                    <label class="block text-xs text-slate-400 mb-1.5">Min. rise</label>
+                    <input type="number" name="min_rise" min="0" step="any" placeholder="Auto"
+                           value="{{ min_rise }}"
+                           class="w-28 bg-slate-900 border border-slate-700 rounded-2xl px-4 py-3 text-sm text-white focus:outline-none focus:border-blue-500">
+                </div>
+                <div>
+                    <label class="block text-xs text-slate-400 mb-1.5">Min. duration (min)</label>
+                    <input type="number" name="min_duration" min="10" max="360" step="1"
+                           value="{{ min_duration }}"
+                           class="w-32 bg-slate-900 border border-slate-700 rounded-2xl px-4 py-3 text-sm text-white focus:outline-none focus:border-blue-500">
+                </div>
+                <div>
+                    <label class="block text-xs text-slate-400 mb-1.5">Min. R²</label>
+                    <input type="number" name="min_r2" min="0.3" max="0.99" step="0.01"
+                           value="{{ min_r2 }}"
+                           class="w-28 bg-slate-900 border border-slate-700 rounded-2xl px-4 py-3 text-sm text-white focus:outline-none focus:border-blue-500">
+                </div>
+            </div>
+
+            <div class="flex flex-wrap items-center gap-3 mt-5">
+                <button type="button" data-hours="8"  class="quick-date-btn px-4 py-2.5 text-sm rounded-2xl {% if active_quick == '8h' %}bg-blue-600 text-white{% else %}bg-slate-800 hover:bg-slate-700{% endif %}">8h</button>
+                <button type="button" data-days="1"   class="quick-date-btn px-4 py-2.5 text-sm rounded-2xl {% if active_quick == '24h' %}bg-blue-600 text-white{% else %}bg-slate-800 hover:bg-slate-700{% endif %}">24h</button>
+                <button type="button" data-days="7"   class="quick-date-btn px-4 py-2.5 text-sm rounded-2xl {% if active_quick == '7d' %}bg-blue-600 text-white{% else %}bg-slate-800 hover:bg-slate-700{% endif %}">7d</button>
+                <button type="button" data-days="30"  class="quick-date-btn px-4 py-2.5 text-sm rounded-2xl {% if active_quick == '30d' %}bg-blue-600 text-white{% else %}bg-slate-800 hover:bg-slate-700{% endif %}">30d</button>
+                <button type="button" data-days="0"   class="quick-date-btn px-4 py-2.5 text-sm rounded-2xl {% if active_quick == 'all' %}bg-blue-600 text-white{% else %}bg-slate-800 hover:bg-slate-700{% endif %}">All</button>
+
+                <input type="hidden" name="selection" value="1">
+                <input type="hidden" name="all" id="all_data" value="{% if all_data %}true{% endif %}">
+                <input type="hidden" name="quick" id="quick" value="{{ request.GET.quick|default:'' }}">
+                <input type="hidden" name="quickh" id="quickh" value="{{ request.GET.quickh|default:'' }}">
+
+                <div class="flex-1"></div>
+
+                <button type="submit"
+                        class="bg-blue-600 hover:bg-blue-500 px-6 py-3 rounded-2xl text-sm font-medium transition-all">
+                    Estimate ACH
+                </button>
+                {% if segment_count %}
+                <button type="submit" name="format" value="csv"
+                        class="bg-emerald-600 hover:bg-emerald-500 px-6 py-3 rounded-2xl text-sm font-medium transition-all flex items-center gap-2">
+                    <i class="fas fa-download"></i>
+                    Export CSV
+                </button>
+                {% endif %}
+            </div>
+            <p class="text-[11px] text-slate-500 mt-3">
+                A segment starts at a peak (or at the beginning of the window if the series is already falling)
+                and ends when the value climbs again. Baseline percentile is only used to decide which peaks
+                are tall enough. The fit estimates its own baseline. Leave min. rise empty to set it from the spread of the series.
+                Keep gaps avoids inventing samples between readings.
+            </p>
+        </div>
+    </form>
+
+    {% if compute_error %}
+    <div class="glass rounded-3xl p-8 border-l-4 border-amber-500">
+        <p class="text-amber-200">{{ compute_error }}</p>
+    </div>
+    {% elif not submitted %}
+    <div class="glass rounded-3xl p-16 text-center">
+        <i class="fas fa-wind text-4xl text-slate-600 mb-4"></i>
+        <p class="text-slate-300 text-lg">Select rooms and a parameter, then estimate.</p>
+        <p class="text-slate-500 text-sm mt-2">CO₂ over several days usually gives the most comparable decays.</p>
+    </div>
+    {% endif %}
+
+    {% if summary %}
+    <div class="flex flex-wrap gap-3 text-xs">
+        <span class="px-3 py-1.5 rounded-full bg-slate-800 text-slate-300">{{ segment_count }} decay{{ segment_count|pluralize }}</span>
+        <span class="px-3 py-1.5 rounded-full bg-slate-800 text-slate-300">{{ series_count }} series</span>
+        {% if sample_count %}
+        <span class="px-3 py-1.5 rounded-full bg-slate-800 text-slate-300">{{ sample_count }} {{ sample_label }}</span>
+        {% endif %}
+        {% if period_label %}
+        <span class="px-3 py-1.5 rounded-full bg-slate-800 text-slate-300">{{ period_label }}</span>
+        {% endif %}
+    </div>
+
+    <div class="glass rounded-3xl p-6 overflow-x-auto">
+        <h2 class="text-xl font-semibold text-white mb-4">By series</h2>
+        <table class="w-full text-sm text-left">
+            <thead class="text-slate-400 text-xs uppercase">
+                <tr>
+                    <th class="py-2 pr-4">Series</th>
+                    <th class="py-2 pr-4">Decays</th>
+                    <th class="py-2 pr-4">Median ACH</th>
+                    <th class="py-2 pr-4">Half-life</th>
+                    <th class="py-2 pr-4">Median R²</th>
+                    <th class="py-2">Clearance</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in summary %}
+                <tr class="border-t border-slate-800">
+                    <td class="py-3 pr-4 text-slate-100">{{ row.label }}{% if row.unit %} <span class="text-slate-500 text-xs">{{ row.unit }}</span>{% endif %}</td>
+                    <td class="py-3 pr-4 text-slate-300">{{ row.n }}</td>
+                    <td class="py-3 pr-4 text-slate-100 font-medium">{{ row.ach_display }}</td>
+                    <td class="py-3 pr-4 text-slate-300">{{ row.half_life_display }}</td>
+                    <td class="py-3 pr-4 text-slate-300">{{ row.r2_display }}</td>
+                    <td class="py-3 text-slate-300">{{ row.band }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
+
+    {% if bar_fig %}
+    <div class="glass rounded-3xl p-4 sm:p-8 overflow-x-auto">
+        {{ bar_fig|safe }}
+    </div>
+    {% endif %}
+
+    {% if fit_fig %}
+    <div class="glass rounded-3xl p-4 sm:p-8 overflow-x-auto">
+        <p class="text-xs text-slate-500 mb-3">Highest-R² decay in each series, with the fitted curve.</p>
+        {{ fit_fig|safe }}
+    </div>
+    {% endif %}
+
+    {% if segments %}
+    <div class="glass rounded-3xl p-6 overflow-x-auto">
+        <div class="flex items-center justify-between gap-3 mb-4">
+            <h2 class="text-xl font-semibold text-white">Detected decays</h2>
+            {% if segments_truncated %}
+            <span class="text-xs text-slate-500">Showing the first 300. The CSV has every decay.</span>
+            {% endif %}
+        </div>
+        <table class="w-full text-sm text-left whitespace-nowrap">
+            <thead class="text-slate-400 text-xs uppercase">
+                <tr>
+                    <th class="py-2 pr-4">Series</th>
+                    <th class="py-2 pr-4">Start</th>
+                    <th class="py-2 pr-4">End</th>
+                    <th class="py-2 pr-4">Duration</th>
+                    <th class="py-2 pr-4">Start</th>
+                    <th class="py-2 pr-4">End</th>
+                    <th class="py-2 pr-4">Baseline</th>
+                    <th class="py-2 pr-4">ACH</th>
+                    <th class="py-2 pr-4">Half-life</th>
+                    <th class="py-2 pr-4">R²</th>
+                    <th class="py-2">n</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for seg in segments %}
+                <tr class="border-t border-slate-800">
+                    <td class="py-2.5 pr-4 text-slate-100">{{ seg.label }}</td>
+                    <td class="py-2.5 pr-4 text-slate-400">{{ seg.start_display }}</td>
+                    <td class="py-2.5 pr-4 text-slate-400">{{ seg.end_display }}</td>
+                    <td class="py-2.5 pr-4 text-slate-300">{{ seg.duration_display }}</td>
+                    <td class="py-2.5 pr-4 text-slate-300">{{ seg.c_start_display }}</td>
+                    <td class="py-2.5 pr-4 text-slate-300">{{ seg.c_end_display }}</td>
+                    <td class="py-2.5 pr-4 text-slate-300">{{ seg.c_base_display }}</td>
+                    <td class="py-2.5 pr-4 text-slate-100 font-medium">{{ seg.ach_display }}</td>
+                    <td class="py-2.5 pr-4 text-slate-300">{{ seg.half_life_display }}</td>
+                    <td class="py-2.5 pr-4 text-slate-300">{{ seg.r2_display }}</td>
+                    <td class="py-2.5 text-slate-500">{{ seg.n }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
+</div>
+
+<script>
+const GROUPS = {{ groups_json|safe }};
+const MAX_SERIES = {{ max_series }};
+
+function checkedCount(sel) {
+    return document.querySelectorAll(sel + ':checked').length;
+}
+
+function updateCounts() {
+    const rooms = checkedCount('.room-cb');
+    const params = checkedCount('.param-cb');
+    const series = rooms * params;
+    const roomEl = document.getElementById('room-count');
+    const paramEl = document.getElementById('param-count');
+    const seriesEl = document.getElementById('series-preview');
+    const warnEl = document.getElementById('series-warn');
+    if (roomEl) roomEl.textContent = rooms;
+    if (paramEl) paramEl.textContent = params;
+    if (seriesEl) seriesEl.textContent = series;
+    if (warnEl) warnEl.classList.toggle('hidden', series <= MAX_SERIES);
+}
+
+function toggleAll(kind, on) {
+    const sel = kind === 'room' ? '.room-cb' : '.param-cb';
+    document.querySelectorAll(sel).forEach(cb => { cb.checked = on; });
+    updateCounts();
+}
+
+function toggleGroup(groupId) {
+    const group = GROUPS.find(g => g.id === groupId);
+    if (!group) return;
+    const boxes = group.room_ids
+        .map(id => document.querySelector('.room-cb[value="' + id + '"]'))
+        .filter(Boolean);
+    const allOn = boxes.length > 0 && boxes.every(cb => cb.checked);
+    boxes.forEach(cb => { cb.checked = !allOn; });
+    updateCounts();
+}
+
+function toLocalInput(date) {
+    const pad = n => String(n).padStart(2, '0');
+    return date.getFullYear() + '-' + pad(date.getMonth() + 1) + '-' + pad(date.getDate())
+        + 'T' + pad(date.getHours()) + ':' + pad(date.getMinutes());
+}
+
+function setHidden(id, value) {
+    const el = document.getElementById(id);
+    if (el) el.value = value;
+}
+
+function clearPeriodFlags() {
+    setHidden('all_data', '');
+    setHidden('quick', '');
+    setHidden('quickh', '');
+}
+
+function applyQuickRange(btn) {
+    const form = document.getElementById('vent-form');
+    const startInput = document.getElementById('start_date');
+    const endInput = document.getElementById('end_date');
+    const days = btn.dataset.days;
+    const hours = btn.dataset.hours;
+    const now = new Date();
+    clearPeriodFlags();
+    if (days === '0') {
+        setHidden('all_data', 'true');
+    } else {
+        const start = new Date(now);
+        if (hours) {
+            start.setHours(start.getHours() - parseInt(hours, 10));
+            setHidden('quickh', hours);
+        } else {
+            start.setDate(start.getDate() - parseInt(days || '7', 10));
+            setHidden('quick', days || '7');
+        }
+        startInput.value = toLocalInput(start);
+        endInput.value = toLocalInput(now);
+    }
+    form.submit();
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    updateCounts();
+    document.querySelectorAll('.room-cb, .param-cb').forEach(cb => {
+        cb.addEventListener('change', updateCounts);
+    });
+    document.querySelectorAll('.quick-date-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.preventDefault();
+            applyQuickRange(btn);
+        });
+    });
+    ['start_date', 'end_date'].forEach(id => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.addEventListener('input', clearPeriodFlags);
+        el.addEventListener('change', clearPeriodFlags);
+    });
+});
+</script>
+{% endblock %}
