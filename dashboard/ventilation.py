@@ -17,6 +17,7 @@ with no indoor source during the drop, that rate is the air-change rate.
 from __future__ import annotations
 
 import math
+from urllib.parse import urlencode
 
 import numpy as np
 import pandas as pd
@@ -160,6 +161,29 @@ def period_min_floor(lowest: float) -> float:
     """
     lowest = float(lowest)
     return lowest - max(abs(lowest) * PERIOD_MIN_SLACK, 1e-9)
+
+
+def _chart_minute(ts, *, end: bool) -> str:
+    """Minute timestamp for a datetime-local From/To field.
+
+    The end minute is rounded up when the sample is not already on the minute,
+    so the last point of the decay stays inside the chart window.
+    """
+    stamp = pd.Timestamp(ts)
+    minute = stamp.floor("min")
+    if end and stamp > minute:
+        minute = minute + pd.Timedelta(minutes=1)
+    return minute.strftime("%Y-%m-%dT%H:%M")
+
+
+def parameter_detail_query(start, end) -> str:
+    """Query string that opens parameter detail on one decay's window."""
+    return urlencode({
+        "start": _chart_minute(start, end=False),
+        "end": _chart_minute(end, end=True),
+        "range_mode": "fixed",
+        "view": "trend",
+    })
 
 
 def fit_exponential_decay(
@@ -663,7 +687,7 @@ def build_fit_figure(segments: list[dict], limit: int = 12):
 
 def present_segment(segment: dict) -> dict:
     """Template-friendly copy without the curve arrays."""
-    return {
+    row = {
         "label": segment["label"],
         "unit": segment.get("unit") or "",
         "start_display": pd.Timestamp(segment["start"]).strftime("%d %b %Y %H:%M"),
@@ -677,7 +701,18 @@ def present_segment(segment: dict) -> dict:
         "half_life_display": format_half_life(segment["half_life_h"]),
         "r2_display": f"{segment['r2']:.2f}",
         "band": ach_band(segment["ach"]),
+        "detail_url": "",
     }
+    parameter_id = segment.get("parameter_id")
+    if parameter_id:
+        from django.urls import reverse
+
+        row["detail_url"] = (
+            reverse("parameter_detail", args=[int(parameter_id)])
+            + "?"
+            + parameter_detail_query(segment["start"], segment["end"])
+        )
+    return row
 
 
 def present_summary(row: dict) -> dict:
@@ -879,11 +914,13 @@ def ventilation_view(request):
         else:
             frame = pd.DataFrame(
                 list(qs.order_by("timestamp").values(
-                    "timestamp", "value", "sensor__room__name", "parameter__name", "parameter__unit"
+                    "timestamp", "value", "sensor__room__name", "parameter__name",
+                    "parameter__unit", "parameter_id",
                 ))
             )
             frame["timestamp"] = pd.to_datetime(frame["timestamp"])
             param_names = frame["parameter__name"].tolist()
+            param_ids = frame["parameter_id"].tolist()
             labels_for_rows = [
                 make_series_label(room, param, include_room=include_room, include_parameter=include_parameter)
                 for room, param in zip(frame["sensor__room__name"], param_names)
@@ -891,11 +928,15 @@ def ventilation_view(request):
             frame["parameter"] = labels_for_rows
             unit_by_label = {}
             param_by_label = {}
-            for label, unit, param_name in zip(labels_for_rows, frame["parameter__unit"].tolist(), param_names):
+            param_id_by_label = {}
+            for label, unit, param_name, param_id in zip(
+                labels_for_rows, frame["parameter__unit"].tolist(), param_names, param_ids
+            ):
                 if not isinstance(unit, str):
                     unit = ""
                 unit_by_label.setdefault(label, unit)
                 param_by_label.setdefault(label, param_name)
+                param_id_by_label.setdefault(label, param_id)
 
             resampled = resample_measurements(
                 frame, interval_minutes, fill_method, spike_factor=spike_factor
@@ -926,19 +967,21 @@ def ventilation_view(request):
                     if min_baseline_auto:
                         low = period_minimums.get(param_by_label.get(label, label))
                         applied_min = None if low is None else period_min_floor(low)
-                    segments.extend(
-                        analyze_series(
-                            series,
-                            label=label,
-                            unit=unit_by_label.get(label, ""),
-                            baseline_percentile=baseline_percentile,
-                            min_rise=min_rise,
-                            min_duration_min=min_duration_min,
-                            min_r2=min_r2,
-                            max_baseline=max_baseline,
-                            min_baseline=applied_min,
-                        )
+                    found = analyze_series(
+                        series,
+                        label=label,
+                        unit=unit_by_label.get(label, ""),
+                        baseline_percentile=baseline_percentile,
+                        min_rise=min_rise,
+                        min_duration_min=min_duration_min,
+                        min_r2=min_r2,
+                        max_baseline=max_baseline,
+                        min_baseline=applied_min,
                     )
+                    parameter_id = param_id_by_label.get(label)
+                    for item in found:
+                        item["parameter_id"] = parameter_id
+                    segments.extend(found)
                 summary = summarize_decays(segments, labels)
                 if not segments and compute_error is None:
                     compute_error = (

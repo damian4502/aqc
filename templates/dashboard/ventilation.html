@@ -384,8 +384,15 @@
             </thead>
             <tbody>
                 {% for seg in segments %}
-                <tr class="border-t border-slate-800">
-                    <td class="py-2.5 pr-4 text-slate-100">{{ seg.label }}</td>
+                <tr class="border-t border-slate-800 {% if seg.detail_url %}cursor-pointer hover:bg-slate-800/50{% endif %}"
+                    {% if seg.detail_url %}data-href="{{ seg.detail_url }}"{% endif %}>
+                    <td class="py-2.5 pr-4 text-slate-100">
+                        {% if seg.detail_url %}
+                        <a href="{{ seg.detail_url }}" class="text-sky-300 hover:text-sky-200 hover:underline" title="Open this period on the parameter chart">{{ seg.label }}</a>
+                        {% else %}
+                        {{ seg.label }}
+                        {% endif %}
+                    </td>
                     <td class="py-2.5 pr-4 text-slate-400">{{ seg.start_display }}</td>
                     <td class="py-2.5 pr-4 text-slate-400">{{ seg.end_display }}</td>
                     <td class="py-2.5 pr-4 text-slate-300">{{ seg.duration_display }}</td>
@@ -543,6 +550,12 @@ document.addEventListener('DOMContentLoaded', () => {
     });
     document.addEventListener('keydown', (event) => {
         if (event.key === 'Escape') hideHelp();
+    });
+    document.querySelectorAll('tr[data-href]').forEach(row => {
+        row.addEventListener('click', (event) => {
+            if (event.target.closest('a')) return;
+            window.location = row.dataset.href;
+        });
     });
     document.querySelectorAll('.quick-date-btn').forEach(btn => {
         btn.addEventListener('click', (e) => {

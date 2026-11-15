@@ -11,6 +11,7 @@ from dashboard.ventilation import (
     detect_decay_spans,
     fit_exponential_decay,
     period_min_floor,
+    parameter_detail_query,
     summarize_decays,
 )
 
@@ -103,6 +104,18 @@ class FitTests(unittest.TestCase):
         )
         self.assertIsNotNone(fit)
         self.assertGreaterEqual(fit["c_base"], period_min_floor(float(np.min(values))))
+
+    def test_detail_query_uses_the_decay_window(self):
+        from urllib.parse import parse_qs
+
+        query = parse_qs(parameter_detail_query(
+            pd.Timestamp("2026-11-14 22:06:00"),
+            pd.Timestamp("2026-11-14 23:19:40"),
+        ))
+        self.assertEqual(query["start"], ["2026-11-14T22:06"])
+        self.assertEqual(query["end"], ["2026-11-14T23:20"])
+        self.assertEqual(query["range_mode"], ["fixed"])
+        self.assertEqual(query["view"], ["trend"])
 
 
 class DetectTests(unittest.TestCase):
