@@ -546,10 +546,105 @@ def summarize_decays(segments: list[dict], labels: list[str] | None = None) -> l
     return rows
 
 
+def window_mean(series: pd.Series | None, start, end) -> float | None:
+    """Mean of a time series between two timestamps, inclusive."""
+    if series is None or len(series) == 0:
+        return None
+    index = pd.DatetimeIndex(pd.to_datetime(series.index))
+    if index.tz is not None:
+        index = index.tz_convert("Europe/Ljubljana").tz_localize(None)
+    start = pd.Timestamp(start)
+    end = pd.Timestamp(end)
+    if start.tzinfo is not None:
+        start = start.tz_convert("Europe/Ljubljana").tz_localize(None)
+    if end.tzinfo is not None:
+        end = end.tz_convert("Europe/Ljubljana").tz_localize(None)
+    if end < start:
+        return None
+    values = pd.to_numeric(pd.Series(series.to_numpy()), errors="coerce").to_numpy(dtype=float)
+    mask = (index >= start) & (index <= end) & np.isfinite(values)
+    if not mask.any():
+        return None
+    return float(np.mean(values[mask]))
+
+
+def assign_air_flow_means(
+    segments: list[dict],
+    series_by_room: dict,
+    units: dict | None = None,
+    decimals: dict | None = None,
+) -> None:
+    """Store each decay's mean air-flow reading. Missing data stays None."""
+    units = units or {}
+    decimals = decimals or {}
+    for segment in segments:
+        room_id = segment.get("room_id")
+        series = series_by_room.get(room_id) if room_id is not None else None
+        segment["air_flow_mean"] = window_mean(series, segment["start"], segment["end"]) if series is not None else None
+        segment["air_flow_unit"] = units.get(room_id, "") if room_id is not None else ""
+        if room_id in decimals:
+            segment["air_flow_decimals"] = decimals[room_id]
+
+
+def load_room_air_flow(segments: list[dict]) -> None:
+    """Fill air_flow_mean from Room.air_flow over each decay's own window."""
+    room_ids = {segment.get("room_id") for segment in segments if segment.get("room_id")}
+    if not room_ids:
+        assign_air_flow_means(segments, {})
+        return
+
+    from django.utils import timezone
+    from measurements.models import Measurement
+    from rooms.models import Room
+
+    rooms = Room.objects.filter(id__in=room_ids).select_related("air_flow")
+    air_param = {}
+    units = {}
+    decimals = {}
+    for room in rooms:
+        if not room.air_flow_id:
+            continue
+        air_param[room.id] = room.air_flow_id
+        units[room.id] = room.air_flow.unit or ""
+        decimals[room.id] = int(room.air_flow.format_decimals)
+
+    series_by_room = {}
+    if air_param:
+        starts = [pd.Timestamp(segment["start"]) for segment in segments if segment.get("room_id") in air_param]
+        ends = [pd.Timestamp(segment["end"]) for segment in segments if segment.get("room_id") in air_param]
+        zone = timezone.get_current_timezone()
+        start = timezone.make_aware(min(starts).to_pydatetime(), zone)
+        end = timezone.make_aware(max(ends).to_pydatetime(), zone)
+        rows = Measurement.objects.filter(
+            sensor__room_id__in=list(air_param),
+            parameter_id__in=set(air_param.values()),
+            timestamp__gte=start,
+            timestamp__lte=end,
+        ).values_list("timestamp", "value", "sensor__room_id", "parameter_id")
+        buckets: dict[int, list[tuple]] = {room_id: [] for room_id in air_param}
+        for timestamp, value, room_id, parameter_id in rows:
+            if air_param.get(room_id) != parameter_id:
+                continue
+            buckets[room_id].append((timestamp, value))
+        for room_id, pairs in buckets.items():
+            if not pairs:
+                continue
+            index = pd.to_datetime([pair[0] for pair in pairs])
+            if getattr(index, "tz", None) is not None:
+                index = index.tz_convert("Europe/Ljubljana").tz_localize(None)
+            series = pd.Series(
+                np.asarray([pair[1] for pair in pairs], dtype=float),
+                index=index,
+            ).sort_index()
+            series_by_room[room_id] = series.groupby(level=0).mean()
+    assign_air_flow_means(segments, series_by_room, units, decimals)
+
+
 def segments_frame(segments: list[dict]) -> pd.DataFrame:
     """Flat table for CSV export. Curve samples are omitted."""
     rows = []
     for segment in segments:
+        mean = segment.get("air_flow_mean")
         rows.append(
             {
                 "series": segment["label"],
@@ -564,6 +659,8 @@ def segments_frame(segments: list[dict]) -> pd.DataFrame:
                 "ach": round(float(segment["ach"]), 4),
                 "half_life_h": round(float(segment["half_life_h"]), 4),
                 "r2": round(float(segment["r2"]), 4),
+                "air_flow_mean": None if mean is None else round(float(mean), 4),
+                "air_flow_unit": segment.get("air_flow_unit") or "",
             }
         )
     return pd.DataFrame(rows)
@@ -702,7 +799,19 @@ def present_segment(segment: dict) -> dict:
         "r2_display": f"{segment['r2']:.2f}",
         "band": ach_band(segment["ach"]),
         "detail_url": "",
+        "air_flow_display": "—",
+        "air_flow_unit": "",
     }
+    mean = segment.get("air_flow_mean")
+    if mean is not None and math.isfinite(float(mean)):
+        decimals = segment.get("air_flow_decimals", 1)
+        try:
+            decimals = int(decimals)
+        except (TypeError, ValueError):
+            decimals = 1
+        decimals = min(4, max(0, decimals))
+        row["air_flow_display"] = f"{float(mean):.{decimals}f}"
+        row["air_flow_unit"] = segment.get("air_flow_unit") or ""
     parameter_id = segment.get("parameter_id")
     if parameter_id:
         from django.urls import reverse
@@ -914,13 +1023,14 @@ def ventilation_view(request):
         else:
             frame = pd.DataFrame(
                 list(qs.order_by("timestamp").values(
-                    "timestamp", "value", "sensor__room__name", "parameter__name",
-                    "parameter__unit", "parameter_id",
+                    "timestamp", "value", "sensor__room__name", "sensor__room_id",
+                    "parameter__name", "parameter__unit", "parameter_id",
                 ))
             )
             frame["timestamp"] = pd.to_datetime(frame["timestamp"])
             param_names = frame["parameter__name"].tolist()
             param_ids = frame["parameter_id"].tolist()
+            room_ids_col = frame["sensor__room_id"].tolist()
             labels_for_rows = [
                 make_series_label(room, param, include_room=include_room, include_parameter=include_parameter)
                 for room, param in zip(frame["sensor__room__name"], param_names)
@@ -929,14 +1039,20 @@ def ventilation_view(request):
             unit_by_label = {}
             param_by_label = {}
             param_id_by_label = {}
-            for label, unit, param_name, param_id in zip(
-                labels_for_rows, frame["parameter__unit"].tolist(), param_names, param_ids
+            room_id_by_label = {}
+            for label, unit, param_name, param_id, room_id in zip(
+                labels_for_rows,
+                frame["parameter__unit"].tolist(),
+                param_names,
+                param_ids,
+                room_ids_col,
             ):
                 if not isinstance(unit, str):
                     unit = ""
                 unit_by_label.setdefault(label, unit)
                 param_by_label.setdefault(label, param_name)
                 param_id_by_label.setdefault(label, param_id)
+                room_id_by_label.setdefault(label, room_id)
 
             resampled = resample_measurements(
                 frame, interval_minutes, fill_method, spike_factor=spike_factor
@@ -979,10 +1095,14 @@ def ventilation_view(request):
                         min_baseline=applied_min,
                     )
                     parameter_id = param_id_by_label.get(label)
+                    room_id = room_id_by_label.get(label)
                     for item in found:
                         item["parameter_id"] = parameter_id
+                        item["room_id"] = room_id
                     segments.extend(found)
                 summary = summarize_decays(segments, labels)
+                if segments:
+                    load_room_air_flow(segments)
                 if not segments and compute_error is None:
                     compute_error = (
                         "No decay segments matched the filters. "

@@ -13,6 +13,8 @@ from dashboard.ventilation import (
     period_min_floor,
     parameter_detail_query,
     summarize_decays,
+    window_mean,
+    assign_air_flow_means,
 )
 
 
@@ -116,6 +118,42 @@ class FitTests(unittest.TestCase):
         self.assertEqual(query["end"], ["2026-11-14T23:20"])
         self.assertEqual(query["range_mode"], ["fixed"])
         self.assertEqual(query["view"], ["trend"])
+
+
+class AirFlowTests(unittest.TestCase):
+    def test_window_mean_is_inclusive(self):
+        index = pd.date_range("2026-11-14 10:00", periods=3, freq="5min")
+        series = pd.Series([100.0, 200.0, 300.0], index=index)
+        self.assertAlmostEqual(window_mean(series, index[0], index[2]), 200.0)
+        self.assertAlmostEqual(window_mean(series, index[1], index[2]), 250.0)
+        self.assertIsNone(window_mean(series, "2026-11-14 12:00", "2026-11-14 13:00"))
+        self.assertIsNone(window_mean(None, index[0], index[2]))
+
+    def test_assign_uses_the_room_series_for_that_decay(self):
+        index = pd.date_range("2026-11-14 22:00", periods=6, freq="10min")
+        flow = pd.Series([10, 20, 30, 40, 80, 100], index=index, dtype=float)
+        segments = [
+            {
+                "room_id": 7,
+                "start": index[1],
+                "end": index[3],
+                "label": "CO2",
+                "unit": "ppm",
+                "duration_h": 0.5,
+                "n": 3,
+                "c_start": 1,
+                "c_end": 1,
+                "c_base": 1,
+                "ach": 1,
+                "half_life_h": 1,
+                "r2": 1,
+            },
+            {"room_id": 8, "start": index[0], "end": index[1], "label": "Other"},
+        ]
+        assign_air_flow_means(segments, {7: flow}, units={7: "m³/h"}, decimals={7: 0})
+        self.assertAlmostEqual(segments[0]["air_flow_mean"], 30.0)
+        self.assertEqual(segments[0]["air_flow_unit"], "m³/h")
+        self.assertIsNone(segments[1]["air_flow_mean"])
 
 
 class DetectTests(unittest.TestCase):

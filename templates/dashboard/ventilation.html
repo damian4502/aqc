@@ -377,6 +377,7 @@
                     <th class="py-2 pr-4">End</th>
                     <th class="py-2 pr-4">Baseline</th>
                     <th class="py-2 pr-4">ACH</th>
+                    <th class="py-2 pr-4" title="Mean of the room's air-flow parameter during this decay">Air flow</th>
                     <th class="py-2 pr-4">Half-life</th>
                     <th class="py-2 pr-4">R²</th>
                     <th class="py-2">n</th>
@@ -400,6 +401,7 @@
                     <td class="py-2.5 pr-4 text-slate-300">{{ seg.c_end_display }}</td>
                     <td class="py-2.5 pr-4 text-slate-300">{{ seg.c_base_display }}</td>
                     <td class="py-2.5 pr-4 text-slate-100 font-medium">{{ seg.ach_display }}</td>
+                    <td class="py-2.5 pr-4 text-slate-300">{{ seg.air_flow_display }}{% if seg.air_flow_display != "—" and seg.air_flow_unit %} <span class="text-slate-500 text-xs">{{ seg.air_flow_unit }}</span>{% endif %}</td>
                     <td class="py-2.5 pr-4 text-slate-300">{{ seg.half_life_display }}</td>
                     <td class="py-2.5 pr-4 text-slate-300">{{ seg.r2_display }}</td>
                     <td class="py-2.5 text-slate-500">{{ seg.n }}</td>
