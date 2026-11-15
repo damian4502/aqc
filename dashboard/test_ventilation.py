@@ -51,6 +51,30 @@ class FitTests(unittest.TestCase):
         # A straight climb is not a decay anchored at the first sample.
         self.assertIsNone(fit_exponential_decay(t, np.linspace(400, 900, 40)))
 
+    def test_short_linear_drop_does_not_invent_a_negative_baseline(self):
+        # 527 → 454 in 73 min is almost a straight line. The asymptote is
+        # not identified; the old search reported C_base ≈ -426.
+        t = np.linspace(0, 73 / 60.0, 74)
+        values = np.linspace(527.3, 454.0, 74)
+        self.assertIsNone(fit_exponential_decay(t, values))
+
+    def test_curved_drop_keeps_a_positive_baseline(self):
+        t = np.linspace(0, 73 / 60.0, 74)
+        values = 440.0 + (527.3 - 440.0) * np.exp(-1.4 * t)
+        fit = fit_exponential_decay(t, values, min_r2=0.9)
+        self.assertIsNotNone(fit)
+        self.assertGreaterEqual(fit["c_base"], 0.0)
+        self.assertAlmostEqual(fit["c_base"], 440.0, delta=20)
+        self.assertAlmostEqual(fit["ach"], 1.4, delta=0.15)
+
+    def test_zero_asymptote_stays_non_negative(self):
+        t, values = _exponential(1.5, 0.0, 40.0, hours=3, step_min=5)
+        fit = fit_exponential_decay(t, values, min_r2=0.9)
+        self.assertIsNotNone(fit)
+        self.assertGreaterEqual(fit["c_base"], 0.0)
+        self.assertAlmostEqual(fit["c_base"], 0.0, delta=1.0)
+        self.assertAlmostEqual(fit["ach"], 1.5, delta=0.2)
+
 
 class DetectTests(unittest.TestCase):
     def test_one_decay_after_a_rise(self):

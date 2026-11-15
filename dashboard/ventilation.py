@@ -161,6 +161,11 @@ def fit_exponential_decay(
 
     C_base is searched below the lowest sample. The guess with the best
     coefficient of determination on the original scale is kept.
+
+    A short, nearly linear drop does not identify the asymptote: C_base and
+    λ trade off, and the search then sits on its lower rail (which can be
+    largely negative). Those fits are rejected. A positive series also
+    cannot return a negative baseline.
     """
     t_hours = np.asarray(t_hours, dtype=float)
     values = np.asarray(values, dtype=float)
@@ -180,6 +185,10 @@ def fit_exponential_decay(
     span = c0 - vmin
     upper = vmin - max(span * 0.002, 1e-9)
     lower = vmin - span * 12.0
+    # Keep a true baseline of 0 inside the window, but do not search
+    # hundreds of units below a series that never went negative.
+    if vmin > 0:
+        lower = max(lower, -max(span * 0.05, 1e-6))
     if not math.isfinite(lower) or not math.isfinite(upper) or lower >= upper:
         return None
 
@@ -203,6 +212,18 @@ def fit_exponential_decay(
                 continue
             if scored["r2"] > best["r2"]:
                 best = scored
+
+    # On the lower rail the data still want a lower asymptote, so λ is not
+    # identified. This is the negative-baseline case.
+    if best["c_base"] <= lower + step * 0.75:
+        return None
+    if vmin >= 0 and best["c_base"] < 0:
+        if best["c_base"] < -max(span * 0.05, 1e-6):
+            return None
+        rescored = _score_baseline(t_hours, values, 0.0)
+        if rescored is None:
+            return None
+        best = rescored
 
     if best["r2"] < min_r2 or best["ach"] < min_ach or best["ach"] > max_ach:
         return None
