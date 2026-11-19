@@ -1,6 +1,6 @@
 """Named selection templates stored in the Django session.
 
-A template keeps rooms, parameters, individual series, and differences.
+A template keeps rooms, parameters, individual series, and calculations.
 It does not store the time range.
 """
 

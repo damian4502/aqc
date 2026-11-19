@@ -4,9 +4,12 @@ from django.test import SimpleTestCase
 import pandas as pd
 
 from dashboard.series_selection import (
+    combine_aligned,
     encode_diff_entry,
     encode_series_entry,
     expand_series_pairs,
+    formula_label,
+    formula_unit,
     parse_difference_entries,
     parse_difference_specs,
     parse_series_entries,
@@ -45,13 +48,16 @@ class SeriesSelectionTests(SimpleTestCase):
         )
         self.assertEqual(
             entries,
-            [(((1, 5), (2, 5)), False), (((1, 5), (3, 5)), True)],
+            [
+                ((((1, 5), (2, 5)), ("-",)), False),
+                ((((1, 5), (3, 5)), ("-",)), True),
+            ],
         )
         self.assertEqual(
             parse_difference_specs(["1:5|2:5|0", "1:5|3:5"], {1, 2, 3}, {5}),
-            [((1, 5), (3, 5))],
+            [(((1, 5), (3, 5)), ("-",))],
         )
-        self.assertEqual(encode_diff_entry(((1, 5), (2, 5)), False), "1:5|2:5|0")
+        self.assertEqual(encode_diff_entry((((1, 5), (2, 5)), ("-",)), False), "1:5|2:5|0")
 
     def test_expand_unions_cross_product_with_extra_pairs(self):
         pairs = expand_series_pairs(
@@ -71,7 +77,30 @@ class SeriesSelectionTests(SimpleTestCase):
             valid_room_ids={1, 2, 3},
             valid_parameter_ids={5},
         )
-        self.assertEqual(specs, [((1, 5), (2, 5))])
+        self.assertEqual(specs, [(((1, 5), (2, 5)), ("-",))])
+
+    def test_formula_ops_round_trip_and_reject_bad_tokens(self):
+        rooms = {1, 2, 3}
+        params = {5}
+        raw = "1:5|add|2:5|mul|3:5"
+        specs = parse_difference_specs(
+            [raw, "1:5|sub|2:5", "1:5|nope|2:5", raw],
+            rooms,
+            params,
+        )
+        self.assertEqual(
+            specs,
+            [
+                (((1, 5), (2, 5), (3, 5)), ("+", "*")),
+                (((1, 5), (2, 5)), ("-",)),
+            ],
+        )
+        self.assertEqual(encode_diff_entry(specs[0]), raw)
+        self.assertEqual(encode_diff_entry(specs[1]), "1:5|2:5")
+        self.assertEqual(formula_label(["A", "B", "C"], ("-", "*")), "A − B × C")
+        self.assertEqual(formula_unit(["°C", "°C", "°C"], ("-",)), "°C")
+        self.assertEqual(formula_unit(["°C", "Pa"], ("-",)), "Δ")
+        self.assertEqual(formula_unit(["°C", "°C"], ("/",)), "")
 
     def test_subtract_shared_index(self):
         index = pd.date_range("2026-01-01", periods=3, freq="h")
@@ -91,3 +120,21 @@ class SeriesSelectionTests(SimpleTestCase):
         far = subtract_aligned(left, right, tolerance="30s")
         self.assertTrue(far.dropna().empty)
 
+    def test_combine_left_to_right_and_divide_by_zero(self):
+        index = pd.date_range("2026-01-01", periods=2, freq="h")
+        first = pd.Series([10.0, 8.0], index=index)
+        second = pd.Series([2.0, 0.0], index=index)
+        third = pd.Series([3.0, 4.0], index=index)
+        values = combine_aligned([first, second, third], ("/", "+"))
+        self.assertEqual(float(values.iloc[0]), 8.0)
+        self.assertTrue(pd.isna(values.iloc[1]))
+
+    def test_combine_three_terms_nearest(self):
+        base = pd.Series([10.0], index=pd.to_datetime(["2026-01-01 00:00"]))
+        second = pd.Series([4.0], index=pd.to_datetime(["2026-01-01 00:01"]))
+        third = pd.Series([2.0], index=pd.to_datetime(["2026-01-01 00:01:30"]))
+        values = combine_aligned([base, second, third], ("-", "/"), tolerance="2min")
+        self.assertEqual(len(values), 1)
+        self.assertEqual(float(values.iloc[0]), 3.0)
+        far = combine_aligned([base, second, third], ("-", "/"), tolerance="30s")
+        self.assertTrue(far.dropna().empty)

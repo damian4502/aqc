@@ -3,10 +3,25 @@
 Checked rooms and parameters still expand to every combination. Extra
 ``series=room_id:parameter_id`` values add only that pair, so a few
 specific traces do not require the full cross product. A trailing ``:0``
-(or ``|0`` on a difference) keeps the chip but leaves it out of the chart.
+(or ``|0`` on a calculation) keeps the chip but leaves it out of the chart.
 """
 
 from __future__ import annotations
+
+# Query tokens stay URL-safe. ``+`` would be decoded as a space.
+OP_TOKENS = {
+    "add": "+",
+    "sub": "-",
+    "mul": "*",
+    "div": "/",
+    "+": "+",
+    "-": "-",
+    "*": "*",
+    "/": "/",
+}
+TOKEN_FOR_OP = {"+": "add", "-": "sub", "*": "mul", "/": "div"}
+OP_SYMBOLS = {"+": "+", "-": "−", "*": "×", "/": "÷"}
+MAX_FORMULA_TERMS = 8
 
 
 def parse_id_list(values) -> list[int]:
@@ -64,30 +79,70 @@ def encode_series_entry(pair, enabled=True) -> str:
     return key if enabled else f"{key}:0"
 
 
-def parse_difference_specs(values, valid_room_ids, valid_parameter_ids) -> list[tuple[tuple[int, int], tuple[int, int]]]:
-    """Parse ``room:parameter|room:parameter`` tokens into unique A − B specs."""
+def _one_pair(token, valid_room_ids, valid_parameter_ids):
+    found = parse_series_entries([token], valid_room_ids, valid_parameter_ids)
+    if len(found) != 1:
+        return None
+    return found[0][0]
+
+
+def parse_difference_specs(values, valid_room_ids, valid_parameter_ids):
+    """Enabled calculations as ``(terms, ops)``.
+
+    ``terms`` is a tuple of ``(room, parameter)`` pairs. ``ops`` has one of
+    ``+``, ``-``, ``*``, ``/`` between each pair. A saved ``a|b`` token is
+    still A − B.
+    """
     return [spec for spec, enabled in parse_difference_entries(values, valid_room_ids, valid_parameter_ids) if enabled]
 
 
 def parse_difference_entries(values, valid_room_ids, valid_parameter_ids):
-    """Parse ``a|b`` or ``a|b|0`` into ``(spec, enabled)`` entries."""
+    """Parse calculation tokens into ``(spec, enabled)`` entries.
+
+    ``spec`` is ``(terms, ops)`` with at least two terms. ``a|b`` and
+    ``a|b|0`` stay valid as a disabled or enabled subtraction. Newer tokens
+    look like ``a|add|b|mul|c``.
+    """
     entries = []
     seen = set()
     for raw in values or []:
         text = str(raw).strip()
+        if not text:
+            continue
         enabled = True
         if text.endswith("|0"):
             enabled = False
             text = text[:-2]
-        halves = text.split("|")
-        if len(halves) != 2:
+        tokens = [part for part in text.split("|") if part != ""]
+        if len(tokens) < 2:
             continue
-        left_pairs = parse_series_entries([halves[0]], valid_room_ids, valid_parameter_ids)
-        right_pairs = parse_series_entries([halves[1]], valid_room_ids, valid_parameter_ids)
-        if len(left_pairs) != 1 or len(right_pairs) != 1:
-            continue
-        spec = (left_pairs[0][0], right_pairs[0][0])
-        if spec[0] == spec[1] or spec in seen:
+        if len(tokens) == 2:
+            left = _one_pair(tokens[0], valid_room_ids, valid_parameter_ids)
+            right = _one_pair(tokens[1], valid_room_ids, valid_parameter_ids)
+            if left is None or right is None or left == right:
+                continue
+            spec = ((left, right), ("-",))
+        else:
+            if len(tokens) % 2 == 0:
+                continue
+            first = _one_pair(tokens[0], valid_room_ids, valid_parameter_ids)
+            if first is None:
+                continue
+            terms = [first]
+            ops = []
+            valid = True
+            for index in range(1, len(tokens), 2):
+                op = OP_TOKENS.get(tokens[index])
+                pair = _one_pair(tokens[index + 1], valid_room_ids, valid_parameter_ids)
+                if op is None or pair is None:
+                    valid = False
+                    break
+                ops.append(op)
+                terms.append(pair)
+            if not valid or len(terms) < 2 or len(terms) > MAX_FORMULA_TERMS:
+                continue
+            spec = (tuple(terms), tuple(ops))
+        if spec in seen:
             continue
         seen.add(spec)
         entries.append((spec, enabled))
@@ -95,8 +150,40 @@ def parse_difference_entries(values, valid_room_ids, valid_parameter_ids):
 
 
 def encode_diff_entry(spec, enabled=True) -> str:
-    key = f"{pair_key(*spec[0])}|{pair_key(*spec[1])}"
+    """Encode ``(terms, ops)``. Two-term subtraction keeps the old ``a|b`` form."""
+    terms, ops = spec
+    if len(terms) == 2 and tuple(ops) == ("-",):
+        key = f"{pair_key(*terms[0])}|{pair_key(*terms[1])}"
+    else:
+        parts = [pair_key(*terms[0])]
+        for op, term in zip(ops, terms[1:]):
+            parts.append(TOKEN_FOR_OP[op])
+            parts.append(pair_key(*term))
+        key = "|".join(parts)
     return key if enabled else f"{key}|0"
+
+
+def formula_label(names, ops) -> str:
+    """Human label, evaluated-order, e.g. ``A − B × C``."""
+    parts = [str(names[0])]
+    for op, name in zip(ops, list(names)[1:]):
+        parts.append(OP_SYMBOLS.get(op, op))
+        parts.append(str(name))
+    return " ".join(parts)
+
+
+def formula_unit(units, ops) -> str:
+    """Unit for a left-to-right formula.
+
+    Addition and subtraction keep the shared unit, or ``Δ`` when the units
+    differ. Multiplication and division are left unlabeled.
+    """
+    units = [str(unit or "") for unit in units]
+    if not ops or any(op not in "+-" for op in ops):
+        return ""
+    if len(set(units)) == 1 and units[0]:
+        return units[0]
+    return "Δ"
 
 
 def expand_series_pairs(room_ids, parameter_ids, explicit_pairs) -> list[tuple[int, int]]:
@@ -118,43 +205,82 @@ def expand_series_pairs(room_ids, parameter_ids, explicit_pairs) -> list[tuple[i
     return pairs
 
 
-def subtract_aligned(left, right, tolerance=None):
-    """Return left − right.
-
-    ``tolerance`` (pandas offset, e.g. ``"2min"``) matches the nearest sample
-    when the two series do not share timestamps. Without it, subtraction uses
-    the shared index and is NaN wherever either side is missing.
-    """
+def _apply_op(left, right, op):
     import pandas as pd
 
-    left = pd.to_numeric(left, errors="coerce")
-    right = pd.to_numeric(right, errors="coerce")
-    if not tolerance:
-        return left - right
-
-    left = left.dropna().sort_index()
-    right = right.dropna().sort_index()
-    if left.empty or right.empty:
+    if op == "+":
+        result = left + right
+    elif op == "-":
+        result = left - right
+    elif op == "*":
+        result = left * right
+    elif op == "/":
+        result = left / right
+    else:
         return pd.Series(dtype="float64")
+    numeric = pd.to_numeric(result, errors="coerce")
+    return numeric.where(numeric.abs() < float("inf"))
 
-    left_frame = left.rename("left").reset_index()
-    right_frame = right.rename("right").reset_index()
-    left_frame.columns = ["timestamp", "left"]
-    right_frame.columns = ["timestamp", "right"]
+
+def _nearest_values(base, other, tolerance):
+    """Values of ``other`` on ``base`` timestamps, NaN outside ``tolerance``."""
+    import pandas as pd
+
+    other = pd.to_numeric(other, errors="coerce").dropna().sort_index()
+    if len(base) == 0 or other.empty:
+        return pd.Series(dtype="float64", index=base.index)
+    base_frame = pd.DataFrame({"timestamp": pd.DatetimeIndex(base.index)})
+    other_frame = other.rename("value").reset_index()
+    other_frame.columns = ["timestamp", "value"]
     merged = pd.merge_asof(
-        left_frame.sort_values("timestamp"),
-        right_frame.sort_values("timestamp"),
+        base_frame.sort_values("timestamp"),
+        other_frame.sort_values("timestamp"),
         on="timestamp",
         direction="nearest",
         tolerance=pd.Timedelta(tolerance),
     )
-    merged = merged.dropna(subset=["left", "right"])
-    if merged.empty:
+    return pd.Series(merged["value"].to_numpy(), index=pd.DatetimeIndex(base.index))
+
+
+def combine_aligned(parts, ops, tolerance=None):
+    """Combine series left to right with ``+``, ``-``, ``*``, ``/``.
+
+    Without ``tolerance``, operations use the shared index and are NaN
+    wherever an operand is missing. With a pandas offset such as ``"2min"``,
+    later series are matched to the nearest sample of the first series.
+    Division by zero becomes NaN.
+    """
+    import pandas as pd
+
+    parts = [pd.to_numeric(part, errors="coerce") for part in parts]
+    ops = tuple(ops)
+    if len(parts) < 2 or len(ops) != len(parts) - 1:
         return pd.Series(dtype="float64")
-    return pd.Series(
-        merged["left"].to_numpy() - merged["right"].to_numpy(),
-        index=pd.DatetimeIndex(merged["timestamp"]),
-    )
+    if not tolerance:
+        result = parts[0]
+        for op, other in zip(ops, parts[1:]):
+            result = _apply_op(result, other, op)
+        return result
+
+    base = parts[0].dropna().sort_index()
+    if base.empty:
+        return pd.Series(dtype="float64")
+    aligned = [base]
+    for other in parts[1:]:
+        aligned.append(_nearest_values(base, other, tolerance))
+    frame = pd.concat(aligned, axis=1)
+    frame = frame.dropna()
+    if frame.empty:
+        return pd.Series(dtype="float64")
+    result = frame.iloc[:, 0]
+    for index, op in enumerate(ops):
+        result = _apply_op(result, frame.iloc[:, index + 1], op)
+    return result.dropna()
+
+
+def subtract_aligned(left, right, tolerance=None):
+    """Return left − right. See ``combine_aligned`` for alignment rules."""
+    return combine_aligned([left, right], ("-",), tolerance=tolerance)
 
 
 def pairs_filter(pairs):

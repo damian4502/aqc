@@ -143,10 +143,10 @@
         <div class="glass rounded-3xl p-6">
             <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-3">
                 <label class="text-sm font-medium text-slate-200">
-                    <i class="fas fa-minus-circle mr-1.5 text-amber-400"></i> Difference
+                    <i class="fas fa-calculator mr-1.5 text-amber-400"></i> Calculation
                 </label>
                 <div class="flex items-center gap-3">
-                    <span class="text-[11px] text-slate-500">Plots A − B as a dashed series on the same graph</span>
+                    <span class="text-[11px] text-slate-500">Plots a formula as a dashed series</span>
                     <div class="flex items-center gap-2 text-xs">
                         <button type="button" onclick="setSeriesEnabled('diff-series', true)" class="text-amber-400 hover:underline">All</button>
                         <span class="text-slate-600">|</span>
@@ -156,49 +156,65 @@
                     </div>
                 </div>
             </div>
-            <div class="flex flex-wrap gap-3 items-end">
-                <select id="diff-room-a" class="bg-slate-900 border border-slate-700 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:border-blue-500 min-w-[160px]">
-                    <option value="">Room A</option>
-                    {% for room in rooms %}
-                    <option value="{{ room.id }}">{{ room.name }}</option>
-                    {% endfor %}
-                </select>
-                <select id="diff-param-a" class="bg-slate-900 border border-slate-700 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:border-blue-500 min-w-[160px]">
-                    <option value="">Parameter A</option>
-                    {% for p in parameters %}
-                    <option value="{{ p.id }}">{{ p.name }}{% if p.unit %} ({{ p.unit }}){% endif %}</option>
-                    {% endfor %}
-                </select>
-                <span class="text-slate-500 text-sm pb-3">minus</span>
-                <select id="diff-room-b" class="bg-slate-900 border border-slate-700 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:border-blue-500 min-w-[160px]">
-                    <option value="">Room B</option>
-                    {% for room in rooms %}
-                    <option value="{{ room.id }}">{{ room.name }}</option>
-                    {% endfor %}
-                </select>
-                <select id="diff-param-b" class="bg-slate-900 border border-slate-700 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:border-blue-500 min-w-[160px]">
-                    <option value="">Parameter B</option>
-                    {% for p in parameters %}
-                    <option value="{{ p.id }}">{{ p.name }}{% if p.unit %} ({{ p.unit }}){% endif %}</option>
-                    {% endfor %}
-                </select>
+            <div id="formula-builder" class="space-y-2">
+                <div class="formula-row flex flex-wrap gap-3 items-end">
+                    <select class="formula-room bg-slate-900 border border-slate-700 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:border-blue-500 min-w-[160px]" aria-label="Room">
+                        <option value="">Room</option>
+                        {% for room in rooms %}
+                        <option value="{{ room.id }}">{{ room.name }}</option>
+                        {% endfor %}
+                    </select>
+                    <select class="formula-param bg-slate-900 border border-slate-700 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:border-blue-500 min-w-[160px]" aria-label="Parameter">
+                        <option value="">Parameter</option>
+                        {% for p in parameters %}
+                        <option value="{{ p.id }}">{{ p.name }}{% if p.unit %} ({{ p.unit }}){% endif %}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="formula-row flex flex-wrap gap-3 items-end">
+                    <select class="formula-op bg-slate-900 border border-slate-700 rounded-2xl px-3 py-3 text-sm focus:outline-none focus:border-amber-500" aria-label="Operation">
+                        <option value="-">−</option>
+                        <option value="+">+</option>
+                        <option value="*">×</option>
+                        <option value="/">÷</option>
+                    </select>
+                    <select class="formula-room bg-slate-900 border border-slate-700 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:border-blue-500 min-w-[160px]" aria-label="Room">
+                        <option value="">Room</option>
+                        {% for room in rooms %}
+                        <option value="{{ room.id }}">{{ room.name }}</option>
+                        {% endfor %}
+                    </select>
+                    <select class="formula-param bg-slate-900 border border-slate-700 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:border-blue-500 min-w-[160px]" aria-label="Parameter">
+                        <option value="">Parameter</option>
+                        {% for p in parameters %}
+                        <option value="{{ p.id }}">{{ p.name }}{% if p.unit %} ({{ p.unit }}){% endif %}</option>
+                        {% endfor %}
+                    </select>
+                    <button type="button" class="formula-remove text-slate-400 hover:text-rose-400 px-2 py-3 leading-none" aria-label="Remove series">&times;</button>
+                </div>
+            </div>
+            <div class="flex flex-wrap gap-3 mt-3">
+                <button type="button" id="add-formula-term"
+                        class="bg-slate-800 hover:bg-slate-700 disabled:opacity-40 px-5 py-3 rounded-2xl text-sm font-medium transition-all">
+                    Add series
+                </button>
                 <button type="button" id="add-diff-btn"
                         class="bg-amber-600 hover:bg-amber-500 px-5 py-3 rounded-2xl text-sm font-medium transition-all">
-                    Add difference
+                    Add calculation
                 </button>
             </div>
             <div id="diff-series" class="flex flex-wrap gap-2 mt-4">
                 {% for diff in selected_diffs %}
                 <span class="series-chip inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-800 border border-slate-700 text-sm text-slate-200{% if not diff.enabled %} opacity-50{% endif %}" data-key="{{ diff.key }}">
-                    <input type="checkbox" class="series-enabled accent-amber-500 w-4 h-4 shrink-0" {% if diff.enabled %}checked{% endif %} title="Include this difference" aria-label="Include this difference">
+                    <input type="checkbox" class="series-enabled accent-amber-500 w-4 h-4 shrink-0" {% if diff.enabled %}checked{% endif %} title="Include this calculation" aria-label="Include this calculation">
                     <input type="hidden" name="diff" data-base="{{ diff.key }}" value="{% if diff.enabled %}{{ diff.key }}{% else %}{{ diff.key }}|0{% endif %}">
-                    <button type="button" class="series-load text-left text-sky-300 hover:text-sky-200 underline decoration-sky-400/40 hover:decoration-sky-300" title="Load into the dropdowns">{{ diff.left }} − {{ diff.right }}</button>
+                    <button type="button" class="series-load text-left text-sky-300 hover:text-sky-200 underline decoration-sky-400/40 hover:decoration-sky-300" title="Load into the builder">{{ diff.label }}</button>
                     <button type="button" class="series-remove text-slate-400 hover:text-rose-400 leading-none" aria-label="Remove">&times;</button>
                 </span>
                 {% endfor %}
             </div>
-            <p id="diff-empty" class="text-[11px] text-slate-500 mt-3 {% if selected_diffs %}hidden{% endif %}">No differences yet. The two pairs do not have to be checked above. Click a difference to load it into the dropdowns. Uncheck to leave it off the next chart.</p>
-            <p class="text-[11px] text-slate-500 mt-1">Raw values show the actual difference. Min-max and Z-score scale its shape like the other series. With all recorded values, samples are paired within 2 minutes.</p>
+            <p id="diff-empty" class="text-[11px] text-slate-500 mt-3 {% if selected_diffs %}hidden{% endif %}">No calculations yet. The series do not have to be checked above. Click a calculation to load it into the builder. Uncheck to leave it off the next chart.</p>
+            <p class="text-[11px] text-slate-500 mt-1">Add, subtract, multiply, or divide up to 8 series. The formula runs left to right, so A − B × C is (A − B) × C. Raw values show the actual result. Min-max and Z-score scale its shape like the other series. With all recorded values, later series are paired to the first within 2 minutes.</p>
         </div>
 
         <div class="glass rounded-3xl p-6">
@@ -206,7 +222,7 @@
                 <label class="text-sm font-medium text-slate-200">
                     <i class="fas fa-bookmark mr-1.5 text-violet-400"></i> Templates
                 </label>
-                <span class="text-[11px] text-slate-500">Saves rooms, parameters, and series. Not the time range.</span>
+                <span class="text-[11px] text-slate-500">Saves rooms, parameters, series, and calculations. Not the time range.</span>
             </div>
             <div class="flex flex-wrap gap-3 items-end">
                 <input type="text" name="template_name" id="template-name" maxlength="60" placeholder="Template name"
@@ -486,7 +502,7 @@ function seriesLoadButton(text) {
     const label = document.createElement('button');
     label.type = 'button';
     label.className = 'series-load text-left text-sky-300 hover:text-sky-200 underline decoration-sky-400/40 hover:decoration-sky-300';
-    label.title = 'Load into the dropdowns';
+    label.title = 'Load this selection';
     label.textContent = text;
     return label;
 }
@@ -499,15 +515,8 @@ function setSelectValue(id, value) {
 function loadChipIntoDropdowns(chip) {
     const key = chip.dataset.key || '';
     if (chip.closest('#diff-series')) {
-        const halves = key.split('|');
-        if (halves.length !== 2) return;
-        const left = halves[0].split(':');
-        const right = halves[1].split(':');
-        if (left.length !== 2 || right.length !== 2) return;
-        setSelectValue('diff-room-a', left[0]);
-        setSelectValue('diff-param-a', left[1]);
-        setSelectValue('diff-room-b', right[0]);
-        setSelectValue('diff-param-b', right[1]);
+        const formula = parseFormulaKey(key);
+        if (formula) setFormulaBuilder(formula);
         return;
     }
     const parts = key.split(':');
@@ -585,20 +594,149 @@ function addExplicitSeries() {
 }
 
 function addDifference() {
-    const roomA = document.getElementById('diff-room-a');
-    const paramA = document.getElementById('diff-param-a');
-    const roomB = document.getElementById('diff-room-b');
-    const paramB = document.getElementById('diff-param-b');
-    if (!roomA || !paramA || !roomB || !paramB) return;
-    if (!roomA.value || !paramA.value || !roomB.value || !paramB.value) return;
-    const key = roomA.value + ':' + paramA.value + '|' + roomB.value + ':' + paramB.value;
-    if (roomA.value === roomB.value && paramA.value === paramB.value) return;
+    const formula = readFormula();
+    if (!formula) return;
+    const key = formulaKey(formula);
+    if (formula.terms.length === 2 && formula.ops[0] === '-'
+        && formula.terms[0].room === formula.terms[1].room
+        && formula.terms[0].param === formula.terms[1].param) return;
     if (document.querySelector('#diff-series .series-chip[data-key="' + key + '"]')) return;
-    const left = roomA.selectedOptions[0].textContent.trim() + ' · ' + paramA.selectedOptions[0].textContent.trim();
-    const right = roomB.selectedOptions[0].textContent.trim() + ' · ' + paramB.selectedOptions[0].textContent.trim();
     const wrap = document.getElementById('diff-series');
-    wrap.appendChild(buildSeriesChip('diff', key, left + ' − ' + right));
+    wrap.appendChild(buildSeriesChip('diff', key, formulaText(formula)));
     updateCounts();
+}
+
+const FORMULA_MAX_TERMS = 8;
+const OP_TOKEN = { '+': 'add', '-': 'sub', '*': 'mul', '/': 'div' };
+const OP_SYMBOL = { '+': '+', '-': '−', '*': '×', '/': '÷' };
+const TOKEN_OP = { add: '+', sub: '-', mul: '*', div: '/', '+': '+', '-': '-', '*': '*', '/': '/' };
+let formulaRowTemplate = null;
+
+function formulaRows() {
+    return [...document.querySelectorAll('#formula-builder .formula-row')];
+}
+
+function ensureFormulaTemplate() {
+    if (formulaRowTemplate) return;
+    const rows = formulaRows();
+    if (!rows.length) return;
+    formulaRowTemplate = rows[rows.length - 1].cloneNode(true);
+}
+
+function updateFormulaControls() {
+    const rows = formulaRows();
+    rows.forEach((row) => {
+        const btn = row.querySelector('.formula-remove');
+        if (btn) btn.classList.toggle('invisible', rows.length <= 2);
+    });
+    const add = document.getElementById('add-formula-term');
+    if (add) add.disabled = rows.length >= FORMULA_MAX_TERMS;
+}
+
+function addFormulaTerm(op) {
+    ensureFormulaTemplate();
+    if (!formulaRowTemplate || formulaRows().length >= FORMULA_MAX_TERMS) return null;
+    const row = formulaRowTemplate.cloneNode(true);
+    const opSel = row.querySelector('.formula-op');
+    if (opSel) opSel.value = op || '+';
+    row.querySelectorAll('select.formula-room, select.formula-param').forEach((el) => { el.value = ''; });
+    document.getElementById('formula-builder').appendChild(row);
+    updateFormulaControls();
+    return row;
+}
+
+function readFormula() {
+    const rows = formulaRows();
+    const terms = [];
+    const ops = [];
+    for (let i = 0; i < rows.length; i++) {
+        const room = rows[i].querySelector('.formula-room');
+        const param = rows[i].querySelector('.formula-param');
+        if (!room || !param || !room.value || !param.value) return null;
+        if (i > 0) {
+            const op = rows[i].querySelector('.formula-op');
+            ops.push((op && op.value) || '-');
+        }
+        terms.push({
+            room: room.value,
+            param: param.value,
+            roomName: room.selectedOptions[0].textContent.trim(),
+            paramName: param.selectedOptions[0].textContent.trim(),
+        });
+    }
+    if (terms.length < 2) return null;
+    return { terms, ops };
+}
+
+function formulaKey(formula) {
+    if (formula.terms.length === 2 && formula.ops[0] === '-') {
+        const a = formula.terms[0];
+        const b = formula.terms[1];
+        return a.room + ':' + a.param + '|' + b.room + ':' + b.param;
+    }
+    const parts = [formula.terms[0].room + ':' + formula.terms[0].param];
+    formula.ops.forEach((op, i) => {
+        const term = formula.terms[i + 1];
+        parts.push(OP_TOKEN[op] || 'sub');
+        parts.push(term.room + ':' + term.param);
+    });
+    return parts.join('|');
+}
+
+function formulaText(formula) {
+    let text = formula.terms[0].roomName + ' · ' + formula.terms[0].paramName;
+    formula.ops.forEach((op, i) => {
+        const term = formula.terms[i + 1];
+        text += ' ' + (OP_SYMBOL[op] || '−') + ' ' + term.roomName + ' · ' + term.paramName;
+    });
+    return text;
+}
+
+function parseFormulaKey(key) {
+    const tokens = String(key || '').split('|').filter(Boolean);
+    if (tokens.length === 2) {
+        const left = tokens[0].split(':');
+        const right = tokens[1].split(':');
+        if (left.length !== 2 || right.length !== 2) return null;
+        return {
+            terms: [{ room: left[0], param: left[1] }, { room: right[0], param: right[1] }],
+            ops: ['-'],
+        };
+    }
+    if (tokens.length < 3 || tokens.length % 2 === 0) return null;
+    const first = tokens[0].split(':');
+    if (first.length !== 2) return null;
+    const terms = [{ room: first[0], param: first[1] }];
+    const ops = [];
+    for (let i = 1; i < tokens.length; i += 2) {
+        const op = TOKEN_OP[tokens[i]];
+        const pair = (tokens[i + 1] || '').split(':');
+        if (!op || pair.length !== 2) return null;
+        ops.push(op);
+        terms.push({ room: pair[0], param: pair[1] });
+    }
+    return { terms, ops };
+}
+
+function setFormulaBuilder(formula) {
+    ensureFormulaTemplate();
+    const builder = document.getElementById('formula-builder');
+    if (!builder) return;
+    while (formulaRows().length > 1) formulaRows().pop().remove();
+    formula.terms.forEach((term, i) => {
+        if (i > 0 && !formulaRows()[i]) addFormulaTerm(formula.ops[i - 1]);
+        const row = formulaRows()[i];
+        if (!row) return;
+        const room = row.querySelector('.formula-room');
+        const param = row.querySelector('.formula-param');
+        if (room) room.value = term.room;
+        if (param) param.value = term.param;
+        if (i > 0) {
+            const op = row.querySelector('.formula-op');
+            if (op) op.value = formula.ops[i - 1];
+        }
+    });
+    updateFormulaControls();
 }
 
 function toggleAll(kind, on) {
@@ -779,6 +917,20 @@ document.addEventListener('DOMContentLoaded', () => {
     bindSeriesList(document.getElementById('diff-series'));
     const addDiffBtn = document.getElementById('add-diff-btn');
     if (addDiffBtn) addDiffBtn.addEventListener('click', addDifference);
+    const addTermBtn = document.getElementById('add-formula-term');
+    if (addTermBtn) addTermBtn.addEventListener('click', () => addFormulaTerm('+'));
+    const formulaBuilder = document.getElementById('formula-builder');
+    if (formulaBuilder) {
+        formulaBuilder.addEventListener('click', (e) => {
+            const removeBtn = e.target.closest('.formula-remove');
+            if (!removeBtn || formulaRows().length <= 2) return;
+            const row = removeBtn.closest('.formula-row');
+            if (row) row.remove();
+            updateFormulaControls();
+        });
+    }
+    ensureFormulaTemplate();
+    updateFormulaControls();
     const clearSeriesBtn = document.getElementById('clear-series-btn');
     if (clearSeriesBtn) clearSeriesBtn.addEventListener('click', () => clearChipList('explicit-series'));
     const clearDiffBtn = document.getElementById('clear-diff-btn');

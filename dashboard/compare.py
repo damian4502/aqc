@@ -398,15 +398,17 @@ def compare_view(request):
         url_without,
     )
     from dashboard.series_selection import (
+        combine_aligned,
         encode_diff_entry,
         encode_series_entry,
         expand_series_pairs,
+        formula_label,
+        formula_unit,
         pair_key,
         pairs_filter,
         parse_difference_entries,
         parse_id_list,
         parse_series_entries,
-        subtract_aligned,
     )
     from dashboard.views import (
         apply_dark_theme,
@@ -591,20 +593,18 @@ def compare_view(request):
 
     selected_diffs = [
         {
-            "key": f"{pair_key(*left)}|{pair_key(*right)}",
-            "left": _pair_title(left),
-            "right": _pair_title(right),
+            "key": encode_diff_entry((terms, ops), True),
+            "label": formula_label([_pair_title(pair) for pair in terms], ops),
             "enabled": enabled,
         }
-        for (left, right), enabled in diff_entries
+        for (terms, ops), enabled in diff_entries
     ]
     query_pairs = list(series_pairs)
     seen_pairs = set(series_pairs)
     event_room_ids = set(pair_room_ids)
-    for left, right in difference_specs:
-        event_room_ids.add(left[0])
-        event_room_ids.add(right[0])
-        for pair in (left, right):
+    for terms, _ops in difference_specs:
+        for pair in terms:
+            event_room_ids.add(pair[0])
             if pair not in seen_pairs:
                 seen_pairs.add(pair)
                 query_pairs.append(pair)
@@ -627,7 +627,7 @@ def compare_view(request):
         )
         should_compute = False
     elif has_query_selection and n_series_selected == 0 and (series_entries or diff_entries):
-        compute_error = "Every individual series is disabled."
+        compute_error = "Every series and calculation is disabled."
     elif has_query_selection and n_series_selected == 0:
         compute_error = "Select at least one room and one parameter, or add an individual series."
 
@@ -698,35 +698,37 @@ def compare_view(request):
 
                 raw_mode = is_raw_interval(interval_minutes)
                 missing_diffs = []
-                for left, right in difference_specs:
-                    left_key = pair_key(*left)
-                    right_key = pair_key(*right)
-                    left_name = f"{room_by_id[left[0]].name} · {parameter_by_id[left[1]].name}"
-                    right_name = f"{room_by_id[right[0]].name} · {parameter_by_id[right[1]].name}"
-                    label = f"Δ {left_name} − {right_name}"
-                    if left_key not in keyed.columns or right_key not in keyed.columns:
+                for terms, ops in difference_specs:
+                    keys = [pair_key(*pair) for pair in terms]
+                    names = [
+                        f"{room_by_id[pair[0]].name} · {parameter_by_id[pair[1]].name}"
+                        for pair in terms
+                    ]
+                    label = formula_label(names, ops)
+                    if any(key not in keyed.columns for key in keys):
                         missing_diffs.append(label)
                         continue
-                    series = subtract_aligned(
-                        keyed[left_key],
-                        keyed[right_key],
+                    series = combine_aligned(
+                        [keyed[key] for key in keys],
+                        ops,
                         tolerance="2min" if raw_mode else None,
                     )
                     if series.dropna().empty:
                         missing_diffs.append(label)
                         continue
                     if label in used_labels:
-                        label = f"{label} ({left_key}|{right_key})"
+                        label = f"{label} ({encode_diff_entry((terms, ops))})"
                     used_labels.add(label)
                     display = display.reindex(display.index.union(series.index))
                     display[label] = series.reindex(display.index)
-                    unit_left = parameter_by_id[left[1]].unit or ""
-                    unit_right = parameter_by_id[right[1]].unit or ""
-                    units_by_label[label] = unit_left if unit_left and unit_left == unit_right else "Δ"
+                    units_by_label[label] = formula_unit(
+                        [parameter_by_id[pair[1]].unit or "" for pair in terms],
+                        ops,
+                    )
                     dash_labels.add(label)
-                    diff_mean = series.dropna().mean()
-                    if pd.notna(diff_mean):
-                        sample_average_by_label[label] = float(diff_mean)
+                    formula_mean = series.dropna().mean()
+                    if pd.notna(formula_mean):
+                        sample_average_by_label[label] = float(formula_mean)
 
                 display = display.dropna(axis=1, how="all")
                 if missing_diffs:
