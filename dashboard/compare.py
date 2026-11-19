@@ -402,8 +402,10 @@ def compare_view(request):
         encode_diff_entry,
         encode_series_entry,
         expand_series_pairs,
+        format_constant,
         formula_label,
         formula_unit,
+        is_constant,
         pair_key,
         pairs_filter,
         parse_difference_entries,
@@ -591,10 +593,25 @@ def compare_view(request):
         unit = f" ({param.unit})" if param.unit else ""
         return f"{room.name} · {param.name}{unit}"
 
+    def _term_title(term):
+        if is_constant(term):
+            return format_constant(term[1])
+        return _pair_title(term)
+
+    def _term_name(term):
+        if is_constant(term):
+            return format_constant(term[1])
+        return f"{room_by_id[term[0]].name} · {parameter_by_id[term[1]].name}"
+
+    def _term_unit(term):
+        if is_constant(term):
+            return None
+        return parameter_by_id[term[1]].unit or ""
+
     selected_diffs = [
         {
             "key": encode_diff_entry((terms, ops), True),
-            "label": formula_label([_pair_title(pair) for pair in terms], ops),
+            "label": formula_label([_term_title(term) for term in terms], ops),
             "enabled": enabled,
         }
         for (terms, ops), enabled in diff_entries
@@ -603,11 +620,13 @@ def compare_view(request):
     seen_pairs = set(series_pairs)
     event_room_ids = set(pair_room_ids)
     for terms, _ops in difference_specs:
-        for pair in terms:
-            event_room_ids.add(pair[0])
-            if pair not in seen_pairs:
-                seen_pairs.add(pair)
-                query_pairs.append(pair)
+        for term in terms:
+            if is_constant(term):
+                continue
+            event_room_ids.add(term[0])
+            if term not in seen_pairs:
+                seen_pairs.add(term)
+                query_pairs.append(term)
 
     compute_error = None
     unit_notice = None
@@ -699,17 +718,21 @@ def compare_view(request):
                 raw_mode = is_raw_interval(interval_minutes)
                 missing_diffs = []
                 for terms, ops in difference_specs:
-                    keys = [pair_key(*pair) for pair in terms]
-                    names = [
-                        f"{room_by_id[pair[0]].name} · {parameter_by_id[pair[1]].name}"
-                        for pair in terms
-                    ]
-                    label = formula_label(names, ops)
-                    if any(key not in keyed.columns for key in keys):
+                    series_terms = [term for term in terms if not is_constant(term)]
+                    label = formula_label([_term_name(term) for term in terms], ops)
+                    if not series_terms or any(
+                        pair_key(*term) not in keyed.columns for term in series_terms
+                    ):
                         missing_diffs.append(label)
                         continue
+                    parts = []
+                    for term in terms:
+                        if is_constant(term):
+                            parts.append(float(term[1]))
+                        else:
+                            parts.append(keyed[pair_key(*term)])
                     series = combine_aligned(
-                        [keyed[key] for key in keys],
+                        parts,
                         ops,
                         tolerance="2min" if raw_mode else None,
                     )
@@ -722,7 +745,7 @@ def compare_view(request):
                     display = display.reindex(display.index.union(series.index))
                     display[label] = series.reindex(display.index)
                     units_by_label[label] = formula_unit(
-                        [parameter_by_id[pair[1]].unit or "" for pair in terms],
+                        [_term_unit(term) for term in terms],
                         ops,
                     )
                     dash_labels.add(label)

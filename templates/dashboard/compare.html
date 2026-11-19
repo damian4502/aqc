@@ -158,6 +158,10 @@
             </div>
             <div id="formula-builder" class="space-y-2">
                 <div class="formula-row flex flex-wrap gap-3 items-end">
+                    <select class="formula-kind bg-slate-900 border border-slate-700 rounded-2xl px-3 py-3 text-sm focus:outline-none focus:border-amber-500" aria-label="Term type">
+                        <option value="series">Series</option>
+                        <option value="number">Number</option>
+                    </select>
                     <select class="formula-room bg-slate-900 border border-slate-700 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:border-blue-500 min-w-[160px]" aria-label="Room">
                         <option value="">Room</option>
                         {% for room in rooms %}
@@ -170,6 +174,7 @@
                         <option value="{{ p.id }}">{{ p.name }}{% if p.unit %} ({{ p.unit }}){% endif %}</option>
                         {% endfor %}
                     </select>
+                    <input type="text" inputmode="decimal" class="formula-number hidden bg-slate-900 border border-slate-700 rounded-2xl px-4 py-3 text-sm text-white focus:outline-none focus:border-amber-500 w-36" placeholder="e.g. 21.5" aria-label="Constant value">
                 </div>
                 <div class="formula-row flex flex-wrap gap-3 items-end">
                     <select class="formula-op bg-slate-900 border border-slate-700 rounded-2xl px-3 py-3 text-sm focus:outline-none focus:border-amber-500" aria-label="Operation">
@@ -178,6 +183,10 @@
                         <option value="*">×</option>
                         <option value="/">÷</option>
                     </select>
+                    <select class="formula-kind bg-slate-900 border border-slate-700 rounded-2xl px-3 py-3 text-sm focus:outline-none focus:border-amber-500" aria-label="Term type">
+                        <option value="series">Series</option>
+                        <option value="number">Number</option>
+                    </select>
                     <select class="formula-room bg-slate-900 border border-slate-700 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:border-blue-500 min-w-[160px]" aria-label="Room">
                         <option value="">Room</option>
                         {% for room in rooms %}
@@ -190,13 +199,14 @@
                         <option value="{{ p.id }}">{{ p.name }}{% if p.unit %} ({{ p.unit }}){% endif %}</option>
                         {% endfor %}
                     </select>
-                    <button type="button" class="formula-remove text-slate-400 hover:text-rose-400 px-2 py-3 leading-none" aria-label="Remove series">&times;</button>
+                    <input type="text" inputmode="decimal" class="formula-number hidden bg-slate-900 border border-slate-700 rounded-2xl px-4 py-3 text-sm text-white focus:outline-none focus:border-amber-500 w-36" placeholder="e.g. 21.5" aria-label="Constant value">
+                    <button type="button" class="formula-remove text-slate-400 hover:text-rose-400 px-2 py-3 leading-none" aria-label="Remove term">&times;</button>
                 </div>
             </div>
             <div class="flex flex-wrap gap-3 mt-3">
                 <button type="button" id="add-formula-term"
                         class="bg-slate-800 hover:bg-slate-700 disabled:opacity-40 px-5 py-3 rounded-2xl text-sm font-medium transition-all">
-                    Add series
+                    Add term
                 </button>
                 <button type="button" id="add-diff-btn"
                         class="bg-amber-600 hover:bg-amber-500 px-5 py-3 rounded-2xl text-sm font-medium transition-all">
@@ -214,7 +224,7 @@
                 {% endfor %}
             </div>
             <p id="diff-empty" class="text-[11px] text-slate-500 mt-3 {% if selected_diffs %}hidden{% endif %}">No calculations yet. The series do not have to be checked above. Click a calculation to load it into the builder. Uncheck to leave it off the next chart.</p>
-            <p class="text-[11px] text-slate-500 mt-1">Add, subtract, multiply, or divide up to 8 series. The formula runs left to right, so A − B × C is (A − B) × C. Raw values show the actual result. Min-max and Z-score scale its shape like the other series. With all recorded values, later series are paired to the first within 2 minutes.</p>
+            <p class="text-[11px] text-slate-500 mt-1">Add, subtract, multiply, or divide up to 8 terms. Each term is a series or a constant number, for example temperature − 21.5. The formula runs left to right, so A − B × C is (A − B) × C. Raw values show the actual result. Min-max and Z-score scale its shape like the other series. With all recorded values, later series are paired to the first within 2 minutes.</p>
         </div>
 
         <div class="glass rounded-3xl p-6">
@@ -598,6 +608,7 @@ function addDifference() {
     if (!formula) return;
     const key = formulaKey(formula);
     if (formula.terms.length === 2 && formula.ops[0] === '-'
+        && formula.terms[0].kind !== 'number' && formula.terms[1].kind !== 'number'
         && formula.terms[0].room === formula.terms[1].room
         && formula.terms[0].param === formula.terms[1].param) return;
     if (document.querySelector('#diff-series .series-chip[data-key="' + key + '"]')) return;
@@ -639,10 +650,60 @@ function addFormulaTerm(op) {
     const row = formulaRowTemplate.cloneNode(true);
     const opSel = row.querySelector('.formula-op');
     if (opSel) opSel.value = op || '+';
+    const kind = row.querySelector('.formula-kind');
+    if (kind) kind.value = 'series';
+    const number = row.querySelector('.formula-number');
+    if (number) number.value = '';
     row.querySelectorAll('select.formula-room, select.formula-param').forEach((el) => { el.value = ''; });
+    syncFormulaKind(row);
     document.getElementById('formula-builder').appendChild(row);
     updateFormulaControls();
     return row;
+}
+
+function parseConstant(raw) {
+    const text = String(raw || '').trim().replace(',', '.');
+    if (!/^[+-]?(?:\d+\.?\d*|\.\d+)(?:e[+-]?\d+)?$/i.test(text)) return null;
+    const value = Number(text);
+    return Number.isFinite(value) ? value : null;
+}
+
+function formatConstant(value) {
+    if (!Number.isFinite(value)) return '';
+    if (Object.is(value, -0) || value === 0) return '0';
+    const rounded = Math.round(value);
+    if (Math.abs(value - rounded) < 1e-9 && Math.abs(value) < 1e15) return String(rounded);
+    const text = Number(value.toPrecision(12)).toString();
+    return text;
+}
+
+function syncFormulaKind(row) {
+    if (!row) return;
+    const isNumber = row.querySelector('.formula-kind')?.value === 'number';
+    row.querySelectorAll('.formula-room, .formula-param').forEach((el) => {
+        el.classList.toggle('hidden', isNumber);
+    });
+    const number = row.querySelector('.formula-number');
+    if (number) number.classList.toggle('hidden', !isNumber);
+}
+
+function readTerm(row) {
+    const isNumber = row.querySelector('.formula-kind')?.value === 'number';
+    if (isNumber) {
+        const value = parseConstant(row.querySelector('.formula-number')?.value);
+        if (value === null) return null;
+        return { kind: 'number', value, label: formatConstant(value) };
+    }
+    const room = row.querySelector('.formula-room');
+    const param = row.querySelector('.formula-param');
+    if (!room || !param || !room.value || !param.value) return null;
+    return {
+        kind: 'series',
+        room: room.value,
+        param: param.value,
+        roomName: room.selectedOptions[0].textContent.trim(),
+        paramName: param.selectedOptions[0].textContent.trim(),
+    };
 }
 
 function readFormula() {
@@ -650,72 +711,96 @@ function readFormula() {
     const terms = [];
     const ops = [];
     for (let i = 0; i < rows.length; i++) {
-        const room = rows[i].querySelector('.formula-room');
-        const param = rows[i].querySelector('.formula-param');
-        if (!room || !param || !room.value || !param.value) return null;
+        const term = readTerm(rows[i]);
+        if (!term) return null;
         if (i > 0) {
             const op = rows[i].querySelector('.formula-op');
             ops.push((op && op.value) || '-');
         }
-        terms.push({
-            room: room.value,
-            param: param.value,
-            roomName: room.selectedOptions[0].textContent.trim(),
-            paramName: param.selectedOptions[0].textContent.trim(),
-        });
+        terms.push(term);
     }
-    if (terms.length < 2) return null;
+    if (terms.length < 2 || !terms.some((term) => term.kind === 'series')) return null;
     return { terms, ops };
 }
 
+function termToken(term) {
+    if (term.kind === 'number') return 'n:' + formatConstant(term.value);
+    return term.room + ':' + term.param;
+}
+
+function termText(term) {
+    if (term.kind === 'number') return term.label || formatConstant(term.value);
+    return term.roomName + ' · ' + term.paramName;
+}
+
 function formulaKey(formula) {
-    if (formula.terms.length === 2 && formula.ops[0] === '-') {
-        const a = formula.terms[0];
-        const b = formula.terms[1];
-        return a.room + ':' + a.param + '|' + b.room + ':' + b.param;
+    const seriesOnly = formula.terms.every((term) => term.kind !== 'number');
+    if (formula.terms.length === 2 && formula.ops[0] === '-' && seriesOnly) {
+        return termToken(formula.terms[0]) + '|' + termToken(formula.terms[1]);
     }
-    const parts = [formula.terms[0].room + ':' + formula.terms[0].param];
+    const parts = [termToken(formula.terms[0])];
     formula.ops.forEach((op, i) => {
-        const term = formula.terms[i + 1];
         parts.push(OP_TOKEN[op] || 'sub');
-        parts.push(term.room + ':' + term.param);
+        parts.push(termToken(formula.terms[i + 1]));
     });
     return parts.join('|');
 }
 
 function formulaText(formula) {
-    let text = formula.terms[0].roomName + ' · ' + formula.terms[0].paramName;
+    let text = termText(formula.terms[0]);
     formula.ops.forEach((op, i) => {
-        const term = formula.terms[i + 1];
-        text += ' ' + (OP_SYMBOL[op] || '−') + ' ' + term.roomName + ' · ' + term.paramName;
+        text += ' ' + (OP_SYMBOL[op] || '−') + ' ' + termText(formula.terms[i + 1]);
     });
     return text;
+}
+
+function parseTermToken(token) {
+    if (String(token).startsWith('n:')) {
+        const value = parseConstant(String(token).slice(2));
+        if (value === null) return null;
+        return { kind: 'number', value, label: formatConstant(value) };
+    }
+    const pair = String(token).split(':');
+    if (pair.length !== 2 || !/^\d+$/.test(pair[0]) || !/^\d+$/.test(pair[1])) return null;
+    return { kind: 'series', room: pair[0], param: pair[1] };
 }
 
 function parseFormulaKey(key) {
     const tokens = String(key || '').split('|').filter(Boolean);
     if (tokens.length === 2) {
-        const left = tokens[0].split(':');
-        const right = tokens[1].split(':');
-        if (left.length !== 2 || right.length !== 2) return null;
-        return {
-            terms: [{ room: left[0], param: left[1] }, { room: right[0], param: right[1] }],
-            ops: ['-'],
-        };
+        const left = parseTermToken(tokens[0]);
+        const right = parseTermToken(tokens[1]);
+        if (!left || !right || left.kind !== 'series' || right.kind !== 'series') return null;
+        return { terms: [left, right], ops: ['-'] };
     }
     if (tokens.length < 3 || tokens.length % 2 === 0) return null;
-    const first = tokens[0].split(':');
-    if (first.length !== 2) return null;
-    const terms = [{ room: first[0], param: first[1] }];
+    const first = parseTermToken(tokens[0]);
+    if (!first) return null;
+    const terms = [first];
     const ops = [];
     for (let i = 1; i < tokens.length; i += 2) {
         const op = TOKEN_OP[tokens[i]];
-        const pair = (tokens[i + 1] || '').split(':');
-        if (!op || pair.length !== 2) return null;
+        const term = parseTermToken(tokens[i + 1]);
+        if (!op || !term) return null;
         ops.push(op);
-        terms.push({ room: pair[0], param: pair[1] });
+        terms.push(term);
     }
     return { terms, ops };
+}
+
+function applyFormulaTerm(row, term) {
+    const kind = row.querySelector('.formula-kind');
+    if (kind) kind.value = term.kind === 'number' ? 'number' : 'series';
+    syncFormulaKind(row);
+    if (term.kind === 'number') {
+        const number = row.querySelector('.formula-number');
+        if (number) number.value = formatConstant(term.value);
+        return;
+    }
+    const room = row.querySelector('.formula-room');
+    const param = row.querySelector('.formula-param');
+    if (room) room.value = term.room;
+    if (param) param.value = term.param;
 }
 
 function setFormulaBuilder(formula) {
@@ -727,10 +812,7 @@ function setFormulaBuilder(formula) {
         if (i > 0 && !formulaRows()[i]) addFormulaTerm(formula.ops[i - 1]);
         const row = formulaRows()[i];
         if (!row) return;
-        const room = row.querySelector('.formula-room');
-        const param = row.querySelector('.formula-param');
-        if (room) room.value = term.room;
-        if (param) param.value = term.param;
+        applyFormulaTerm(row, term);
         if (i > 0) {
             const op = row.querySelector('.formula-op');
             if (op) op.value = formula.ops[i - 1];
@@ -921,6 +1003,11 @@ document.addEventListener('DOMContentLoaded', () => {
     if (addTermBtn) addTermBtn.addEventListener('click', () => addFormulaTerm('+'));
     const formulaBuilder = document.getElementById('formula-builder');
     if (formulaBuilder) {
+        formulaBuilder.addEventListener('change', (e) => {
+            if (e.target.classList.contains('formula-kind')) {
+                syncFormulaKind(e.target.closest('.formula-row'));
+            }
+        });
         formulaBuilder.addEventListener('click', (e) => {
             const removeBtn = e.target.closest('.formula-remove');
             if (!removeBtn || formulaRows().length <= 2) return;
@@ -930,6 +1017,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
     ensureFormulaTemplate();
+    formulaRows().forEach(syncFormulaKind);
     updateFormulaControls();
     const clearSeriesBtn = document.getElementById('clear-series-btn');
     if (clearSeriesBtn) clearSeriesBtn.addEventListener('click', () => clearChipList('explicit-series'));

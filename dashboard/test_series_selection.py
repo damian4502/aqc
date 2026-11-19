@@ -101,6 +101,45 @@ class SeriesSelectionTests(SimpleTestCase):
         self.assertEqual(formula_unit(["°C", "°C", "°C"], ("-",)), "°C")
         self.assertEqual(formula_unit(["°C", "Pa"], ("-",)), "Δ")
         self.assertEqual(formula_unit(["°C", "°C"], ("/",)), "")
+        self.assertEqual(formula_unit(["°C", None], ("-",)), "°C")
+        self.assertEqual(formula_unit([None, "°C"], ("*",)), "°C")
+        self.assertEqual(formula_unit(["°C", "°C"], ("*",)), "")
+
+    def test_constant_term_round_trip(self):
+        rooms = {1, 2}
+        params = {5}
+        raw = "1:5|sub|n:21.5"
+        specs = parse_difference_specs(
+            [raw, "n:100|div|2:5", "n:1|add|n:2", "1:5|sub|n:nope", raw + "|0"],
+            rooms,
+            params,
+        )
+        self.assertEqual(
+            specs,
+            [
+                (((1, 5), ("n", 21.5)), ("-",)),
+                ((("n", 100.0), (2, 5)), ("/",)),
+            ],
+        )
+        self.assertEqual(encode_diff_entry(specs[0]), raw)
+        self.assertEqual(encode_diff_entry(specs[1]), "n:100|div|2:5")
+        disabled = parse_difference_entries([raw + "|0"], rooms, params)
+        self.assertEqual(disabled[0][1], False)
+
+    def test_combine_with_constant(self):
+        index = pd.date_range("2026-01-01", periods=2, freq="h")
+        series = pd.Series([23.5, 20.0], index=index)
+        lowered = combine_aligned([series, 2.5], ("-",))
+        self.assertEqual(float(lowered.iloc[0]), 21.0)
+        self.assertEqual(float(lowered.iloc[1]), 17.5)
+        offset = combine_aligned([100, series], ("-",))
+        self.assertEqual(float(offset.iloc[0]), 76.5)
+        scaled = combine_aligned([series, 2], ("/",))
+        self.assertEqual(float(scaled.iloc[1]), 10.0)
+        other = pd.Series([1.5], index=pd.to_datetime(["2026-01-01 00:01"]))
+        aligned = combine_aligned([series.iloc[:1], other, 2], ("-", "/"), tolerance="2min")
+        self.assertEqual(len(aligned), 1)
+        self.assertEqual(float(aligned.iloc[0]), (23.5 - 1.5) / 2)
 
     def test_subtract_shared_index(self):
         index = pd.date_range("2026-01-01", periods=3, freq="h")

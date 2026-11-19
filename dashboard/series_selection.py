@@ -8,6 +8,8 @@ specific traces do not require the full cross product. A trailing ``:0``
 
 from __future__ import annotations
 
+import math
+
 # Query tokens stay URL-safe. ``+`` would be decoded as a space.
 OP_TOKENS = {
     "add": "+",
@@ -86,12 +88,53 @@ def _one_pair(token, valid_room_ids, valid_parameter_ids):
     return found[0][0]
 
 
+def is_constant(term) -> bool:
+    """True for a numeric formula term ``("n", value)``."""
+    return isinstance(term, tuple) and len(term) == 2 and term[0] == "n"
+
+
+def format_constant(value) -> str:
+    """Stable text for a finite constant so keys round-trip."""
+    number = float(value)
+    if number == 0.0:
+        return "0"
+    return format(number, ".12g")
+
+
+def _parse_constant_value(text):
+    try:
+        number = float(str(text).strip().replace(",", "."))
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(number):
+        return None
+    return number
+
+
+def parse_formula_term(token, valid_room_ids, valid_parameter_ids):
+    """A ``room:parameter`` pair or a ``n:<number>`` constant."""
+    text = str(token).strip()
+    if text.lower().startswith("n:"):
+        number = _parse_constant_value(text[2:])
+        if number is None:
+            return None
+        return ("n", number)
+    return _one_pair(text, valid_room_ids, valid_parameter_ids)
+
+
+def _encode_term(term) -> str:
+    if is_constant(term):
+        return "n:" + format_constant(term[1])
+    return pair_key(*term)
+
+
 def parse_difference_specs(values, valid_room_ids, valid_parameter_ids):
     """Enabled calculations as ``(terms, ops)``.
 
-    ``terms`` is a tuple of ``(room, parameter)`` pairs. ``ops`` has one of
-    ``+``, ``-``, ``*``, ``/`` between each pair. A saved ``a|b`` token is
-    still A − B.
+    ``terms`` is a tuple of ``(room, parameter)`` pairs or ``("n", value)``
+    constants. ``ops`` has one of ``+``, ``-``, ``*``, ``/`` between each
+    term. A saved ``a|b`` token is still A − B. At least one term must be a
+    series.
     """
     return [spec for spec, enabled in parse_difference_entries(values, valid_room_ids, valid_parameter_ids) if enabled]
 
@@ -99,9 +142,9 @@ def parse_difference_specs(values, valid_room_ids, valid_parameter_ids):
 def parse_difference_entries(values, valid_room_ids, valid_parameter_ids):
     """Parse calculation tokens into ``(spec, enabled)`` entries.
 
-    ``spec`` is ``(terms, ops)`` with at least two terms. ``a|b`` and
-    ``a|b|0`` stay valid as a disabled or enabled subtraction. Newer tokens
-    look like ``a|add|b|mul|c``.
+    ``spec`` is ``(terms, ops)`` with at least two terms, and at least one
+    series. ``a|b`` and ``a|b|0`` stay valid as a subtraction. Newer tokens
+    look like ``a|add|b|mul|c`` or ``a|sub|n:21.5``.
     """
     entries = []
     seen = set()
@@ -117,15 +160,21 @@ def parse_difference_entries(values, valid_room_ids, valid_parameter_ids):
         if len(tokens) < 2:
             continue
         if len(tokens) == 2:
-            left = _one_pair(tokens[0], valid_room_ids, valid_parameter_ids)
-            right = _one_pair(tokens[1], valid_room_ids, valid_parameter_ids)
-            if left is None or right is None or left == right:
+            left = parse_formula_term(tokens[0], valid_room_ids, valid_parameter_ids)
+            right = parse_formula_term(tokens[1], valid_room_ids, valid_parameter_ids)
+            if (
+                left is None
+                or right is None
+                or is_constant(left)
+                or is_constant(right)
+                or left == right
+            ):
                 continue
             spec = ((left, right), ("-",))
         else:
             if len(tokens) % 2 == 0:
                 continue
-            first = _one_pair(tokens[0], valid_room_ids, valid_parameter_ids)
+            first = parse_formula_term(tokens[0], valid_room_ids, valid_parameter_ids)
             if first is None:
                 continue
             terms = [first]
@@ -133,13 +182,15 @@ def parse_difference_entries(values, valid_room_ids, valid_parameter_ids):
             valid = True
             for index in range(1, len(tokens), 2):
                 op = OP_TOKENS.get(tokens[index])
-                pair = _one_pair(tokens[index + 1], valid_room_ids, valid_parameter_ids)
-                if op is None or pair is None:
+                term = parse_formula_term(tokens[index + 1], valid_room_ids, valid_parameter_ids)
+                if op is None or term is None:
                     valid = False
                     break
                 ops.append(op)
-                terms.append(pair)
+                terms.append(term)
             if not valid or len(terms) < 2 or len(terms) > MAX_FORMULA_TERMS:
+                continue
+            if not any(not is_constant(term) for term in terms):
                 continue
             spec = (tuple(terms), tuple(ops))
         if spec in seen:
@@ -150,15 +201,20 @@ def parse_difference_entries(values, valid_room_ids, valid_parameter_ids):
 
 
 def encode_diff_entry(spec, enabled=True) -> str:
-    """Encode ``(terms, ops)``. Two-term subtraction keeps the old ``a|b`` form."""
+    """Encode ``(terms, ops)``. Two-series subtraction keeps the old ``a|b`` form."""
     terms, ops = spec
-    if len(terms) == 2 and tuple(ops) == ("-",):
+    if (
+        len(terms) == 2
+        and tuple(ops) == ("-",)
+        and not is_constant(terms[0])
+        and not is_constant(terms[1])
+    ):
         key = f"{pair_key(*terms[0])}|{pair_key(*terms[1])}"
     else:
-        parts = [pair_key(*terms[0])]
+        parts = [_encode_term(terms[0])]
         for op, term in zip(ops, terms[1:]):
             parts.append(TOKEN_FOR_OP[op])
-            parts.append(pair_key(*term))
+            parts.append(_encode_term(term))
         key = "|".join(parts)
     return key if enabled else f"{key}|0"
 
@@ -175,15 +231,41 @@ def formula_label(names, ops) -> str:
 def formula_unit(units, ops) -> str:
     """Unit for a left-to-right formula.
 
-    Addition and subtraction keep the shared unit, or ``Δ`` when the units
-    differ. Multiplication and division are left unlabeled.
+    ``None`` marks a constant. Addition and subtraction keep a measured unit
+    when the other side is a constant or the same unit, and use ``Δ`` when
+    measured units differ or are blank. Scaling by a constant keeps the
+    series unit. An operation between two series with ``*`` or ``/`` is
+    unlabeled.
     """
-    units = [str(unit or "") for unit in units]
-    if not ops or any(op not in "+-" for op in ops):
+    if not units:
         return ""
-    if len(set(units)) == 1 and units[0]:
-        return units[0]
-    return "Δ"
+
+    def token(unit):
+        if unit is None:
+            return None
+        return str(unit or "")
+
+    current = token(units[0])
+    for op, unit in zip(ops, list(units)[1:]):
+        other = token(unit)
+        if op in "*/":
+            if current is not None and other is not None:
+                current = ""
+            else:
+                current = current if current is not None else other
+        elif current is None:
+            current = other
+        elif other is None:
+            continue
+        elif current != other:
+            current = "Δ"
+    if current:
+        return current
+    if any(op not in "+-" for op in ops):
+        return ""
+    if any(unit is not None for unit in units):
+        return "Δ"
+    return ""
 
 
 def expand_series_pairs(room_ids, parameter_ids, explicit_pairs) -> list[tuple[int, int]]:
@@ -205,6 +287,10 @@ def expand_series_pairs(room_ids, parameter_ids, explicit_pairs) -> list[tuple[i
     return pairs
 
 
+def _is_number(part) -> bool:
+    return isinstance(part, (int, float)) and not isinstance(part, bool)
+
+
 def _apply_op(left, right, op):
     import pandas as pd
 
@@ -218,8 +304,16 @@ def _apply_op(left, right, op):
         result = left / right
     else:
         return pd.Series(dtype="float64")
-    numeric = pd.to_numeric(result, errors="coerce")
-    return numeric.where(numeric.abs() < float("inf"))
+    if isinstance(result, pd.Series):
+        numeric = pd.to_numeric(result, errors="coerce")
+        return numeric.where(numeric.abs() < float("inf"))
+    try:
+        value = float(result)
+    except (TypeError, ValueError):
+        return float("nan")
+    if not math.isfinite(value):
+        return float("nan")
+    return value
 
 
 def _nearest_values(base, other, tolerance):
@@ -243,31 +337,51 @@ def _nearest_values(base, other, tolerance):
 
 
 def combine_aligned(parts, ops, tolerance=None):
-    """Combine series left to right with ``+``, ``-``, ``*``, ``/``.
+    """Combine series and constants left to right with ``+``, ``-``, ``*``, ``/``.
 
-    Without ``tolerance``, operations use the shared index and are NaN
-    wherever an operand is missing. With a pandas offset such as ``"2min"``,
-    later series are matched to the nearest sample of the first series.
-    Division by zero becomes NaN.
+    A number broadcasts across the series index. Without ``tolerance``,
+    series operations use the shared index and are NaN wherever an operand
+    is missing. With a pandas offset such as ``"2min"``, later series are
+    matched to the nearest sample of the first series. Division by zero
+    becomes NaN.
     """
     import pandas as pd
 
-    parts = [pd.to_numeric(part, errors="coerce") for part in parts]
+    prepared = []
+    for part in parts:
+        if _is_number(part):
+            value = float(part)
+            if not math.isfinite(value):
+                return pd.Series(dtype="float64")
+            prepared.append(value)
+        else:
+            prepared.append(pd.to_numeric(part, errors="coerce"))
     ops = tuple(ops)
-    if len(parts) < 2 or len(ops) != len(parts) - 1:
+    if len(prepared) < 2 or len(ops) != len(prepared) - 1:
         return pd.Series(dtype="float64")
+    if not any(isinstance(part, pd.Series) for part in prepared):
+        return pd.Series(dtype="float64")
+
     if not tolerance:
-        result = parts[0]
-        for op, other in zip(ops, parts[1:]):
+        result = prepared[0]
+        for op, other in zip(ops, prepared[1:]):
             result = _apply_op(result, other, op)
+        if not isinstance(result, pd.Series):
+            return pd.Series(dtype="float64")
         return result
 
-    base = parts[0].dropna().sort_index()
+    anchor_at = next(index for index, part in enumerate(prepared) if isinstance(part, pd.Series))
+    base = prepared[anchor_at].dropna().sort_index()
     if base.empty:
         return pd.Series(dtype="float64")
-    aligned = [base]
-    for other in parts[1:]:
-        aligned.append(_nearest_values(base, other, tolerance))
+    aligned = []
+    for index, part in enumerate(prepared):
+        if index == anchor_at:
+            aligned.append(base)
+        elif isinstance(part, pd.Series):
+            aligned.append(_nearest_values(base, part, tolerance))
+        else:
+            aligned.append(pd.Series(part, index=base.index, dtype="float64"))
     frame = pd.concat(aligned, axis=1)
     frame = frame.dropna()
     if frame.empty:
