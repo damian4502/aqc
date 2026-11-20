@@ -866,6 +866,8 @@ def ventilation_view(request):
         is_raw_interval,
         parse_interval_minutes,
         parse_spike_factor,
+        remember_spike_ceiling,
+        format_spike_ceiling,
         resample_measurements,
     )
     from measurements.models import Measurement
@@ -979,6 +981,7 @@ def ventilation_view(request):
     else:
         spike_factor = parse_spike_factor(request.session.get("spike_factor"), default=0.0)
 
+    spike_ceiling = remember_spike_ceiling(request)
     if has_query_selection:
         request.session["resample_interval"] = interval_minutes
         request.session["vent_fill_method"] = fill_method
@@ -1055,7 +1058,7 @@ def ventilation_view(request):
                 room_id_by_label.setdefault(label, room_id)
 
             resampled = resample_measurements(
-                frame, interval_minutes, fill_method, spike_factor=spike_factor
+                frame, interval_minutes, fill_method, spike_factor=spike_factor, spike_ceiling=spike_ceiling
             )
             if resampled is None or resampled.empty:
                 compute_error = "No recorded samples in this period."
@@ -1149,6 +1152,7 @@ def ventilation_view(request):
         "interval": interval_minutes,
         "fill_method": fill_method,
         "spike_factor": spike_factor,
+        "spike_ceiling": format_spike_ceiling(spike_ceiling),
         "baseline_pct": int(round(baseline_percentile)),
         "min_duration": int(round(min_duration_min)),
         "min_r2": f"{min_r2:.2f}",

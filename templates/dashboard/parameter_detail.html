@@ -177,6 +177,7 @@
 
 <div>
     <label class="block text-xs text-slate-400 mb-1.5">Ignore spikes</label>
+    <div class="flex gap-2">
     <select name="spike_factor" id="spike_factor"
             class="bg-slate-900 border border-slate-700 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:border-blue-500 min-w-[140px]">
         <option value="0" {% if not spike_factor or spike_factor == 0 %}selected{% endif %}>Off</option>
@@ -184,6 +185,12 @@
         <option value="2.5" {% if spike_factor == 2.5 %}selected{% endif %}>Medium</option>
         <option value="1.5" {% if spike_factor == 1.5 %}selected{% endif %}>Aggressive</option>
     </select>
+    <input type="text" inputmode="decimal" name="spike_ceiling" id="spike_ceiling"
+           value="{{ spike_ceiling }}" placeholder="Cap"
+           title="Clip every series above this number. Empty means no cap. Shared across charts."
+           autocomplete="off"
+           class="w-24 bg-slate-900 border border-slate-700 rounded-2xl px-3 py-3 text-sm text-white focus:outline-none focus:border-blue-500">
+    </div>
 </div>
 
 <label class="inline-flex items-center gap-2 h-[46px] px-4 rounded-2xl bg-slate-900 border border-slate-700 text-sm text-slate-200 cursor-pointer self-end">
@@ -450,6 +457,7 @@ async function loadGraph(extraParams = {override: true}) {
         'spike_factor',
         document.getElementById('spike_factor')?.value || '0'
     );
+    params.set('spike_ceiling', document.getElementById('spike_ceiling')?.value || '');
     params.set('events', document.getElementById('show-events')?.checked ? '1' : '0');
 
     // Cancel in-flight request so rapid picker steps keep only the latest range
@@ -534,6 +542,7 @@ function getFilterKey() {
         document.getElementById('interval')?.value || '',
         document.getElementById('fill_method')?.value || '',
         document.getElementById('spike_factor')?.value || '0',
+        document.getElementById('spike_ceiling')?.value || '',
         document.getElementById('show-events')?.checked ? '1' : '0',
         getRangeMode(),
     ].join('|');
@@ -803,7 +812,7 @@ document.addEventListener('DOMContentLoaded', () => {
     syncRawIntervalUi();
 
     // Selects (including spike aggressiveness)
-    ['interval', 'fill_method', 'spike_factor', 'show-events'].forEach(id => {
+    ['interval', 'fill_method', 'spike_factor', 'spike_ceiling', 'show-events'].forEach(id => {
         const el = document.getElementById(id);
         if (!el) return;
         el.addEventListener('change', () => {
@@ -811,6 +820,12 @@ document.addEventListener('DOMContentLoaded', () => {
             lastLoadGraphKey = '';
             scheduleLoadGraph({ immediate: true, force: true });
         });
+    });
+    document.getElementById('spike_ceiling')?.addEventListener('keydown', (e) => {
+        if (e.key !== 'Enter') return;
+        e.preventDefault();
+        lastLoadGraphKey = '';
+        scheduleLoadGraph({ immediate: true, force: true });
     });
 
     // Apply the currently zoomed chart range to From/To
@@ -911,6 +926,7 @@ document.addEventListener('DOMContentLoaded', () => {
         for (let [key, value] of formData.entries()) {
             if (value) params.append(key, value);
         }
+        params.set('spike_ceiling', document.getElementById('spike_ceiling')?.value || '');
         
         window.location.href = baseUrl + '?' + params.toString();
     }</script>

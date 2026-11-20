@@ -178,6 +178,7 @@ def export_room_csv(request, room_id):
         spike_factor = parse_spike_factor(request.GET.get('spike_factor'))
     else:
         spike_factor = parse_spike_factor(request.GET.get('ignore_spikes'), default=0.0)
+    spike_ceiling = remember_spike_ceiling(request)
 
     qs = Measurement.objects.filter(sensor__room=room).select_related('sensor', 'parameter')
     if not all_data:
@@ -199,7 +200,7 @@ def export_room_csv(request, room_id):
     df = df.rename(columns={'parameter__name': 'parameter'})
 
     resampled = resample_measurements(
-        df, interval_minutes, fill_method, spike_factor=spike_factor
+        df, interval_minutes, fill_method, spike_factor=spike_factor, spike_ceiling=spike_ceiling
     )
 
     resampled = resampled.reset_index()
@@ -293,10 +294,12 @@ def room_detail(request, room_id):
     request.session['resample_interval'] = interval_minutes
     request.session['resample_fill_method'] = fill_method
     request.session['spike_factor'] = spike_factor
+    spike_ceiling = remember_spike_ceiling(request)
 
     context['interval'] = interval_minutes
     context['fill_method'] = fill_method
     context['spike_factor'] = spike_factor
+    context['spike_ceiling'] = format_spike_ceiling(spike_ceiling)
     context['ignore_spikes'] = spike_factor > 0  # backward compat for templates
 
     """
@@ -343,7 +346,9 @@ def room_detail(request, room_id):
     
     # === Main logic by view_type ===
     if view_type == 'trend':
-        resampled = resample_measurements(df, interval_minutes, fill_method, ignore_spikes)
+        resampled = resample_measurements(
+            df, interval_minutes, fill_method, ignore_spikes, spike_ceiling=spike_ceiling
+        )
         if not resampled.empty:
             fig = px.line(resampled, x=resampled.index, y=resampled.columns,
                          title=f'Time trend - {room.name}',
@@ -389,7 +394,9 @@ def room_detail(request, room_id):
             context['fig'] = fig.to_html(full_html=False, include_plotlyjs='cdn')
 
     elif view_type == 'correlation':
-        resampled = resample_measurements(df, interval_minutes, fill_method, ignore_spikes)
+        resampled = resample_measurements(
+            df, interval_minutes, fill_method, ignore_spikes, spike_ceiling=spike_ceiling
+        )
         
         if resampled.empty or len(resampled.columns) < 2:
             context['no_data'] = True
@@ -570,7 +577,7 @@ def interval_file_label(interval_minutes):
     return f"{int(interval_minutes)}min"
 
 
-def resample_measurements(df, interval_minutes=15, fill_method='ffill', ignore_spikes=False, spike_factor=None):
+def resample_measurements(df, interval_minutes=15, fill_method='ffill', ignore_spikes=False, spike_factor=None, spike_ceiling=None):
     """Resample measurements and optionally remove outliers using IQR method.
 
     interval_minutes: bin size. 0 (or negative) skips resampling and returns
@@ -581,6 +588,8 @@ def resample_measurements(df, interval_minutes=15, fill_method='ffill', ignore_s
       0 or None + ignore_spikes=False => no filtering
       Typical values: 3.5 (mild), 2.5 (medium), 1.5 (aggressive)
     ignore_spikes: legacy bool; if True and spike_factor is None, uses 2.5
+    spike_ceiling: fixed upper limit. Values above it are clipped, including
+      spikes that survive the IQR filter. 0 or None disables the cap.
     """
     if df.empty:
         return pd.DataFrame()
@@ -628,6 +637,10 @@ def resample_measurements(df, interval_minutes=15, fill_method='ffill', ignore_s
 
             rolling_median = series.rolling(window=5, center=True, min_periods=1).median()
             resampled[col] = series.where((series >= lower_bound) & (series <= upper_bound), rolling_median)
+
+    ceiling = parse_spike_ceiling(spike_ceiling)
+    if ceiling > 0 and not resampled.empty:
+        resampled = resampled.clip(upper=ceiling)
 
     # Fill missing bins only when the series was resampled. Raw mode keeps
     # gaps so the chart does not invent values between real samples.
@@ -716,6 +729,41 @@ def parse_spike_factor(value, default=0.0):
         if parse_bool_flag(value, default=False):
             return 2.5
         return 0.0
+
+
+def parse_spike_ceiling(value, default=0.0):
+    """Fixed upper limit for plotted values. 0 or blank means no cap."""
+    if value is None or str(value).strip() == "":
+        try:
+            return float(default) if float(default) > 0 else 0.0
+        except (TypeError, ValueError):
+            return 0.0
+    try:
+        number = float(str(value).strip().replace(",", "."))
+    except (TypeError, ValueError):
+        return 0.0
+    if number != number or number == float("inf") or number <= 0:
+        return 0.0
+    return number
+
+
+def remember_spike_ceiling(request) -> float:
+    """Read the shared value cap and store it on the session."""
+    if "spike_ceiling" in request.GET:
+        ceiling = parse_spike_ceiling(request.GET.get("spike_ceiling"))
+    else:
+        ceiling = parse_spike_ceiling(request.session.get("spike_ceiling"))
+    request.session["spike_ceiling"] = ceiling
+    return ceiling
+
+
+def format_spike_ceiling(value) -> str:
+    """Empty string when the cap is off, so the input stays blank."""
+    ceiling = parse_spike_ceiling(value)
+    if ceiling <= 0:
+        return ""
+    return format(ceiling, ".12g")
+
 
 def chart_data(request):
     from django.utils.dateparse import parse_datetime
@@ -820,13 +868,17 @@ def chart_data(request):
     request.session['resample_interval'] = interval_minutes
     request.session['resample_fill_method'] = fill_method
     request.session['spike_factor'] = spike_factor
+    spike_ceiling = remember_spike_ceiling(request)
 
     context['interval'] = interval_minutes
     context['fill_method'] = fill_method
     context['spike_factor'] = spike_factor
+    context['spike_ceiling'] = format_spike_ceiling(spike_ceiling)
     context['ignore_spikes'] = spike_factor > 0
 
-    resampled = resample_measurements(df, interval_minutes, fill_method, spike_factor=spike_factor)
+    resampled = resample_measurements(
+        df, interval_minutes, fill_method, spike_factor=spike_factor, spike_ceiling=spike_ceiling
+    )
     if not resampled.empty:
         raw = is_raw_interval(interval_minutes)
         fig = build_time_series_figure(
@@ -1270,10 +1322,12 @@ def parameter_detail(request, parameter_id):
     request.session['resample_interval'] = interval_minutes
     request.session['resample_fill_method'] = fill_method
     request.session['spike_factor'] = spike_factor
+    spike_ceiling = remember_spike_ceiling(request)
 
     context['interval'] = interval_minutes
     context['fill_method'] = fill_method
     context['spike_factor'] = spike_factor
+    context['spike_ceiling'] = format_spike_ceiling(spike_ceiling)
     context['ignore_spikes'] = spike_factor > 0  # backward compat
 
     # Measurements for charts
@@ -1294,7 +1348,7 @@ def parameter_detail(request, parameter_id):
         df = df.rename(columns={'sensor__room__name': 'room'})
 
         if view_type == 'trend':
-            resampled = resample_measurements(df, interval_minutes, fill_method, spike_factor=spike_factor)
+            resampled = resample_measurements(df, interval_minutes, fill_method, spike_factor=spike_factor, spike_ceiling=spike_ceiling)
             raw = is_raw_interval(interval_minutes)
             title = f'Time trend - {parameter.name}'
             if raw:
@@ -1337,7 +1391,7 @@ def parameter_detail(request, parameter_id):
             context['fig'] = fig.to_html(full_html=False, include_plotlyjs='cdn')
 
         elif view_type == 'correlation':
-            resampled = resample_measurements(df, interval_minutes, fill_method, spike_factor=spike_factor)
+            resampled = resample_measurements(df, interval_minutes, fill_method, spike_factor=spike_factor, spike_ceiling=spike_ceiling)
             
             if resampled.empty or len(resampled.columns) < 2:
                 context['no_data'] = True
@@ -1426,6 +1480,7 @@ def export_parameter_csv(request, parameter_id):
         spike_factor = parse_spike_factor(request.GET.get('spike_factor'))
     else:
         spike_factor = parse_spike_factor(request.GET.get('ignore_spikes'), default=0.0)
+    spike_ceiling = remember_spike_ceiling(request)
 
     # Fetch measurements
     qs = Measurement.objects.filter(parameter=parameter).select_related('sensor__room')
@@ -1448,7 +1503,7 @@ def export_parameter_csv(request, parameter_id):
 
     # Resampling — pivot column is auto-detected (parameter vs room)
     resampled = resample_measurements(
-        df, interval_minutes, fill_method, spike_factor=spike_factor
+        df, interval_minutes, fill_method, spike_factor=spike_factor, spike_ceiling=spike_ceiling
     )
 
     # Prepare for CSV
@@ -1706,6 +1761,7 @@ def correlations_view(request):
     request.session["resample_interval"] = interval_minutes
     request.session["resample_fill_method"] = fill_method
     request.session["spike_factor"] = spike_factor
+    spike_ceiling = remember_spike_ceiling(request)
 
     room_by_id = {room.id: room for room in rooms}
     parameter_by_id = {param.id: param for param in parameters}
@@ -1794,7 +1850,7 @@ def correlations_view(request):
             ]
 
             resampled = resample_measurements(
-                df, interval_minutes, fill_method, spike_factor=spike_factor
+                df, interval_minutes, fill_method, spike_factor=spike_factor, spike_ceiling=spike_ceiling
             )
             if resampled is None or resampled.empty:
                 compute_error = (
@@ -1902,6 +1958,7 @@ def correlations_view(request):
         "interval": interval_minutes,
         "fill_method": fill_method,
         "spike_factor": spike_factor,
+        "spike_ceiling": format_spike_ceiling(spike_ceiling),
         "fig": fig_html,
         "pairs": pairs,
         "scatter_json": scatter_json,
@@ -2036,6 +2093,7 @@ def patterns_view(request):
         if spike_factor == 0.0 and request.session.get("ignore_spikes"):
             spike_factor = 2.5
     request.session["spike_factor"] = spike_factor
+    spike_ceiling = remember_spike_ceiling(request)
 
     compute_error = None
     fig_hourly = None
@@ -2069,7 +2127,7 @@ def patterns_view(request):
             df["timestamp"] = pd.to_datetime(df["timestamp"])
             df = df.rename(columns={"parameter__name": "parameter"})
             resampled = resample_measurements(
-                df, interval_minutes, "ffill", spike_factor=spike_factor
+                df, interval_minutes, "ffill", spike_factor=spike_factor, spike_ceiling=spike_ceiling
             )
             if resampled is None or resampled.empty:
                 source = df[["timestamp", "value"]]
@@ -2277,6 +2335,7 @@ def patterns_view(request):
         "end_date": context_end,
         "all_data": all_data,
         "spike_factor": spike_factor,
+        "spike_ceiling": format_spike_ceiling(spike_ceiling),
         "interval": interval_minutes,
         "fig_hourly": fig_hourly,
         "fig_weekly": fig_weekly,

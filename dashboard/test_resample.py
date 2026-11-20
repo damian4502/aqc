@@ -10,6 +10,7 @@ from dashboard.views import (
     build_time_series_figure,
     is_raw_interval,
     parse_interval_minutes,
+    parse_spike_ceiling,
     resample_measurements,
 )
 
@@ -52,6 +53,40 @@ class RawResampleTests(SimpleTestCase):
         self.assertAlmostEqual(float(co2.iloc[1]), 30.0)
         # Forward fill must not invent a CO2 value at the Temp-only stamp.
         self.assertTrue(pd.isna(out["CO2"].iloc[-1]))
+
+    def test_ceiling_clips_values_the_iqr_filter_keeps(self):
+        frame = pd.DataFrame(
+            {
+                "timestamp": pd.date_range("2026-01-01", periods=6, freq="5min"),
+                "value": [1.0, 2.0, 216.0, 730.0, 3310.0, 1.5],
+                "parameter": ["PM10"] * 6,
+            }
+        )
+        out = resample_measurements(
+            frame, interval_minutes=5, fill_method="ffill", spike_factor=1.5, spike_ceiling=10
+        )
+        self.assertLessEqual(float(out["PM10"].max()), 10.0)
+        self.assertAlmostEqual(float(out["PM10"].iloc[0]), 1.0)
+
+    def test_ceiling_alone_clips_and_blank_is_off(self):
+        frame = pd.DataFrame(
+            {
+                "timestamp": pd.date_range("2026-01-01", periods=3, freq="5min"),
+                "value": [1.0, 40.0, 2.0],
+                "parameter": ["PM10"] * 3,
+            }
+        )
+        capped = resample_measurements(
+            frame, interval_minutes=5, fill_method="ffill", spike_factor=0, spike_ceiling="10,5"
+        )
+        self.assertAlmostEqual(float(capped["PM10"].max()), 10.5)
+        self.assertAlmostEqual(float(capped["PM10"].iloc[0]), 1.0)
+        open_ended = resample_measurements(
+            frame, interval_minutes=5, fill_method="ffill", spike_factor=0, spike_ceiling=""
+        )
+        self.assertAlmostEqual(float(open_ended["PM10"].max()), 40.0)
+        self.assertEqual(parse_spike_ceiling("0"), 0.0)
+        self.assertEqual(parse_spike_ceiling("nope"), 0.0)
 
     def test_fifteen_minutes_still_bins(self):
         out = resample_measurements(_frame(), interval_minutes=15, fill_method="ffill")

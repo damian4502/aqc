@@ -417,6 +417,8 @@ def compare_view(request):
         is_raw_interval,
         parse_interval_minutes,
         parse_spike_factor,
+        remember_spike_ceiling,
+        format_spike_ceiling,
         resample_measurements,
         want_chart_events,
     )
@@ -439,6 +441,7 @@ def compare_view(request):
         "interval",
         "fill_method",
         "spike_factor",
+        "spike_ceiling",
         "normalize",
     )
 
@@ -560,6 +563,7 @@ def compare_view(request):
     request.session["resample_interval"] = interval_minutes
     request.session["resample_fill_method"] = fill_method
     request.session["spike_factor"] = spike_factor
+    spike_ceiling = remember_spike_ceiling(request)
 
     room_by_id = {room.id: room for room in rooms}
     parameter_by_id = {param.id: param for param in parameters}
@@ -685,7 +689,7 @@ def compare_view(request):
             recorded_mean = recorded_averages(frame)
 
             resampled = resample_measurements(
-                frame, interval_minutes, fill_method, spike_factor=spike_factor
+                frame, interval_minutes, fill_method, spike_factor=spike_factor, spike_ceiling=spike_ceiling
             )
             if resampled is None or resampled.empty:
                 compute_error = (
@@ -911,6 +915,7 @@ def compare_view(request):
         "interval": interval_minutes,
         "fill_method": fill_method,
         "spike_factor": spike_factor,
+        "spike_ceiling": format_spike_ceiling(spike_ceiling),
         "fig": fig_html,
         "stats_rows": stats_rows,
         "compute_error": compute_error,
