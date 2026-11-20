@@ -616,16 +616,17 @@ def load_room_air_flow(segments: list[dict]) -> None:
         start = timezone.make_aware(min(starts).to_pydatetime(), zone)
         end = timezone.make_aware(max(ends).to_pydatetime(), zone)
         rows = Measurement.objects.filter(
-            sensor__room_id__in=list(air_param),
             parameter_id__in=set(air_param.values()),
             timestamp__gte=start,
             timestamp__lte=end,
-        ).values_list("timestamp", "value", "sensor__room_id", "parameter_id")
+        ).values_list("timestamp", "value", "parameter_id")
         buckets: dict[int, list[tuple]] = {room_id: [] for room_id in air_param}
-        for timestamp, value, room_id, parameter_id in rows:
-            if air_param.get(room_id) != parameter_id:
-                continue
-            buckets[room_id].append((timestamp, value))
+        for timestamp, value, parameter_id in rows:
+            #if air_param.get(room_id) != parameter_id:
+            #    continue
+            buckets[room.id].append((timestamp, value))
+        
+        print(buckets)
         for room_id, pairs in buckets.items():
             if not pairs:
                 continue
@@ -637,6 +638,7 @@ def load_room_air_flow(segments: list[dict]) -> None:
                 index=index,
             ).sort_index()
             series_by_room[room_id] = series.groupby(level=0).mean()
+
     assign_air_flow_means(segments, series_by_room, units, decimals)
 
 
