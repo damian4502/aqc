@@ -156,75 +156,54 @@
                     </div>
                 </div>
             </div>
-            <div id="formula-builder" class="space-y-2">
-                <div class="formula-row flex flex-wrap gap-3 items-end">
-                    <select class="formula-kind bg-slate-900 border border-slate-700 rounded-2xl px-3 py-3 text-sm focus:outline-none focus:border-amber-500" aria-label="Term type">
-                        <option value="series">Series</option>
-                        <option value="number">Number</option>
-                    </select>
-                    <select class="formula-room bg-slate-900 border border-slate-700 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:border-blue-500 min-w-[160px]" aria-label="Room">
-                        <option value="">Room</option>
-                        {% for room in rooms %}
-                        <option value="{{ room.id }}">{{ room.name }}</option>
-                        {% endfor %}
-                    </select>
-                    <select class="formula-param bg-slate-900 border border-slate-700 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:border-blue-500 min-w-[160px]" aria-label="Parameter">
-                        <option value="">Parameter</option>
-                        {% for p in parameters %}
-                        <option value="{{ p.id }}">{{ p.name }}{% if p.unit %} ({{ p.unit }}){% endif %}</option>
-                        {% endfor %}
-                    </select>
-                    <input type="text" inputmode="decimal" class="formula-number hidden bg-slate-900 border border-slate-700 rounded-2xl px-4 py-3 text-sm text-white focus:outline-none focus:border-amber-500 w-36" placeholder="e.g. 21.5" aria-label="Constant value">
-                </div>
-                <div class="formula-row flex flex-wrap gap-3 items-end">
-                    <select class="formula-op bg-slate-900 border border-slate-700 rounded-2xl px-3 py-3 text-sm focus:outline-none focus:border-amber-500" aria-label="Operation">
-                        <option value="-">−</option>
-                        <option value="+">+</option>
-                        <option value="*">×</option>
-                        <option value="/">÷</option>
-                    </select>
-                    <select class="formula-kind bg-slate-900 border border-slate-700 rounded-2xl px-3 py-3 text-sm focus:outline-none focus:border-amber-500" aria-label="Term type">
-                        <option value="series">Series</option>
-                        <option value="number">Number</option>
-                    </select>
-                    <select class="formula-room bg-slate-900 border border-slate-700 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:border-blue-500 min-w-[160px]" aria-label="Room">
-                        <option value="">Room</option>
-                        {% for room in rooms %}
-                        <option value="{{ room.id }}">{{ room.name }}</option>
-                        {% endfor %}
-                    </select>
-                    <select class="formula-param bg-slate-900 border border-slate-700 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:border-blue-500 min-w-[160px]" aria-label="Parameter">
-                        <option value="">Parameter</option>
-                        {% for p in parameters %}
-                        <option value="{{ p.id }}">{{ p.name }}{% if p.unit %} ({{ p.unit }}){% endif %}</option>
-                        {% endfor %}
-                    </select>
-                    <input type="text" inputmode="decimal" class="formula-number hidden bg-slate-900 border border-slate-700 rounded-2xl px-4 py-3 text-sm text-white focus:outline-none focus:border-amber-500 w-36" placeholder="e.g. 21.5" aria-label="Constant value">
-                    <button type="button" class="formula-remove text-slate-400 hover:text-rose-400 px-2 py-3 leading-none" aria-label="Remove term">&times;</button>
-                </div>
-            </div>
-            <div class="flex flex-wrap gap-3 mt-3">
-                <button type="button" id="add-formula-term"
-                        class="bg-slate-800 hover:bg-slate-700 disabled:opacity-40 px-5 py-3 rounded-2xl text-sm font-medium transition-all">
-                    Add term
-                </button>
+            <div class="flex flex-wrap gap-3 items-end">
+                <textarea id="formula-input" rows="2" spellcheck="false"
+                          placeholder="(Kuhinja/CO2 + Kopalnica/CO2 + Strojnica/CO2) / 3"
+                          class="flex-1 min-w-[280px] bg-slate-900 border border-slate-700 rounded-2xl px-4 py-3 text-sm text-white focus:outline-none focus:border-amber-500 font-mono"></textarea>
                 <button type="button" id="add-diff-btn"
                         class="bg-amber-600 hover:bg-amber-500 px-5 py-3 rounded-2xl text-sm font-medium transition-all">
                     Add calculation
                 </button>
             </div>
+            <div class="flex flex-wrap gap-3 mt-3">
+                <select id="formula-insert-room" aria-label="Insert room"
+                        class="bg-slate-900 border border-slate-700 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:border-blue-500 min-w-[160px]">
+                    <option value="">Room</option>
+                    {% for room in rooms %}
+                    <option value="{{ room.name }}">{{ room.name }}</option>
+                    {% endfor %}
+                </select>
+                <select id="formula-insert-param" aria-label="Insert parameter"
+                        class="bg-slate-900 border border-slate-700 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:border-blue-500 min-w-[160px]">
+                    <option value="">Parameter</option>
+                    {% for p in parameters %}
+                    <option value="{{ p.name }}">{{ p.name }}{% if p.unit %} ({{ p.unit }}){% endif %}</option>
+                    {% endfor %}
+                </select>
+                <select id="formula-insert-op" aria-label="Insert operation"
+                        class="bg-slate-900 border border-slate-700 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:border-amber-500 min-w-[140px]">
+                    <option value="">Operation</option>
+                    <option value="+">+</option>
+                    <option value="-">−</option>
+                    <option value="*">×</option>
+                    <option value="/">÷</option>
+                    <option value="(">(</option>
+                    <option value=")">)</option>
+                </select>
+            </div>
+            <p id="formula-error" class="hidden text-xs text-rose-300 mt-2"></p>
             <div id="diff-series" class="flex flex-wrap gap-2 mt-4">
                 {% for diff in selected_diffs %}
                 <span class="series-chip inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-800 border border-slate-700 text-sm text-slate-200{% if not diff.enabled %} opacity-50{% endif %}" data-key="{{ diff.key }}">
                     <input type="checkbox" class="series-enabled accent-amber-500 w-4 h-4 shrink-0" {% if diff.enabled %}checked{% endif %} title="Include this calculation" aria-label="Include this calculation">
                     <input type="hidden" name="diff" data-base="{{ diff.key }}" value="{% if diff.enabled %}{{ diff.key }}{% else %}{{ diff.key }}|0{% endif %}">
-                    <button type="button" class="series-load text-left text-sky-300 hover:text-sky-200 underline decoration-sky-400/40 hover:decoration-sky-300" title="Load into the builder">{{ diff.label }}</button>
+                    <button type="button" class="series-load text-left text-sky-300 hover:text-sky-200 underline decoration-sky-400/40 hover:decoration-sky-300" title="Load into the formula" data-formula="{{ diff.label }}">{{ diff.label }}</button>
                     <button type="button" class="series-remove text-slate-400 hover:text-rose-400 leading-none" aria-label="Remove">&times;</button>
                 </span>
                 {% endfor %}
             </div>
-            <p id="diff-empty" class="text-[11px] text-slate-500 mt-3 {% if selected_diffs %}hidden{% endif %}">No calculations yet. The series do not have to be checked above. Click a calculation to load it into the builder. Uncheck to leave it off the next chart.</p>
-            <p class="text-[11px] text-slate-500 mt-1">Add, subtract, multiply, or divide up to 8 terms. Each term is a series or a constant number, for example temperature − 21.5. The formula runs left to right, so A − B × C is (A − B) × C. Raw values show the actual result. Min-max and Z-score scale its shape like the other series. With all recorded values, later series are paired to the first within 2 minutes.</p>
+            <p id="diff-empty" class="text-[11px] text-slate-500 mt-3 {% if selected_diffs %}hidden{% endif %}">No calculations yet. The series do not have to be checked above. Click a calculation to load it into the field. Uncheck to leave it off the next chart.</p>
+            <p class="text-[11px] text-slate-500 mt-1">Write Room/Parameter, numbers, and + − * /. Parentheses group. * and / happen before + and −, so A − B * C is A − (B * C). The dropdowns insert at the cursor: a room inserts its name and a slash. Up to 24 series. Raw values show the result. With all recorded values, other series are paired to the first within 2 minutes.</p>
         </div>
 
         <div class="glass rounded-3xl p-6">
@@ -232,7 +211,7 @@
                 <label class="text-sm font-medium text-slate-200">
                     <i class="fas fa-bookmark mr-1.5 text-violet-400"></i> Templates
                 </label>
-                <span class="text-[11px] text-slate-500">Saves rooms, parameters, series, and calculations. Not the time range.</span>
+                <span class="text-[11px] text-slate-500">Saves the selection and chart settings (resampling, normalize, spikes, events). Not the time range.</span>
             </div>
             <div class="flex flex-wrap gap-3 items-end">
                 <input type="text" name="template_name" id="template-name" maxlength="60" placeholder="Template name"
@@ -260,6 +239,11 @@
         <div class="glass rounded-3xl p-6">
             <div class="flex flex-wrap items-end gap-5">
 
+                <div id="range-mode" data-initial="{{ chart_range_mode|default:'fixed' }}" class="inline-flex rounded-2xl bg-slate-900 border border-slate-700 p-1 self-end">
+                    <button type="button" data-range-mode="fixed" class="range-mode-btn px-4 py-2.5 text-sm rounded-xl transition-all {% if chart_range_mode != 'live' %}bg-blue-600 text-white{% else %}text-slate-300 hover:text-white{% endif %}">Range</button>
+                    <button type="button" data-range-mode="live" class="range-mode-btn px-4 py-2.5 text-sm rounded-xl transition-all {% if chart_range_mode == 'live' %}bg-blue-600 text-white{% else %}text-slate-300 hover:text-white{% endif %}">Live</button>
+                </div>
+
                 <div class="flex gap-4 items-end">
                     <div>
                         <label class="block text-sm text-slate-400 mb-1">From</label>
@@ -267,7 +251,7 @@
                                value="{{ start|date:'Y-m-d\TH:i' }}"
                                class="bg-slate-800 border border-slate-700 rounded-2xl px-4 py-3 text-white focus:outline-none focus:border-blue-500">
                     </div>
-                    <div>
+                    <div id="end-date-wrap" class="{% if chart_range_mode == 'live' %}hidden{% endif %}">
                         <label class="block text-sm text-slate-400 mb-1">To</label>
                         <input type="datetime-local" name="end" id="end_date"
                                value="{{ end|date:'Y-m-d\TH:i' }}"
@@ -355,6 +339,7 @@
                 </button>
 
                 <input type="hidden" name="selection" value="1">
+                <input type="hidden" name="range_mode" id="range_mode" value="{{ chart_range_mode|default:'fixed' }}">
                 <input type="hidden" name="all" id="all_data" value="{% if all_data %}true{% endif %}">
                 <input type="hidden" name="quick" id="quick" value="{{ request.GET.quick|default:'' }}">
                 <input type="hidden" name="quickh" id="quickh" value="{{ request.GET.quickh|default:'' }}">
@@ -362,6 +347,11 @@
 
                 <div class="flex-1"></div>
 
+                <button type="button" id="reset-compare-btn"
+                        title="Clear rooms, parameters, series, and calculations"
+                        class="bg-slate-800 hover:bg-slate-700 px-5 py-3 rounded-2xl text-sm font-medium transition-all">
+                    Reset
+                </button>
                 <button type="submit"
                         class="bg-blue-600 hover:bg-blue-500 px-6 py-3 rounded-2xl text-sm font-medium transition-all">
                     Draw comparison
@@ -375,6 +365,7 @@
                 {% endif %}
             </div>
             <p class="text-[11px] text-slate-500 mt-3">
+                Live hides To and redraws the chart at the resampling interval.
                 Click a legend item to hide a series. Hover shows both the plotted
                 value and the original measurement.
             </p>
@@ -470,6 +461,7 @@
 {% endblock %}
 
 {% block scripts %}
+{{ formula_catalog|json_script:"formula-catalog" }}
 <script>
 const GROUPS = {{ groups_json|default:'[]'|safe }};
 const MAX_SERIES = {{ max_series }};
@@ -532,8 +524,15 @@ function setSelectValue(id, value) {
 function loadChipIntoDropdowns(chip) {
     const key = chip.dataset.key || '';
     if (chip.closest('#diff-series')) {
-        const formula = parseFormulaKey(key);
-        if (formula) setFormulaBuilder(formula);
+        const input = document.getElementById('formula-input');
+        const source = chip.querySelector('.series-load');
+        const text = (source && (source.dataset.formula || source.textContent)) || '';
+        if (input) {
+            input.value = text.trim();
+            input.focus();
+        }
+        const error = document.getElementById('formula-error');
+        if (error) error.classList.add('hidden');
         return;
     }
     const parts = key.split(':');
@@ -611,61 +610,40 @@ function addExplicitSeries() {
 }
 
 function addDifference() {
-    const formula = readFormula();
-    if (!formula) return;
-    const key = formulaKey(formula);
-    if (formula.terms.length === 2 && formula.ops[0] === '-'
-        && formula.terms[0].kind !== 'number' && formula.terms[1].kind !== 'number'
-        && formula.terms[0].room === formula.terms[1].room
-        && formula.terms[0].param === formula.terms[1].param) return;
-    if (document.querySelector('#diff-series .series-chip[data-key="' + key + '"]')) return;
-    const wrap = document.getElementById('diff-series');
-    wrap.appendChild(buildSeriesChip('diff', key, formulaText(formula)));
+    const input = document.getElementById('formula-input');
+    const error = document.getElementById('formula-error');
+    const parsed = parseFormulaText(input ? input.value : '');
+    if (!parsed.ok) {
+        if (error) {
+            error.textContent = parsed.error;
+            error.classList.remove('hidden');
+        }
+        return;
+    }
+    if (error) error.classList.add('hidden');
+    if ([...document.querySelectorAll('#diff-series .series-chip')].some((chip) => chip.dataset.key === parsed.key)) return;
+    const chip = buildSeriesChip('diff', parsed.key, parsed.text);
+    const label = chip.querySelector('.series-load');
+    if (label) label.dataset.formula = parsed.text;
+    document.getElementById('diff-series').appendChild(chip);
     updateCounts();
 }
 
-const FORMULA_MAX_TERMS = 8;
+const FORMULA_MAX_SERIES = 24;
+const FORMULA_CATALOG = JSON.parse(document.getElementById('formula-catalog').textContent);
 const OP_TOKEN = { '+': 'add', '-': 'sub', '*': 'mul', '/': 'div' };
-const OP_SYMBOL = { '+': '+', '-': '−', '*': '×', '/': '÷' };
-const TOKEN_OP = { add: '+', sub: '-', mul: '*', div: '/', '+': '+', '-': '-', '*': '*', '/': '/' };
-let formulaRowTemplate = null;
+const TOKEN_OP = { add: '+', sub: '-', mul: '*', div: '/' };
 
-function formulaRows() {
-    return [...document.querySelectorAll('#formula-builder .formula-row')];
+function formulaNames(kind) {
+    return (FORMULA_CATALOG[kind] || [])
+        .map((item) => ({ id: Number(item.id), name: String(item.name || '') }))
+        .filter((item) => item.name)
+        .sort((a, b) => b.name.length - a.name.length);
 }
 
-function ensureFormulaTemplate() {
-    if (formulaRowTemplate) return;
-    const rows = formulaRows();
-    if (!rows.length) return;
-    formulaRowTemplate = rows[rows.length - 1].cloneNode(true);
-}
-
-function updateFormulaControls() {
-    const rows = formulaRows();
-    rows.forEach((row) => {
-        const btn = row.querySelector('.formula-remove');
-        if (btn) btn.classList.toggle('invisible', rows.length <= 2);
-    });
-    const add = document.getElementById('add-formula-term');
-    if (add) add.disabled = rows.length >= FORMULA_MAX_TERMS;
-}
-
-function addFormulaTerm(op) {
-    ensureFormulaTemplate();
-    if (!formulaRowTemplate || formulaRows().length >= FORMULA_MAX_TERMS) return null;
-    const row = formulaRowTemplate.cloneNode(true);
-    const opSel = row.querySelector('.formula-op');
-    if (opSel) opSel.value = op || '+';
-    const kind = row.querySelector('.formula-kind');
-    if (kind) kind.value = 'series';
-    const number = row.querySelector('.formula-number');
-    if (number) number.value = '';
-    row.querySelectorAll('select.formula-room, select.formula-param').forEach((el) => { el.value = ''; });
-    syncFormulaKind(row);
-    document.getElementById('formula-builder').appendChild(row);
-    updateFormulaControls();
-    return row;
+function nameBoundary(text, index) {
+    if (index >= text.length) return true;
+    return /[\s+\-*/()×÷−]/.test(text[index]);
 }
 
 function parseConstant(raw) {
@@ -680,152 +658,222 @@ function formatConstant(value) {
     if (Object.is(value, -0) || value === 0) return '0';
     const rounded = Math.round(value);
     if (Math.abs(value - rounded) < 1e-9 && Math.abs(value) < 1e15) return String(rounded);
-    const text = Number(value.toPrecision(12)).toString();
-    return text;
+    return Number(value.toPrecision(12)).toString();
 }
 
-function syncFormulaKind(row) {
-    if (!row) return;
-    const isNumber = row.querySelector('.formula-kind')?.value === 'number';
-    row.querySelectorAll('.formula-room, .formula-param').forEach((el) => {
-        el.classList.toggle('hidden', isNumber);
-    });
-    const number = row.querySelector('.formula-number');
-    if (number) number.classList.toggle('hidden', !isNumber);
-}
-
-function readTerm(row) {
-    const isNumber = row.querySelector('.formula-kind')?.value === 'number';
-    if (isNumber) {
-        const value = parseConstant(row.querySelector('.formula-number')?.value);
-        if (value === null) return null;
-        return { kind: 'number', value, label: formatConstant(value) };
-    }
-    const room = row.querySelector('.formula-room');
-    const param = row.querySelector('.formula-param');
-    if (!room || !param || !room.value || !param.value) return null;
-    return {
-        kind: 'series',
-        room: room.value,
-        param: param.value,
-        roomName: room.selectedOptions[0].textContent.trim(),
-        paramName: param.selectedOptions[0].textContent.trim(),
-    };
-}
-
-function readFormula() {
-    const rows = formulaRows();
-    const terms = [];
-    const ops = [];
-    for (let i = 0; i < rows.length; i++) {
-        const term = readTerm(rows[i]);
-        if (!term) return null;
-        if (i > 0) {
-            const op = rows[i].querySelector('.formula-op');
-            ops.push((op && op.value) || '-');
+function parseFormulaText(raw) {
+    const text = String(raw || '');
+    if (!text.trim()) return { ok: false, error: 'Enter a formula.' };
+    const rooms = formulaNames('rooms');
+    const params = formulaNames('parameters');
+    const tokens = [];
+    let i = 0;
+    const skip = () => { while (i < text.length && /\s/.test(text[i])) i += 1; };
+    while (i < text.length) {
+        skip();
+        if (i >= text.length) break;
+        let matched = null;
+        for (const room of rooms) {
+            const end = i + room.name.length;
+            if (text.slice(i, end).toLocaleLowerCase() !== room.name.toLocaleLowerCase()) continue;
+            let slash = end;
+            while (slash < text.length && /\s/.test(text[slash])) slash += 1;
+            if (text[slash] !== '/') continue;
+            let nameAt = slash + 1;
+            while (nameAt < text.length && /\s/.test(text[nameAt])) nameAt += 1;
+            for (const param of params) {
+                const pend = nameAt + param.name.length;
+                if (text.slice(nameAt, pend).toLocaleLowerCase() !== param.name.toLocaleLowerCase()) continue;
+                if (!nameBoundary(text, pend)) continue;
+                matched = { node: [room.id, param.id], next: pend };
+                break;
+            }
+            if (matched) break;
         }
-        terms.push(term);
-    }
-    if (terms.length < 2 || !terms.some((term) => term.kind === 'series')) return null;
-    return { terms, ops };
-}
-
-function termToken(term) {
-    if (term.kind === 'number') return 'n:' + formatConstant(term.value);
-    return term.room + ':' + term.param;
-}
-
-function termText(term) {
-    if (term.kind === 'number') return term.label || formatConstant(term.value);
-    return term.roomName + ' · ' + term.paramName;
-}
-
-function formulaKey(formula) {
-    const seriesOnly = formula.terms.every((term) => term.kind !== 'number');
-    if (formula.terms.length === 2 && formula.ops[0] === '-' && seriesOnly) {
-        return termToken(formula.terms[0]) + '|' + termToken(formula.terms[1]);
-    }
-    const parts = [termToken(formula.terms[0])];
-    formula.ops.forEach((op, i) => {
-        parts.push(OP_TOKEN[op] || 'sub');
-        parts.push(termToken(formula.terms[i + 1]));
-    });
-    return parts.join('|');
-}
-
-function formulaText(formula) {
-    let text = termText(formula.terms[0]);
-    formula.ops.forEach((op, i) => {
-        text += ' ' + (OP_SYMBOL[op] || '−') + ' ' + termText(formula.terms[i + 1]);
-    });
-    return text;
-}
-
-function parseTermToken(token) {
-    if (String(token).startsWith('n:')) {
-        const value = parseConstant(String(token).slice(2));
-        if (value === null) return null;
-        return { kind: 'number', value, label: formatConstant(value) };
-    }
-    const pair = String(token).split(':');
-    if (pair.length !== 2 || !/^\d+$/.test(pair[0]) || !/^\d+$/.test(pair[1])) return null;
-    return { kind: 'series', room: pair[0], param: pair[1] };
-}
-
-function parseFormulaKey(key) {
-    const tokens = String(key || '').split('|').filter(Boolean);
-    if (tokens.length === 2) {
-        const left = parseTermToken(tokens[0]);
-        const right = parseTermToken(tokens[1]);
-        if (!left || !right || left.kind !== 'series' || right.kind !== 'series') return null;
-        return { terms: [left, right], ops: ['-'] };
-    }
-    if (tokens.length < 3 || tokens.length % 2 === 0) return null;
-    const first = parseTermToken(tokens[0]);
-    if (!first) return null;
-    const terms = [first];
-    const ops = [];
-    for (let i = 1; i < tokens.length; i += 2) {
-        const op = TOKEN_OP[tokens[i]];
-        const term = parseTermToken(tokens[i + 1]);
-        if (!op || !term) return null;
-        ops.push(op);
-        terms.push(term);
-    }
-    return { terms, ops };
-}
-
-function applyFormulaTerm(row, term) {
-    const kind = row.querySelector('.formula-kind');
-    if (kind) kind.value = term.kind === 'number' ? 'number' : 'series';
-    syncFormulaKind(row);
-    if (term.kind === 'number') {
-        const number = row.querySelector('.formula-number');
-        if (number) number.value = formatConstant(term.value);
-        return;
-    }
-    const room = row.querySelector('.formula-room');
-    const param = row.querySelector('.formula-param');
-    if (room) room.value = term.room;
-    if (param) param.value = term.param;
-}
-
-function setFormulaBuilder(formula) {
-    ensureFormulaTemplate();
-    const builder = document.getElementById('formula-builder');
-    if (!builder) return;
-    while (formulaRows().length > 1) formulaRows().pop().remove();
-    formula.terms.forEach((term, i) => {
-        if (i > 0 && !formulaRows()[i]) addFormulaTerm(formula.ops[i - 1]);
-        const row = formulaRows()[i];
-        if (!row) return;
-        applyFormulaTerm(row, term);
-        if (i > 0) {
-            const op = row.querySelector('.formula-op');
-            if (op) op.value = formula.ops[i - 1];
+        if (matched) {
+            tokens.push(matched.node);
+            i = matched.next;
+            continue;
         }
+        const number = text.slice(i).match(/^\d+(?:[.,]\d+)?/);
+        if (number) {
+            const value = parseConstant(number[0]);
+            if (value === null) return { ok: false, error: "Can't read that number." };
+            tokens.push(['n', value]);
+            i += number[0].length;
+            continue;
+        }
+        const ch = text[i];
+        if (ch === '(' || ch === ')') {
+            tokens.push(ch);
+            i += 1;
+            continue;
+        }
+        const op = ({ '+': '+', '-': '-', '*': '*', '/': '/', '−': '-', '×': '*', '÷': '/' })[ch];
+        if (op) {
+            tokens.push(op);
+            i += 1;
+            continue;
+        }
+        return { ok: false, error: "Can't read the formula near “" + text.slice(i, i + 12).trim() + "”." };
+    }
+    let pos = 0;
+    const peek = () => tokens[pos];
+    const take = () => tokens[pos++];
+    function parseExpr() {
+        let node = parseTerm();
+        while (peek() === '+' || peek() === '-') {
+            const op = take();
+            node = ['op', op, node, parseTerm()];
+        }
+        return node;
+    }
+    function parseTerm() {
+        let node = parseUnary();
+        while (peek() === '*' || peek() === '/') {
+            const op = take();
+            node = ['op', op, node, parseUnary()];
+        }
+        return node;
+    }
+    function parseUnary() {
+        if (peek() === '-') {
+            take();
+            return ['op', '-', ['n', 0], parseUnary()];
+        }
+        return parsePrimary();
+    }
+    function parsePrimary() {
+        const current = peek();
+        if (current == null) throw new Error('The formula ends unexpectedly.');
+        if (current === '(') {
+            take();
+            const node = parseExpr();
+            if (peek() !== ')') throw new Error('Close the parenthesis.');
+            take();
+            return node;
+        }
+        if (Array.isArray(current) && (current[0] === 'n' || typeof current[0] === 'number')) {
+            take();
+            return current;
+        }
+        throw new Error('Expected a series, a number, or (.');
+    }
+    let node;
+    try {
+        node = parseExpr();
+        if (pos !== tokens.length) throw new Error("Can't read the rest of the formula.");
+    } catch (err) {
+        return { ok: false, error: err.message || "Can't read the formula." };
+    }
+    const series = [];
+    (function walk(current) {
+        if (Array.isArray(current) && current[0] === 'op') {
+            walk(current[2]);
+            walk(current[3]);
+        } else if (Array.isArray(current) && typeof current[0] === 'number') {
+            series.push(current);
+        }
+    })(node);
+    if (!series.length) return { ok: false, error: 'Use at least one series, written as Room/Parameter.' };
+    if (series.length > FORMULA_MAX_SERIES) {
+        return { ok: false, error: 'A formula can use at most ' + FORMULA_MAX_SERIES + ' series.' };
+    }
+    return { ok: true, key: encodeFormula(node), text: formulaSource(node) };
+}
+
+function isLeaf(node) {
+    return Array.isArray(node) && (node[0] === 'n' || typeof node[0] === 'number');
+}
+
+function encodeTerm(node) {
+    if (node[0] === 'n') return 'n:' + formatConstant(node[1]);
+    return node[0] + ':' + node[1];
+}
+
+function encodeFormula(node) {
+    const ops = [];
+    const rights = [];
+    let current = node;
+    while (Array.isArray(current) && current[0] === 'op' && isLeaf(current[3])) {
+        ops.push(current[1]);
+        rights.push(current[3]);
+        current = current[2];
+    }
+    if (isLeaf(current)) {
+        const terms = [current].concat(rights.reverse());
+        ops.reverse();
+        if (terms.length === 2 && ops[0] === '-' && typeof terms[0][0] === 'number' && typeof terms[1][0] === 'number') {
+            return encodeTerm(terms[0]) + '|' + encodeTerm(terms[1]);
+        }
+        const parts = [encodeTerm(terms[0])];
+        ops.forEach((op, index) => {
+            parts.push(OP_TOKEN[op] || 'add');
+            parts.push(encodeTerm(terms[index + 1]));
+        });
+        return parts.join('|');
+    }
+    function fx(currentNode) {
+        if (currentNode[0] === 'op') {
+            return OP_TOKEN[currentNode[1]] + '(' + fx(currentNode[2]) + ',' + fx(currentNode[3]) + ')';
+        }
+        return encodeTerm(currentNode);
+    }
+    return 'fx:' + fx(node);
+}
+
+function formulaSource(node) {
+    const precOf = { '+': 1, '-': 1, '*': 2, '/': 2 };
+    const roomName = {};
+    const paramName = {};
+    (FORMULA_CATALOG.rooms || []).forEach((item) => { roomName[item.id] = item.name; });
+    (FORMULA_CATALOG.parameters || []).forEach((item) => { paramName[item.id] = item.name; });
+    function emit(current, parentPrec, isRight) {
+        if (current[0] === 'n') return formatConstant(current[1]);
+        if (typeof current[0] === 'number') return roomName[current[0]] + '/' + paramName[current[1]];
+        const op = current[1];
+        if (op === '-' && current[2][0] === 'n' && Number(current[2][1]) === 0) {
+            const text = '-' + emit(current[3], 3, false);
+            return 3 < parentPrec || (3 === parentPrec && isRight) ? '(' + text + ')' : text;
+        }
+        const prec = precOf[op];
+        const text = emit(current[2], prec, false) + ' ' + op + ' ' + emit(current[3], prec, true);
+        if (prec < parentPrec || (prec === parentPrec && isRight)) return '(' + text + ')';
+        return text;
+    }
+    return emit(node, 0, false);
+}
+
+function insertFormulaText(text) {
+    const el = document.getElementById('formula-input');
+    if (!el) return;
+    const start = el.selectionStart == null ? el.value.length : el.selectionStart;
+    const end = el.selectionEnd == null ? start : el.selectionEnd;
+    el.value = el.value.slice(0, start) + text + el.value.slice(end);
+    const pos = start + text.length;
+    el.focus();
+    el.setSelectionRange(pos, pos);
+}
+
+function bindFormulaInserts() {
+    const room = document.getElementById('formula-insert-room');
+    const param = document.getElementById('formula-insert-param');
+    const op = document.getElementById('formula-insert-op');
+    if (room) room.addEventListener('change', () => {
+        if (!room.value) return;
+        insertFormulaText(room.value + '/');
+        room.value = '';
     });
-    updateFormulaControls();
+    if (param) param.addEventListener('change', () => {
+        if (!param.value) return;
+        insertFormulaText(param.value);
+        param.value = '';
+    });
+    if (op) op.addEventListener('change', () => {
+        if (!op.value) return;
+        insertFormulaText(op.value === '(' || op.value === ')' ? op.value : ' ' + op.value + ' ');
+        op.value = '';
+    });
 }
 
 function toggleAll(kind, on) {
@@ -874,6 +922,10 @@ function clearPeriodFlags() {
     setHidden('zoomed', '');
 }
 
+function liveEndDate() {
+    return new Date(Date.now() + 365 * 24 * 60 * 60 * 1000);
+}
+
 function applyQuickRange(btn) {
     const form = document.getElementById('compare-form');
     const startInput = document.getElementById('start_date');
@@ -882,20 +934,17 @@ function applyQuickRange(btn) {
     const hours = btn.dataset.hours;
     const now = new Date();
     clearPeriodFlags();
+    setHidden('range_mode', 'live');
     if (days === '0') {
         setHidden('all_data', 'true');
+        startInput.value = '2020-01-01T00:00';
     } else {
         const start = new Date(now);
-        if (hours) {
-            start.setHours(start.getHours() - parseInt(hours, 10));
-            setHidden('quickh', hours);
-        } else {
-            start.setDate(start.getDate() - parseInt(days || '7', 10));
-            setHidden('quick', days || '7');
-        }
+        if (hours) start.setTime(now.getTime() - parseInt(hours, 10) * 60 * 60 * 1000);
+        else start.setTime(now.getTime() - parseInt(days || '7', 10) * 24 * 60 * 60 * 1000);
         startInput.value = toLocalInput(start);
-        endInput.value = toLocalInput(now);
     }
+    endInput.value = toLocalInput(liveEndDate());
     form.submit();
 }
 
@@ -972,6 +1021,7 @@ function applyChartZoomToPeriod() {
     startInput.value = toLocalInput(start);
     endInput.value = toLocalInput(end);
     clearPeriodFlags();
+    setHidden('range_mode', 'fixed');
     setHidden('zoomed', '1');
     form.submit();
 }
@@ -992,7 +1042,90 @@ function clearChipList(id) {
     updateCounts();
 }
 
+let chartRangeMode = 'fixed';
+let liveTimer = null;
+
+function paintRangeMode() {
+    document.querySelectorAll('[data-range-mode]').forEach((btn) => {
+        const on = btn.dataset.rangeMode === chartRangeMode;
+        btn.classList.toggle('bg-blue-600', on);
+        btn.classList.toggle('text-white', on);
+        btn.classList.toggle('text-slate-300', !on);
+        btn.classList.toggle('hover:text-white', !on);
+    });
+    const wrap = document.getElementById('end-date-wrap');
+    if (wrap) wrap.classList.toggle('hidden', chartRangeMode === 'live');
+    setHidden('range_mode', chartRangeMode);
+}
+
+function setRangeMode(mode) {
+    chartRangeMode = mode === 'live' ? 'live' : 'fixed';
+    paintRangeMode();
+    const endInput = document.getElementById('end_date');
+    if (endInput) endInput.value = toLocalInput(chartRangeMode === 'live' ? liveEndDate() : new Date());
+    clearPeriodFlags();
+    document.getElementById('compare-form').submit();
+}
+
+function parseLocalInput(value) {
+    const match = String(value || '').match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/);
+    if (!match) return null;
+    return new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]), Number(match[4]), Number(match[5]));
+}
+
+async function refreshLiveChart() {
+    const params = new URLSearchParams(window.location.search);
+    params.set('format', 'json');
+    params.set('range_mode', 'live');
+    const start = document.getElementById('start_date')?.value;
+    const end = document.getElementById('end_date')?.value;
+    if (start) params.set('start', start);
+    if (end) params.set('end', end);
+    try {
+        const res = await fetch(window.location.pathname + '?' + params.toString(), {
+            headers: { Accept: 'application/json' },
+        });
+        if (!res.ok) return;
+        const fig = await res.json();
+        const gd = document.getElementById('compare-plot');
+        if (!fig || !fig.data || !gd || typeof Plotly === 'undefined') return;
+        Plotly.react(gd, fig.data, fig.layout, { responsive: true });
+    } catch (err) {
+        console.error('Live refresh failed', err);
+    }
+}
+
+function setupLiveRefresh() {
+    if (liveTimer) {
+        clearInterval(liveTimer);
+        liveTimer = null;
+    }
+    if (chartRangeMode !== 'live' || !document.getElementById('compare-plot')) return;
+    const end = parseLocalInput(document.getElementById('end_date')?.value);
+    if (!end || end.getTime() <= Date.now()) return;
+    const intervalMin = Math.max(1, parseInt(document.getElementById('interval')?.value || '1', 10) || 1);
+    liveTimer = setInterval(refreshLiveChart, intervalMin * 60 * 1000);
+}
+
+function resetCompare() {
+    document.querySelectorAll('.room-cb, .param-cb').forEach((box) => { box.checked = false; });
+    clearChipList('explicit-series');
+    clearChipList('diff-series');
+    const formula = document.getElementById('formula-input');
+    if (formula) formula.value = '';
+    const error = document.getElementById('formula-error');
+    if (error) error.classList.add('hidden');
+    const name = document.getElementById('template-name');
+    if (name) name.value = '';
+    updateCounts();
+    document.getElementById('compare-form').submit();
+}
+
 document.addEventListener('DOMContentLoaded', () => {
+    const modeEl = document.getElementById('range-mode');
+    chartRangeMode = modeEl && modeEl.dataset.initial === 'live' ? 'live' : 'fixed';
+    paintRangeMode();
+    setupLiveRefresh();
     syncRawIntervalUi();
     const intervalEl = document.getElementById('interval');
     if (intervalEl) intervalEl.addEventListener('change', syncRawIntervalUi);
@@ -1006,30 +1139,20 @@ document.addEventListener('DOMContentLoaded', () => {
     bindSeriesList(document.getElementById('diff-series'));
     const addDiffBtn = document.getElementById('add-diff-btn');
     if (addDiffBtn) addDiffBtn.addEventListener('click', addDifference);
-    const addTermBtn = document.getElementById('add-formula-term');
-    if (addTermBtn) addTermBtn.addEventListener('click', () => addFormulaTerm('+'));
-    const formulaBuilder = document.getElementById('formula-builder');
-    if (formulaBuilder) {
-        formulaBuilder.addEventListener('change', (e) => {
-            if (e.target.classList.contains('formula-kind')) {
-                syncFormulaKind(e.target.closest('.formula-row'));
-            }
-        });
-        formulaBuilder.addEventListener('click', (e) => {
-            const removeBtn = e.target.closest('.formula-remove');
-            if (!removeBtn || formulaRows().length <= 2) return;
-            const row = removeBtn.closest('.formula-row');
-            if (row) row.remove();
-            updateFormulaControls();
-        });
-    }
-    ensureFormulaTemplate();
-    formulaRows().forEach(syncFormulaKind);
-    updateFormulaControls();
+    bindFormulaInserts();
     const clearSeriesBtn = document.getElementById('clear-series-btn');
     if (clearSeriesBtn) clearSeriesBtn.addEventListener('click', () => clearChipList('explicit-series'));
     const clearDiffBtn = document.getElementById('clear-diff-btn');
     if (clearDiffBtn) clearDiffBtn.addEventListener('click', () => clearChipList('diff-series'));
+    const resetBtn = document.getElementById('reset-compare-btn');
+    if (resetBtn) resetBtn.addEventListener('click', resetCompare);
+    document.querySelectorAll('[data-range-mode]').forEach((btn) => {
+        btn.addEventListener('click', (e) => {
+            e.preventDefault();
+            if (btn.dataset.rangeMode === chartRangeMode) return;
+            setRangeMode(btn.dataset.rangeMode);
+        });
+    });
     document.querySelectorAll('.quick-date-btn').forEach(btn => {
         btn.addEventListener('click', (e) => {
             e.preventDefault();
@@ -1052,8 +1175,23 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     const form = document.getElementById('compare-form');
     if (form) {
-        form.addEventListener('submit', () => {
+        form.addEventListener('submit', (e) => {
             document.querySelectorAll('.series-chip').forEach(syncSeriesToken);
+            const submitter = e.submitter;
+            if (submitter && (submitter.name === 'load_template' || submitter.name === 'template_delete')) return;
+            const input = document.getElementById('formula-input');
+            if (!input || !input.value.trim()) return;
+            const parsed = parseFormulaText(input.value);
+            if (!parsed.ok) {
+                e.preventDefault();
+                const error = document.getElementById('formula-error');
+                if (error) {
+                    error.textContent = parsed.error;
+                    error.classList.remove('hidden');
+                }
+                return;
+            }
+            addDifference();
         });
     }
 });

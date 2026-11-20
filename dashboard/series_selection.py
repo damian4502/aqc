@@ -23,7 +23,32 @@ OP_TOKENS = {
 }
 TOKEN_FOR_OP = {"+": "add", "-": "sub", "*": "mul", "/": "div"}
 OP_SYMBOLS = {"+": "+", "-": "−", "*": "×", "/": "÷"}
-MAX_FORMULA_TERMS = 8
+MAX_FORMULA_TERMS = 24
+_PREC = {"+": 1, "-": 1, "*": 2, "/": 2}
+_FX_WORD = {"+": "add", "-": "sub", "*": "mul", "/": "div"}
+
+
+class FormulaError(ValueError):
+    """A typed calculation could not be parsed."""
+
+
+def _is_series(node) -> bool:
+    return (
+        isinstance(node, tuple)
+        and len(node) == 2
+        and not isinstance(node[0], bool)
+        and isinstance(node[0], int)
+        and isinstance(node[1], int)
+    )
+
+
+def _is_op(node) -> bool:
+    return (
+        isinstance(node, tuple)
+        and len(node) == 4
+        and node[0] == "op"
+        and node[1] in _PREC
+    )
 
 
 def parse_id_list(values) -> list[int]:
@@ -128,23 +153,103 @@ def _encode_term(term) -> str:
     return pair_key(*term)
 
 
-def parse_difference_specs(values, valid_room_ids, valid_parameter_ids):
-    """Enabled calculations as ``(terms, ops)``.
+def _fold_left(terms, ops):
+    """Left-associative chain ``((a op b) op c)``."""
+    node = terms[0]
+    for op, term in zip(ops, terms[1:]):
+        node = ("op", op, node, term)
+    return node
 
-    ``terms`` is a tuple of ``(room, parameter)`` pairs or ``("n", value)``
-    constants. ``ops`` has one of ``+``, ``-``, ``*``, ``/`` between each
-    term. A saved ``a|b`` token is still A − B. At least one term must be a
-    series.
+
+def _left_chain(node):
+    """``(terms, ops)`` when every operation's right side is a leaf, else None."""
+    ops = []
+    rights = []
+    current = node
+    while _is_op(current) and (is_constant(current[3]) or _is_series(current[3])):
+        ops.append(current[1])
+        rights.append(current[3])
+        current = current[2]
+    if not (is_constant(current) or _is_series(current)):
+        return None
+    return (current, *reversed(rights)), tuple(reversed(ops))
+
+
+def iter_series(node):
+    """Series leaves of a formula, left to right. The same pair can repeat."""
+    if _is_series(node):
+        yield node
+    elif _is_op(node):
+        yield from iter_series(node[2])
+        yield from iter_series(node[3])
+
+
+def _series_count(node) -> int:
+    return sum(1 for _ in iter_series(node))
+
+
+def _parse_fx(body, valid_room_ids, valid_parameter_ids):
+    """Parse ``add(1:5,2:5)`` style bodies produced by :func:`_encode_fx`."""
+    pos = 0
+
+    def parse_node():
+        nonlocal pos
+        for word, op in (("add(", "+"), ("sub(", "-"), ("mul(", "*"), ("div(", "/")):
+            if body.startswith(word, pos):
+                pos += len(word)
+                left = parse_node()
+                if pos >= len(body) or body[pos] != ",":
+                    return None
+                pos += 1
+                right = parse_node()
+                if pos >= len(body) or body[pos] != ")":
+                    return None
+                pos += 1
+                return ("op", op, left, right)
+        end = pos
+        while end < len(body) and body[end] not in ",)":
+            end += 1
+        token = body[pos:end]
+        pos = end
+        if not token:
+            return None
+        return parse_formula_term(token, valid_room_ids, valid_parameter_ids)
+
+    node = parse_node()
+    if node is None or pos != len(body):
+        return None
+    if _series_count(node) < 1 or _series_count(node) > MAX_FORMULA_TERMS:
+        return None
+    return node
+
+
+def _encode_fx(node) -> str:
+    if _is_op(node):
+        return f"{_FX_WORD[node[1]]}({_encode_fx(node[2])},{_encode_fx(node[3])})"
+    return _encode_term(node)
+
+
+def parse_difference_specs(values, valid_room_ids, valid_parameter_ids):
+    """Enabled calculations as expression trees.
+
+    A leaf is ``(room, parameter)`` or ``("n", value)``. An operation is
+    ``("op", "+", left, right)``. ``*`` and ``/`` bind tighter than ``+``
+    and ``-`` when the formula was typed. A saved ``a|b`` token is still
+    left-associative A − B, and ``a|add|b|mul|c`` is still ``(a + b) * c``.
     """
-    return [spec for spec, enabled in parse_difference_entries(values, valid_room_ids, valid_parameter_ids) if enabled]
+    return [
+        spec
+        for spec, enabled in parse_difference_entries(values, valid_room_ids, valid_parameter_ids)
+        if enabled
+    ]
 
 
 def parse_difference_entries(values, valid_room_ids, valid_parameter_ids):
-    """Parse calculation tokens into ``(spec, enabled)`` entries.
+    """Parse calculation tokens into ``(ast, enabled)`` entries.
 
-    ``spec`` is ``(terms, ops)`` with at least two terms, and at least one
-    series. ``a|b`` and ``a|b|0`` stay valid as a subtraction. Newer tokens
-    look like ``a|add|b|mul|c`` or ``a|sub|n:21.5``.
+    ``a|b`` and ``a|b|0`` stay valid as a subtraction. Newer left-to-right
+    tokens look like ``a|add|b|mul|c`` or ``a|sub|n:21.5``. Formulas that
+    need real parentheses are ``fx:div(add(1:5,2:5),n:3)``.
     """
     entries = []
     seen = set()
@@ -156,66 +261,75 @@ def parse_difference_entries(values, valid_room_ids, valid_parameter_ids):
         if text.endswith("|0"):
             enabled = False
             text = text[:-2]
-        tokens = [part for part in text.split("|") if part != ""]
-        if len(tokens) < 2:
-            continue
-        if len(tokens) == 2:
-            left = parse_formula_term(tokens[0], valid_room_ids, valid_parameter_ids)
-            right = parse_formula_term(tokens[1], valid_room_ids, valid_parameter_ids)
-            if (
-                left is None
-                or right is None
-                or is_constant(left)
-                or is_constant(right)
-                or left == right
-            ):
+        if text.startswith("fx:"):
+            node = _parse_fx(text[3:], valid_room_ids, valid_parameter_ids)
+            if node is None:
                 continue
-            spec = ((left, right), ("-",))
         else:
-            if len(tokens) % 2 == 0:
+            tokens = [part for part in text.split("|") if part != ""]
+            if len(tokens) < 2:
                 continue
-            first = parse_formula_term(tokens[0], valid_room_ids, valid_parameter_ids)
-            if first is None:
-                continue
-            terms = [first]
-            ops = []
-            valid = True
-            for index in range(1, len(tokens), 2):
-                op = OP_TOKENS.get(tokens[index])
-                term = parse_formula_term(tokens[index + 1], valid_room_ids, valid_parameter_ids)
-                if op is None or term is None:
-                    valid = False
-                    break
-                ops.append(op)
-                terms.append(term)
-            if not valid or len(terms) < 2 or len(terms) > MAX_FORMULA_TERMS:
-                continue
-            if not any(not is_constant(term) for term in terms):
-                continue
-            spec = (tuple(terms), tuple(ops))
-        if spec in seen:
+            if len(tokens) == 2:
+                left = parse_formula_term(tokens[0], valid_room_ids, valid_parameter_ids)
+                right = parse_formula_term(tokens[1], valid_room_ids, valid_parameter_ids)
+                if (
+                    left is None
+                    or right is None
+                    or is_constant(left)
+                    or is_constant(right)
+                    or left == right
+                ):
+                    continue
+                node = _fold_left((left, right), ("-",))
+            else:
+                if len(tokens) % 2 == 0:
+                    continue
+                first = parse_formula_term(tokens[0], valid_room_ids, valid_parameter_ids)
+                if first is None:
+                    continue
+                terms = [first]
+                ops = []
+                valid = True
+                for index in range(1, len(tokens), 2):
+                    op = OP_TOKENS.get(tokens[index])
+                    term = parse_formula_term(tokens[index + 1], valid_room_ids, valid_parameter_ids)
+                    if op is None or term is None:
+                        valid = False
+                        break
+                    ops.append(op)
+                    terms.append(term)
+                if not valid or len(terms) < 2 or len(terms) > MAX_FORMULA_TERMS:
+                    continue
+                if not any(_is_series(term) for term in terms):
+                    continue
+                node = _fold_left(terms, ops)
+        if node in seen:
             continue
-        seen.add(spec)
-        entries.append((spec, enabled))
+        seen.add(node)
+        entries.append((node, enabled))
     return entries
 
 
-def encode_diff_entry(spec, enabled=True) -> str:
-    """Encode ``(terms, ops)``. Two-series subtraction keeps the old ``a|b`` form."""
-    terms, ops = spec
-    if (
-        len(terms) == 2
-        and tuple(ops) == ("-",)
-        and not is_constant(terms[0])
-        and not is_constant(terms[1])
-    ):
-        key = f"{pair_key(*terms[0])}|{pair_key(*terms[1])}"
+def encode_diff_entry(node, enabled=True) -> str:
+    """Encode an expression. A left-associative chain keeps the old pipe form."""
+    chain = _left_chain(node)
+    if chain is not None:
+        terms, ops = chain
+        if (
+            len(terms) == 2
+            and ops == ("-",)
+            and _is_series(terms[0])
+            and _is_series(terms[1])
+        ):
+            key = f"{pair_key(*terms[0])}|{pair_key(*terms[1])}"
+        else:
+            parts = [_encode_term(terms[0])]
+            for op, term in zip(ops, terms[1:]):
+                parts.append(TOKEN_FOR_OP[op])
+                parts.append(_encode_term(term))
+            key = "|".join(parts)
     else:
-        parts = [_encode_term(terms[0])]
-        for op, term in zip(ops, terms[1:]):
-            parts.append(TOKEN_FOR_OP[op])
-            parts.append(_encode_term(term))
-        key = "|".join(parts)
+        key = "fx:" + _encode_fx(node)
     return key if enabled else f"{key}|0"
 
 
@@ -266,6 +380,266 @@ def formula_unit(units, ops) -> str:
     if any(unit is not None for unit in units):
         return "Δ"
     return ""
+
+
+def formula_unit_of(node, unit_of_series):
+    """Unit of an expression tree. ``None`` means a constant.
+
+    ``unit_of_series(room_id, parameter_id)`` returns the series unit.
+    """
+    if is_constant(node):
+        return None
+    if _is_series(node):
+        return unit_of_series(node[0], node[1]) or ""
+    if not _is_op(node):
+        return ""
+    return formula_unit(
+        [
+            formula_unit_of(node[2], unit_of_series),
+            formula_unit_of(node[3], unit_of_series),
+        ],
+        (node[1],),
+    )
+
+
+def formula_source(node, series_name) -> str:
+    """Text that parses back to ``node``. ``series_name(room, parameter)`` is ``Room/Parameter``."""
+
+    def emit(current, parent_prec, is_right):
+        if is_constant(current):
+            return format_constant(current[1])
+        if _is_series(current):
+            return series_name(current[0], current[1])
+        if not _is_op(current):
+            return ""
+        op = current[1]
+        if (
+            op == "-"
+            and is_constant(current[2])
+            and float(current[2][1]) == 0.0
+        ):
+            text = "-" + emit(current[3], 3, False)
+            prec = 3
+        else:
+            prec = _PREC[op]
+            text = emit(current[2], prec, False) + " " + op + " " + emit(current[3], prec, True)
+        if prec < parent_prec or (prec == parent_prec and is_right):
+            return "(" + text + ")"
+        return text
+
+    return emit(node, 0, False)
+
+
+def _name_boundary(text, index) -> bool:
+    if index >= len(text):
+        return True
+    char = text[index]
+    return char.isspace() or char in "+-*/()×÷−"
+
+
+def parse_formula_text(text, rooms, parameters):
+    """Parse ``(Kuhinja/CO2 + Kopalnica/CO2) / 3`` into an expression tree.
+
+    ``rooms`` and ``parameters`` are ``(id, name)`` pairs. ``/`` between a
+    known room and parameter is the series, and ``/`` between values divides.
+    ``*`` and ``/`` bind tighter than ``+`` and ``-``. Parentheses group.
+    At least one series is required.
+    """
+    raw = str(text or "")
+    if not raw.strip():
+        raise FormulaError("Enter a formula.")
+    room_list = sorted((rooms or []), key=lambda item: len(item[1] or ""), reverse=True)
+    param_list = sorted((parameters or []), key=lambda item: len(item[1] or ""), reverse=True)
+    tokens = []
+    index = 0
+    length = len(raw)
+
+    def skip_space(pos):
+        while pos < length and raw[pos].isspace():
+            pos += 1
+        return pos
+
+    while True:
+        index = skip_space(index)
+        if index >= length:
+            break
+        matched = None
+        for room_id, room_name in room_list:
+            room_name = str(room_name or "")
+            if not room_name:
+                continue
+            end = index + len(room_name)
+            if raw[index:end].casefold() != room_name.casefold():
+                continue
+            slash = skip_space(end)
+            if slash >= length or raw[slash] != "/":
+                continue
+            name_at = skip_space(slash + 1)
+            for param_id, param_name in param_list:
+                param_name = str(param_name or "")
+                if not param_name:
+                    continue
+                param_end = name_at + len(param_name)
+                if raw[name_at:param_end].casefold() != param_name.casefold():
+                    continue
+                if not _name_boundary(raw, param_end):
+                    continue
+                matched = ((int(room_id), int(param_id)), param_end)
+                break
+            if matched:
+                break
+        if matched:
+            tokens.append(matched[0])
+            index = matched[1]
+            continue
+        number = _match_number(raw, index)
+        if number is not None:
+            value, index = number
+            tokens.append(("n", value))
+            continue
+        char = raw[index]
+        if char in "()":
+            tokens.append(char)
+            index += 1
+            continue
+        op = OP_TOKENS.get(char)
+        if op is None and char in "−×÷":
+            op = {"−": "-", "×": "*", "÷": "/"}[char]
+        if op in _PREC:
+            tokens.append(op)
+            index += 1
+            continue
+        snippet = raw[index:index + 12].strip()
+        raise FormulaError(f"Can't read the formula near “{snippet}”.")
+
+    node = _parse_expression_tokens(tokens)
+    count = _series_count(node)
+    if count < 1:
+        raise FormulaError("Use at least one series, written as Room/Parameter.")
+    if count > MAX_FORMULA_TERMS:
+        raise FormulaError(f"A formula can use at most {MAX_FORMULA_TERMS} series.")
+    return node
+
+
+def _match_number(text, index):
+    import re
+
+    found = re.match(r"\d+(?:[.,]\d+)?", text[index:])
+    if not found:
+        return None
+    value = _parse_constant_value(found.group(0))
+    if value is None:
+        return None
+    return value, index + found.end()
+
+
+def _parse_expression_tokens(tokens):
+    pos = 0
+
+    def peek():
+        return tokens[pos] if pos < len(tokens) else None
+
+    def parse_expr():
+        node = parse_term()
+        while peek() in ("+", "-"):
+            op = tokens[pos]
+            nonlocal_advance()
+            node = ("op", op, node, parse_term())
+        return node
+
+    def nonlocal_advance():
+        nonlocal pos
+        pos += 1
+
+    def parse_term():
+        node = parse_unary()
+        while peek() in ("*", "/"):
+            op = tokens[pos]
+            nonlocal_advance()
+            node = ("op", op, node, parse_unary())
+        return node
+
+    def parse_unary():
+        if peek() == "-":
+            nonlocal_advance()
+            return ("op", "-", ("n", 0.0), parse_unary())
+        return parse_primary()
+
+    def parse_primary():
+        current = peek()
+        if current is None:
+            raise FormulaError("The formula ends unexpectedly.")
+        if current == "(":
+            nonlocal_advance()
+            node = parse_expr()
+            if peek() != ")":
+                raise FormulaError("Close the parenthesis.")
+            nonlocal_advance()
+            return node
+        if is_constant(current) or _is_series(current):
+            nonlocal_advance()
+            return current
+        raise FormulaError("Expected a series, a number, or '('.")
+
+    node = parse_expr()
+    if pos != len(tokens):
+        raise FormulaError("Can't read the rest of the formula.")
+    return node
+
+
+def evaluate_formula(node, get_series, tolerance=None):
+    """Evaluate an expression tree.
+
+    ``get_series(room_id, parameter_id)`` returns a Series. Without
+    ``tolerance``, operations use the shared index. With a pandas offset
+    such as ``"2min"``, every series is matched to the nearest sample of
+    the first series. Division by zero becomes NaN.
+    """
+    import pandas as pd
+
+    pairs = list(dict.fromkeys(iter_series(node)))
+    if not pairs:
+        return pd.Series(dtype="float64")
+    loaded = {}
+    for room_id, param_id in pairs:
+        series = get_series(room_id, param_id)
+        if series is None:
+            return pd.Series(dtype="float64")
+        loaded[(room_id, param_id)] = pd.to_numeric(series, errors="coerce")
+
+    def eval_in(environment):
+        def value(current):
+            if is_constant(current):
+                return float(current[1])
+            if _is_series(current):
+                return environment[current]
+            if _is_op(current):
+                return _apply_op(value(current[2]), value(current[3]), current[1])
+            return pd.Series(dtype="float64")
+
+        return value(node)
+
+    if not tolerance:
+        result = eval_in(loaded)
+        if not isinstance(result, pd.Series):
+            return pd.Series(dtype="float64")
+        return result
+
+    base = loaded[pairs[0]].dropna().sort_index()
+    if base.empty:
+        return pd.Series(dtype="float64")
+    aligned = {pairs[0]: base}
+    for pair in pairs[1:]:
+        aligned[pair] = _nearest_values(base, loaded[pair], tolerance)
+    frame = pd.concat([aligned[pair] for pair in pairs], axis=1)
+    frame = frame.dropna()
+    if frame.empty:
+        return pd.Series(dtype="float64")
+    environment = {pair: frame.iloc[:, index] for index, pair in enumerate(pairs)}
+    result = eval_in(environment)
+    if not isinstance(result, pd.Series):
+        return pd.Series(dtype="float64")
+    return result.dropna()
 
 
 def expand_series_pairs(room_ids, parameter_ids, explicit_pairs) -> list[tuple[int, int]]:

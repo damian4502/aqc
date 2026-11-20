@@ -71,8 +71,8 @@
     <div>
         <label class="block text-sm text-slate-400 mb-1">Period</label>
         <div id="range-mode" data-initial="{{ chart_range_mode|default:'fixed' }}" class="inline-flex rounded-2xl bg-slate-900 border border-slate-700 p-1">
-            <button type="button" data-range-mode="fixed" class="range-mode-btn px-4 py-2.5 text-sm rounded-xl transition-all {% if chart_range_mode != 'live' %}bg-blue-600 text-white{% else %}text-slate-300 hover:text-white{% endif %}">From – To</button>
-            <button type="button" data-range-mode="live" class="range-mode-btn px-4 py-2.5 text-sm rounded-xl transition-all {% if chart_range_mode == 'live' %}bg-blue-600 text-white{% else %}text-slate-300 hover:text-white{% endif %}">From – Now</button>
+            <button type="button" data-range-mode="fixed" class="range-mode-btn px-4 py-2.5 text-sm rounded-xl transition-all {% if chart_range_mode != 'live' %}bg-blue-600 text-white{% else %}text-slate-300 hover:text-white{% endif %}">Range</button>
+            <button type="button" data-range-mode="live" class="range-mode-btn px-4 py-2.5 text-sm rounded-xl transition-all {% if chart_range_mode == 'live' %}bg-blue-600 text-white{% else %}text-slate-300 hover:text-white{% endif %}">Live</button>
         </div>
     </div>
     <div>

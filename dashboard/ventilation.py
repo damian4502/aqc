@@ -865,6 +865,7 @@ def ventilation_view(request):
     from dashboard.correlations import make_series_label
     from dashboard.series_selection import expand_series_pairs, pairs_filter, parse_id_list
     from dashboard.views import (
+        DEFAULT_RESAMPLE_MINUTES,
         is_raw_interval,
         parse_interval_minutes,
         parse_spike_factor,
@@ -972,8 +973,8 @@ def ventilation_view(request):
 
     interval_raw = request.GET.get("interval", None)
     if interval_raw is None:
-        interval_raw = request.session.get("resample_interval", 15)
-    interval_minutes = parse_interval_minutes(interval_raw, default=15)
+        interval_raw = request.session.get("resample_interval", DEFAULT_RESAMPLE_MINUTES)
+    interval_minutes = parse_interval_minutes(interval_raw, default=DEFAULT_RESAMPLE_MINUTES)
     fill_raw = request.GET.get("fill_method", None)
     if fill_raw is None:
         fill_raw = request.session.get("vent_fill_method", "none")

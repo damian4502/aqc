@@ -171,7 +171,7 @@ def export_room_csv(request, room_id):
             start_date = timezone.now() - timedelta(days=7)
             end_date = timezone.now()
 
-    interval_minutes = int(request.GET.get('interval', 15) or 15)
+    interval_minutes = int(request.GET.get('interval', DEFAULT_RESAMPLE_MINUTES) or DEFAULT_RESAMPLE_MINUTES)
     fill_method = request.GET.get('fill_method') or request.GET.get('fill', 'ffill')
     # Prefer new spike_factor; fall back to legacy ignore_spikes
     if 'spike_factor' in request.GET:
@@ -280,7 +280,7 @@ def room_detail(request, room_id):
         'show_events': want_chart_events(request),
     }
 
-    interval_minutes = int(request.GET.get('interval', request.session.get('resample_interval', 15)))
+    interval_minutes = int(request.GET.get('interval', request.session.get('resample_interval', DEFAULT_RESAMPLE_MINUTES)))
     fill_method = request.GET.get('fill_method', request.session.get('resample_fill_method', 'ffill'))
     if 'spike_factor' in request.GET:
         spike_factor = parse_spike_factor(request.GET.get('spike_factor'))
@@ -328,7 +328,7 @@ def room_detail(request, room_id):
             request.session['resample_fill_method'] = request.GET.get('fill_method')
 
     # Resampling parameters
-    interval_minutes = int(request.GET.get('interval', request.session.get('resample_interval', 15)))
+    interval_minutes = int(request.GET.get('interval', request.session.get('resample_interval', DEFAULT_RESAMPLE_MINUTES)))
     fill_method = request.GET.get('fill_method', request.session.get('resample_fill_method', 'ffill'))
     if 'ignore_spikes' in request.GET:
         ignore_spikes = parse_bool_flag(request.GET.get('ignore_spikes'), default=False)
@@ -548,6 +548,10 @@ import pandas as pd
 from django.utils import timezone
 
 
+# Charts open at 1 minute until the user picks another interval.
+DEFAULT_RESAMPLE_MINUTES = 1
+
+
 def is_raw_interval(interval_minutes):
     """Interval 0 plots every recorded sample, with no time binning."""
     try:
@@ -608,7 +612,7 @@ def resample_measurements(df, interval_minutes=15, fill_method='ffill', ignore_s
     try:
         interval_minutes = int(interval_minutes)
     except (TypeError, ValueError):
-        interval_minutes = 15
+        interval_minutes = DEFAULT_RESAMPLE_MINUTES
 
     if interval_minutes <= 0:
         resampled = pivot.sort_index()
@@ -849,7 +853,7 @@ def chart_data(request):
             request.session['resample_fill_method'] = request.GET.get('fill_method')
 
     # Resampling parameters
-    interval_minutes = int(request.GET.get('interval', request.session.get('resample_interval', 15)))
+    interval_minutes = int(request.GET.get('interval', request.session.get('resample_interval', DEFAULT_RESAMPLE_MINUTES)))
     fill_method = (
         request.GET.get('fill_method')
         or request.GET.get('fill')
@@ -1307,7 +1311,7 @@ def parameter_detail(request, parameter_id):
             request.session['resample_fill_method'] = request.GET.get('fill_method')
 
     # Resampling parameters
-    interval_minutes = int(request.GET.get('interval', request.session.get('resample_interval', 15)))
+    interval_minutes = int(request.GET.get('interval', request.session.get('resample_interval', DEFAULT_RESAMPLE_MINUTES)))
     fill_method = request.GET.get('fill_method', request.session.get('resample_fill_method', 'ffill'))
     if 'spike_factor' in request.GET:
         spike_factor = parse_spike_factor(request.GET.get('spike_factor'))
@@ -1474,7 +1478,7 @@ def export_parameter_csv(request, parameter_id):
             end_date = timezone.now()
 
     # Resampling parameters
-    interval_minutes = int(request.GET.get('interval', 15))
+    interval_minutes = int(request.GET.get('interval', DEFAULT_RESAMPLE_MINUTES))
     fill_method = request.GET.get('fill_method') or request.GET.get('fill', 'ffill')
     if 'spike_factor' in request.GET:
         spike_factor = parse_spike_factor(request.GET.get('spike_factor'))
@@ -1646,13 +1650,12 @@ def correlations_view(request):
 
     TEMPLATE_KEY = "corr_templates"
     ACTIVE_TEMPLATE_KEY = "corr_active_template"
-    KEEP_WITH_TEMPLATE = (
-        "start",
-        "end",
-        "all",
+    PERIOD_KEYS = ("start", "end", "all", "range_mode", "quick", "quickh")
+    SETTING_KEYS = (
         "interval",
         "fill_method",
         "spike_factor",
+        "spike_ceiling",
         "method",
         "min_overlap",
     )
@@ -1672,6 +1675,7 @@ def correlations_view(request):
                         encode_series_entry(pair, enabled) for pair, enabled in series_entries
                     ],
                     "diffs": [],
+                    "settings": {key: request.GET.get(key, "") for key in SETTING_KEYS},
                 },
             )
             remember_active_template(request.session, ACTIVE_TEMPLATE_KEY, save_name)
@@ -1691,6 +1695,7 @@ def correlations_view(request):
         series_entries = parse_series_entries(
             stored.get("series") or [], valid_room_ids, valid_parameter_ids
         )
+        stored_settings = stored.get("settings") if isinstance(stored.get("settings"), dict) else None
         return redirect(
             url_for_selection(
                 request,
@@ -1698,7 +1703,8 @@ def correlations_view(request):
                 selected_parameter_ids,
                 [encode_series_entry(pair, enabled) for pair, enabled in series_entries],
                 [],
-                KEEP_WITH_TEMPLATE,
+                PERIOD_KEYS if stored_settings is not None else PERIOD_KEYS + SETTING_KEYS,
+                overrides=stored_settings,
             )
         )
 
@@ -1744,8 +1750,8 @@ def correlations_view(request):
 
     interval_raw = request.GET.get("interval", None)
     if interval_raw is None:
-        interval_raw = request.session.get("resample_interval", 15)
-    interval_minutes = parse_interval_minutes(interval_raw, default=15)
+        interval_raw = request.session.get("resample_interval", DEFAULT_RESAMPLE_MINUTES)
+    interval_minutes = parse_interval_minutes(interval_raw, default=DEFAULT_RESAMPLE_MINUTES)
     fill_method = request.GET.get(
         "fill_method", request.session.get("resample_fill_method", "ffill")
     )
@@ -2077,11 +2083,11 @@ def patterns_view(request):
         context_end = end_date.strftime("%Y-%m-%d") if end_date else ""
 
     if "interval" in request.GET:
-        interval_minutes = parse_interval_minutes(request.GET.get("interval"), default=15)
+        interval_minutes = parse_interval_minutes(request.GET.get("interval"), default=DEFAULT_RESAMPLE_MINUTES)
         request.session["resample_interval"] = interval_minutes
     else:
         interval_minutes = parse_interval_minutes(
-            request.session.get("resample_interval", 15), default=15
+            request.session.get("resample_interval", DEFAULT_RESAMPLE_MINUTES), default=DEFAULT_RESAMPLE_MINUTES
         )
 
     if "spike_factor" in request.GET:

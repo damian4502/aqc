@@ -398,14 +398,13 @@ def compare_view(request):
         url_without,
     )
     from dashboard.series_selection import (
-        combine_aligned,
         encode_diff_entry,
         encode_series_entry,
+        evaluate_formula,
         expand_series_pairs,
-        format_constant,
-        formula_label,
-        formula_unit,
-        is_constant,
+        formula_source,
+        formula_unit_of,
+        iter_series,
         pair_key,
         pairs_filter,
         parse_difference_entries,
@@ -413,6 +412,7 @@ def compare_view(request):
         parse_series_entries,
     )
     from dashboard.views import (
+        DEFAULT_RESAMPLE_MINUTES,
         apply_dark_theme,
         is_raw_interval,
         parse_interval_minutes,
@@ -434,16 +434,26 @@ def compare_view(request):
 
     TEMPLATE_KEY = "compare_templates"
     ACTIVE_TEMPLATE_KEY = "compare_active_template"
-    KEEP_WITH_TEMPLATE = (
+    PERIOD_KEYS = (
         "start",
         "end",
         "all",
+        "range_mode",
+        "quick",
+        "quickh",
+        "zoomed",
+    )
+    SETTING_KEYS = (
         "interval",
         "fill_method",
         "spike_factor",
         "spike_ceiling",
         "normalize",
+        "events",
     )
+
+    def template_settings():
+        return {key: request.GET.get(key, "") for key in SETTING_KEYS}
 
     selected_room_ids = parse_id_list(request.GET.getlist("room"))
     selected_parameter_ids = parse_id_list(request.GET.getlist("parameter"))
@@ -467,7 +477,8 @@ def compare_view(request):
                     "rooms": selected_room_ids,
                     "parameters": selected_parameter_ids,
                     "series": [encode_series_entry(pair, enabled) for pair, enabled in series_entries],
-                    "diffs": [encode_diff_entry(spec, enabled) for spec, enabled in diff_entries],
+                    "diffs": [encode_diff_entry(node, enabled) for node, enabled in diff_entries],
+                    "settings": template_settings(),
                 },
             )
             remember_active_template(request.session, ACTIVE_TEMPLATE_KEY, save_name)
@@ -490,14 +501,16 @@ def compare_view(request):
         diff_entries = parse_difference_entries(
             stored.get("diffs") or [], valid_room_ids, valid_parameter_ids
         )
+        stored_settings = stored.get("settings") if isinstance(stored.get("settings"), dict) else None
         return redirect(
             url_for_selection(
                 request,
                 selected_room_ids,
                 selected_parameter_ids,
                 [encode_series_entry(pair, enabled) for pair, enabled in series_entries],
-                [encode_diff_entry(spec, enabled) for spec, enabled in diff_entries],
-                KEEP_WITH_TEMPLATE,
+                [encode_diff_entry(node, enabled) for node, enabled in diff_entries],
+                PERIOD_KEYS if stored_settings is not None else PERIOD_KEYS + SETTING_KEYS,
+                overrides=stored_settings,
             )
         )
 
@@ -515,7 +528,7 @@ def compare_view(request):
             encode_series_entry(pair, enabled) for pair, enabled in series_entries
         ]
         request.session["compare_diffs"] = [
-            encode_diff_entry(spec, enabled) for spec, enabled in diff_entries
+            encode_diff_entry(node, enabled) for node, enabled in diff_entries
         ]
     elif not request.GET:
         selected_room_ids = parse_id_list(request.session.get("compare_rooms") or [])
@@ -546,8 +559,8 @@ def compare_view(request):
 
     interval_raw = request.GET.get("interval", None)
     if interval_raw is None:
-        interval_raw = request.session.get("resample_interval", 15)
-    interval_minutes = parse_interval_minutes(interval_raw, default=15)
+        interval_raw = request.session.get("resample_interval", DEFAULT_RESAMPLE_MINUTES)
+    interval_minutes = parse_interval_minutes(interval_raw, default=DEFAULT_RESAMPLE_MINUTES)
     fill_method = request.GET.get(
         "fill_method", request.session.get("resample_fill_method", "ffill")
     )
@@ -591,42 +604,22 @@ def compare_view(request):
         for (room_id, param_id), enabled in series_entries
     ]
 
-    def _pair_title(pair):
-        room = room_by_id[pair[0]]
-        param = parameter_by_id[pair[1]]
-        unit = f" ({param.unit})" if param.unit else ""
-        return f"{room.name} · {param.name}{unit}"
-
-    def _term_title(term):
-        if is_constant(term):
-            return format_constant(term[1])
-        return _pair_title(term)
-
-    def _term_name(term):
-        if is_constant(term):
-            return format_constant(term[1])
-        return f"{room_by_id[term[0]].name} · {parameter_by_id[term[1]].name}"
-
-    def _term_unit(term):
-        if is_constant(term):
-            return None
-        return parameter_by_id[term[1]].unit or ""
+    def _series_name(room_id, parameter_id):
+        return f"{room_by_id[room_id].name}/{parameter_by_id[parameter_id].name}"
 
     selected_diffs = [
         {
-            "key": encode_diff_entry((terms, ops), True),
-            "label": formula_label([_term_title(term) for term in terms], ops),
+            "key": encode_diff_entry(node, True),
+            "label": formula_source(node, _series_name),
             "enabled": enabled,
         }
-        for (terms, ops), enabled in diff_entries
+        for node, enabled in diff_entries
     ]
     query_pairs = list(series_pairs)
     seen_pairs = set(series_pairs)
     event_room_ids = set(pair_room_ids)
-    for terms, _ops in difference_specs:
-        for term in terms:
-            if is_constant(term):
-                continue
+    for node in difference_specs:
+        for term in iter_series(node):
             event_room_ids.add(term[0])
             if term not in seen_pairs:
                 seen_pairs.add(term)
@@ -635,6 +628,7 @@ def compare_view(request):
     compute_error = None
     unit_notice = None
     fig_html = None
+    compare_figure = None
     stats_rows = []
     series_count = 0
     sample_count = 0
@@ -721,37 +715,35 @@ def compare_view(request):
 
                 raw_mode = is_raw_interval(interval_minutes)
                 missing_diffs = []
-                for terms, ops in difference_specs:
-                    series_terms = [term for term in terms if not is_constant(term)]
-                    label = formula_label([_term_name(term) for term in terms], ops)
+                for node in difference_specs:
+                    series_terms = list(iter_series(node))
+                    label = formula_source(node, _series_name)
                     if not series_terms or any(
                         pair_key(*term) not in keyed.columns for term in series_terms
                     ):
                         missing_diffs.append(label)
                         continue
-                    parts = []
-                    for term in terms:
-                        if is_constant(term):
-                            parts.append(float(term[1]))
-                        else:
-                            parts.append(keyed[pair_key(*term)])
-                    series = combine_aligned(
-                        parts,
-                        ops,
+
+                    def get_series(room_id, parameter_id, _keyed=keyed):
+                        return _keyed[pair_key(room_id, parameter_id)]
+
+                    series = evaluate_formula(
+                        node,
+                        get_series,
                         tolerance="2min" if raw_mode else None,
                     )
                     if series.dropna().empty:
                         missing_diffs.append(label)
                         continue
                     if label in used_labels:
-                        label = f"{label} ({encode_diff_entry((terms, ops))})"
+                        label = f"{label} ({encode_diff_entry(node)})"
                     used_labels.add(label)
                     display = display.reindex(display.index.union(series.index))
                     display[label] = series.reindex(display.index)
-                    units_by_label[label] = formula_unit(
-                        [_term_unit(term) for term in terms],
-                        ops,
-                    )
+                    units_by_label[label] = formula_unit_of(
+                        node,
+                        lambda room_id, parameter_id: parameter_by_id[parameter_id].unit or "",
+                    ) or ""
                     dash_labels.add(label)
                     formula_mean = series.dropna().mean()
                     if pd.notna(formula_mean):
@@ -881,10 +873,22 @@ def compare_view(request):
                 pad=dict(t=8, l=4, b=0),
             ),
         )
-        fig_html = fig.to_html(full_html=False, include_plotlyjs="cdn")
+        fig_html = fig.to_html(
+            full_html=False, include_plotlyjs="cdn", div_id="compare-plot"
+        )
+        compare_figure = fig
+
+    if request.GET.get("format") == "json":
+        from django.http import JsonResponse
+
+        if compare_figure is None:
+            return JsonResponse({"error": compute_error or "No chart"}, status=400)
+        return JsonResponse(json.loads(compare_figure.to_json()))
 
     period_label = "all data" if all_data else None
-    if not period_label and start_date and end_date:
+    if load_chart_range_mode(request) == "live" and start_date and not all_data:
+        period_label = f"{timezone.localtime(start_date).strftime('%d %b %Y %H:%M')} – now"
+    elif not period_label and start_date and end_date:
         period_label = (
             f"{timezone.localtime(start_date).strftime('%d %b %Y %H:%M')} – "
             f"{timezone.localtime(end_date).strftime('%d %b %Y %H:%M')}"
@@ -932,6 +936,11 @@ def compare_view(request):
         "templates": list_templates(request.session, TEMPLATE_KEY),
         "active_template": active_template_name(request, ACTIVE_TEMPLATE_KEY),
         "show_events": show_events,
+        "chart_range_mode": load_chart_range_mode(request),
+        "formula_catalog": {
+            "rooms": [{"id": room.id, "name": room.name} for room in rooms],
+            "parameters": [{"id": param.id, "name": param.name} for param in parameters],
+        },
         "active_quick": active_quick_key(
             start_date, end_date, all_data, live=load_chart_range_mode(request) == "live"
         ),

@@ -1,7 +1,7 @@
 """Named selection templates stored in the Django session.
 
-A template keeps rooms, parameters, individual series, and calculations.
-It does not store the time range.
+A template keeps the selection and the chart settings. It does not store
+the time range.
 """
 
 from __future__ import annotations
@@ -62,8 +62,13 @@ def url_without(request, extra_drop=()):
     return request.path + (f"?{encoded}" if encoded else "")
 
 
-def url_for_selection(request, rooms, parameters, series_values, diff_values, keep_keys):
-    """URL that restores a saved selection and keeps the current time controls."""
+def url_for_selection(request, rooms, parameters, series_values, diff_values, keep_keys, overrides=None):
+    """URL that restores a saved selection and keeps the current time controls.
+
+    ``overrides`` replaces those query keys (including empty strings, so a
+    saved blank cap can turn the cap off). Keys listed there are not also
+    copied from the current request.
+    """
     from django.http import QueryDict
 
     query = QueryDict(mutable=True)
@@ -75,10 +80,17 @@ def url_for_selection(request, rooms, parameters, series_values, diff_values, ke
         query.appendlist("series", value)
     for value in diff_values:
         query.appendlist("diff", value)
+    overridden = set(overrides or [])
     for key in keep_keys:
+        if key in overridden:
+            continue
         value = request.GET.get(key)
         if value not in (None, ""):
             query[key] = value
+    for key, value in (overrides or {}).items():
+        if value is None:
+            continue
+        query[key] = str(value)
     query["selection"] = "1"
     encoded = query.urlencode()
     return request.path + (f"?{encoded}" if encoded else "")
