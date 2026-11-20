@@ -164,8 +164,9 @@
                     <label class="flex items-center gap-1.5 text-xs text-slate-400 mb-1.5">
                         Ignore spikes
                         <button type="button" class="help-btn" aria-label="About spike removal"
-                                data-help="Drops samples that jump far from their neighbours before a decay is looked for. Mild removes only the largest jumps. Aggressive removes smaller ones too. Off keeps every sample.">?</button>
+                                data-help="Drops samples that jump far from their neighbours before a decay is looked for. Mild removes only the largest jumps. Aggressive removes smaller ones too. Cap clips anything still above that fixed limit. Off and an empty cap keep every sample.">?</button>
                     </label>
+                    <div class="flex gap-2">
                     <select name="spike_factor"
                             class="bg-slate-900 border border-slate-700 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:border-blue-500 min-w-[140px]">
                         <option value="0"   {% if not spike_factor or spike_factor == 0 %}selected{% endif %}>Off</option>
@@ -173,6 +174,12 @@
                         <option value="2.5" {% if spike_factor == 2.5 %}selected{% endif %}>Medium</option>
                         <option value="1.5" {% if spike_factor == 1.5 %}selected{% endif %}>Aggressive</option>
                     </select>
+                    <input type="text" inputmode="decimal" name="spike_ceiling" id="spike_ceiling"
+                           value="{{ spike_ceiling }}" placeholder="Cap"
+                           title="Clip every series above this number. Empty means no cap. Shared across charts."
+                           autocomplete="off"
+                           class="w-24 bg-slate-900 border border-slate-700 rounded-2xl px-3 py-3 text-sm text-white focus:outline-none focus:border-blue-500">
+                    </div>
                 </div>
             </div>
 
