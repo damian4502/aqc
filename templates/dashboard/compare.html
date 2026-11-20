@@ -158,7 +158,7 @@
             </div>
             <div class="flex flex-wrap gap-3 items-end">
                 <textarea id="formula-input" rows="2" spellcheck="false"
-                          placeholder="(Kuhinja/CO2 + Kopalnica/CO2 + Strojnica/CO2) / 3"
+                          placeholder="avg(Kuhinja/CO2, Kopalnica/CO2, Strojnica/CO2)"
                           class="flex-1 min-w-[280px] bg-slate-900 border border-slate-700 rounded-2xl px-4 py-3 text-sm text-white focus:outline-none focus:border-amber-500 font-mono"></textarea>
                 <button type="button" id="add-diff-btn"
                         class="bg-amber-600 hover:bg-amber-500 px-5 py-3 rounded-2xl text-sm font-medium transition-all">
@@ -187,6 +187,9 @@
                     <option value="-">−</option>
                     <option value="*">×</option>
                     <option value="/">÷</option>
+                    <option value="min(">min(</option>
+                    <option value="max(">max(</option>
+                    <option value="avg(">avg(</option>
                     <option value="(">(</option>
                     <option value=")">)</option>
                 </select>
@@ -203,7 +206,7 @@
                 {% endfor %}
             </div>
             <p id="diff-empty" class="text-[11px] text-slate-500 mt-3 {% if selected_diffs %}hidden{% endif %}">No calculations yet. The series do not have to be checked above. Click a calculation to load it into the field. Uncheck to leave it off the next chart.</p>
-            <p class="text-[11px] text-slate-500 mt-1">Write Room/Parameter, numbers, and + − * /. Parentheses group. * and / happen before + and −, so A − B * C is A − (B * C). The dropdowns insert at the cursor: a room inserts its name and a slash. Up to 24 series. Raw values show the result. With all recorded values, other series are paired to the first within 2 minutes.</p>
+            <p class="text-[11px] text-slate-500 mt-1">Write Room/Parameter, numbers, + − * /, and min(), max(), avg(). Each function takes two or more values, separated by commas, and is computed at each time. Parentheses group. * and / happen before + and −, so A − B * C is A − (B * C). The dropdowns insert at the cursor: a room inserts its name and a slash. Up to 24 series. Raw values show the result. With all recorded values, other series are paired to the first within 2 minutes.</p>
         </div>
 
         <div class="glass rounded-3xl p-6">
@@ -643,7 +646,16 @@ function formulaNames(kind) {
 
 function nameBoundary(text, index) {
     if (index >= text.length) return true;
-    return /[\s+\-*/()×÷−]/.test(text[index]);
+    return /[\s+\-*/(),×÷−]/.test(text[index]);
+}
+
+function matchCall(text, index) {
+    const found = /^(min|max|avg)/i.exec(text.slice(index));
+    if (!found || !nameBoundary(text, index + found[0].length)) return null;
+    let cursor = index + found[0].length;
+    while (cursor < text.length && /\s/.test(text[cursor])) cursor += 1;
+    if (text[cursor] !== '(') return null;
+    return { name: found[0].toLowerCase(), next: cursor };
 }
 
 function parseConstant(raw) {
@@ -672,6 +684,12 @@ function parseFormulaText(raw) {
     while (i < text.length) {
         skip();
         if (i >= text.length) break;
+        const call = matchCall(text, i);
+        if (call) {
+            tokens.push(['fn', call.name]);
+            i = call.next;
+            continue;
+        }
         let matched = null;
         for (const room of rooms) {
             const end = i + room.name.length;
@@ -704,7 +722,7 @@ function parseFormulaText(raw) {
             continue;
         }
         const ch = text[i];
-        if (ch === '(' || ch === ')') {
+        if (ch === '(' || ch === ')' || ch === ',') {
             tokens.push(ch);
             i += 1;
             continue;
@@ -753,6 +771,30 @@ function parseFormulaText(raw) {
             take();
             return node;
         }
+        if (Array.isArray(current) && current[0] === 'fn' && current.length === 2) {
+            const name = current[1];
+            take();
+            if (peek() !== '(') throw new Error("Expected '(' after " + name + ".");
+            take();
+            if (peek() == null || peek() === ',' || peek() === ')') {
+                throw new Error(name + ' needs at least two values.');
+            }
+            const args = [parseExpr()];
+            while (peek() === ',') {
+                take();
+                if (peek() == null || peek() === ',' || peek() === ')') {
+                    throw new Error(name + ' has an empty argument.');
+                }
+                args.push(parseExpr());
+            }
+            if (peek() !== ')') throw new Error('Close the parenthesis.');
+            take();
+            if (args.length < 2) throw new Error(name + ' needs at least two values.');
+            if (args.length > FORMULA_MAX_SERIES) {
+                throw new Error(name + ' can use at most ' + FORMULA_MAX_SERIES + ' values.');
+            }
+            return ['fn', name, args];
+        }
         if (Array.isArray(current) && (current[0] === 'n' || typeof current[0] === 'number')) {
             take();
             return current;
@@ -768,10 +810,13 @@ function parseFormulaText(raw) {
     }
     const series = [];
     (function walk(current) {
-        if (Array.isArray(current) && current[0] === 'op') {
+        if (!Array.isArray(current)) return;
+        if (current[0] === 'op') {
             walk(current[2]);
             walk(current[3]);
-        } else if (Array.isArray(current) && typeof current[0] === 'number') {
+        } else if (current[0] === 'fn' && current.length === 3) {
+            current[2].forEach(walk);
+        } else if (typeof current[0] === 'number') {
             series.push(current);
         }
     })(node);
@@ -817,6 +862,9 @@ function encodeFormula(node) {
         if (currentNode[0] === 'op') {
             return OP_TOKEN[currentNode[1]] + '(' + fx(currentNode[2]) + ',' + fx(currentNode[3]) + ')';
         }
+        if (currentNode[0] === 'fn') {
+            return currentNode[1] + '(' + currentNode[2].map(fx).join(',') + ')';
+        }
         return encodeTerm(currentNode);
     }
     return 'fx:' + fx(node);
@@ -829,6 +877,9 @@ function formulaSource(node) {
     (FORMULA_CATALOG.rooms || []).forEach((item) => { roomName[item.id] = item.name; });
     (FORMULA_CATALOG.parameters || []).forEach((item) => { paramName[item.id] = item.name; });
     function emit(current, parentPrec, isRight) {
+        if (current[0] === 'fn') {
+            return current[1] + '(' + current[2].map((arg) => emit(arg, 0, false)).join(', ') + ')';
+        }
         if (current[0] === 'n') return formatConstant(current[1]);
         if (typeof current[0] === 'number') return roomName[current[0]] + '/' + paramName[current[1]];
         const op = current[1];
@@ -871,7 +922,9 @@ function bindFormulaInserts() {
     });
     if (op) op.addEventListener('change', () => {
         if (!op.value) return;
-        insertFormulaText(op.value === '(' || op.value === ')' ? op.value : ' ' + op.value + ' ');
+        const value = op.value;
+        if (value === '(' || value === ')' || value.endsWith('(')) insertFormulaText(value);
+        else insertFormulaText(' ' + value + ' ');
         op.value = '';
     });
 }

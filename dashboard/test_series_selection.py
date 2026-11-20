@@ -261,3 +261,68 @@ class FormulaTextTests(SimpleTestCase):
         folded = evaluate_formula(legacy, lookup)
         self.assertEqual(float(folded.iloc[0]), (400 + 430) * 2)
         self.assertEqual(formula_unit_of(average, lambda _room, _param: "ppm"), "ppm")
+
+    def test_min_max_avg_round_trip_and_values(self):
+        text = "avg(Kuhinja/CO2, Kopalnica/CO2, Strojnica/CO2)"
+        node = parse_formula_text(text, ROOMS, PARAMS)
+        self.assertEqual(
+            node,
+            ("fn", "avg", ((1, 5), (2, 5), (3, 5))),
+        )
+        self.assertEqual(
+            formula_source(node, lambda room, param: f"{dict(ROOMS)[room]}/{dict(PARAMS)[param]}"),
+            text,
+        )
+        encoded = encode_diff_entry(node)
+        self.assertEqual(encoded, "fx:avg(1:5,2:5,3:5)")
+        self.assertEqual(parse_difference_specs([encoded, encoded + "|0"], {1, 2, 3}, {5})[0], node)
+        disabled = parse_difference_entries([encoded + "|0"], {1, 2, 3}, {5})
+        self.assertFalse(disabled[0][1])
+
+        upper = parse_formula_text("MAX(Kuhinja/CO2, 500)", ROOMS, PARAMS)
+        self.assertEqual(upper, ("fn", "max", ((1, 5), ("n", 500.0))))
+        self.assertEqual(encode_diff_entry(upper), "fx:max(1:5,n:500)")
+        nested = parse_formula_text(
+            "min(avg(Kuhinja/CO2, Kopalnica/CO2), Strojnica/CO2) + 1",
+            ROOMS,
+            PARAMS,
+        )
+        self.assertEqual(
+            formula_source(nested, lambda room, param: f"{dict(ROOMS)[room]}/{dict(PARAMS)[param]}"),
+            "min(avg(Kuhinja/CO2, Kopalnica/CO2), Strojnica/CO2) + 1",
+        )
+        self.assertEqual(
+            parse_difference_specs([encode_diff_entry(nested)], {1, 2, 3}, {5}),
+            [nested],
+        )
+        self.assertEqual(formula_unit_of(node, lambda _room, _param: "ppm"), "ppm")
+        self.assertEqual(formula_unit_of(upper, lambda _room, _param: "ppm"), "ppm")
+        mixed = parse_formula_text("min(Kuhinja/CO2, Kuhinja/PM2.5)", ROOMS, PARAMS)
+        self.assertEqual(
+            formula_unit_of(mixed, lambda _room, param: "ppm" if param == 5 else "µg/m³"),
+            "Δ",
+        )
+
+        index = pd.date_range("2026-01-01", periods=2, freq="h")
+        kitchen = pd.Series([400.0, None], index=index)
+        bath = pd.Series([430.0, 470.0], index=index)
+        utility = pd.Series([460.0, 450.0], index=index)
+
+        def lookup(room, param):
+            return {1: kitchen, 2: bath, 3: utility}[room]
+
+        values = evaluate_formula(node, lookup)
+        self.assertEqual(float(values.iloc[0]), (400 + 430 + 460) / 3)
+        self.assertTrue(pd.isna(values.iloc[1]))
+        lowest = evaluate_formula(
+            parse_formula_text("min(Kuhinja/CO2, Kopalnica/CO2, 410)", ROOMS, PARAMS),
+            lookup,
+        )
+        self.assertEqual(float(lowest.iloc[0]), 400.0)
+        self.assertTrue(pd.isna(lowest.iloc[1]))
+        with self.assertRaises(FormulaError):
+            parse_formula_text("avg(Kuhinja/CO2)", ROOMS, PARAMS)
+        with self.assertRaises(FormulaError):
+            parse_formula_text("min(1, 2)", ROOMS, PARAMS)
+        with self.assertRaises(FormulaError):
+            parse_formula_text("avg(Kuhinja/CO2,)", ROOMS, PARAMS)

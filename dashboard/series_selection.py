@@ -23,6 +23,7 @@ OP_TOKENS = {
 }
 TOKEN_FOR_OP = {"+": "add", "-": "sub", "*": "mul", "/": "div"}
 OP_SYMBOLS = {"+": "+", "-": "−", "*": "×", "/": "÷"}
+FN_NAMES = ("min", "max", "avg")
 MAX_FORMULA_TERMS = 24
 _PREC = {"+": 1, "-": 1, "*": 2, "/": 2}
 _FX_WORD = {"+": "add", "-": "sub", "*": "mul", "/": "div"}
@@ -39,6 +40,17 @@ def _is_series(node) -> bool:
         and not isinstance(node[0], bool)
         and isinstance(node[0], int)
         and isinstance(node[1], int)
+    )
+
+
+def _is_fn(node) -> bool:
+    return (
+        isinstance(node, tuple)
+        and len(node) == 3
+        and node[0] == "fn"
+        and node[1] in FN_NAMES
+        and isinstance(node[2], tuple)
+        and len(node[2]) >= 2
     )
 
 
@@ -182,6 +194,9 @@ def iter_series(node):
     elif _is_op(node):
         yield from iter_series(node[2])
         yield from iter_series(node[3])
+    elif _is_fn(node):
+        for arg in node[2]:
+            yield from iter_series(arg)
 
 
 def _series_count(node) -> int:
@@ -189,7 +204,7 @@ def _series_count(node) -> int:
 
 
 def _parse_fx(body, valid_room_ids, valid_parameter_ids):
-    """Parse ``add(1:5,2:5)`` style bodies produced by :func:`_encode_fx`."""
+    """Parse ``add(1:5,2:5)`` and ``avg(1:5,2:5)`` bodies from :func:`_encode_fx`."""
     pos = 0
 
     def parse_node():
@@ -198,14 +213,33 @@ def _parse_fx(body, valid_room_ids, valid_parameter_ids):
             if body.startswith(word, pos):
                 pos += len(word)
                 left = parse_node()
-                if pos >= len(body) or body[pos] != ",":
+                if left is None or pos >= len(body) or body[pos] != ",":
                     return None
                 pos += 1
                 right = parse_node()
-                if pos >= len(body) or body[pos] != ")":
+                if right is None or pos >= len(body) or body[pos] != ")":
                     return None
                 pos += 1
                 return ("op", op, left, right)
+        for name in FN_NAMES:
+            word = name + "("
+            if not body.startswith(word, pos):
+                continue
+            pos += len(word)
+            args = []
+            while True:
+                arg = parse_node()
+                if arg is None:
+                    return None
+                args.append(arg)
+                if pos < len(body) and body[pos] == ",":
+                    pos += 1
+                    continue
+                break
+            if pos >= len(body) or body[pos] != ")" or len(args) < 2:
+                return None
+            pos += 1
+            return ("fn", name, tuple(args))
         end = pos
         while end < len(body) and body[end] not in ",)":
             end += 1
@@ -226,6 +260,8 @@ def _parse_fx(body, valid_room_ids, valid_parameter_ids):
 def _encode_fx(node) -> str:
     if _is_op(node):
         return f"{_FX_WORD[node[1]]}({_encode_fx(node[2])},{_encode_fx(node[3])})"
+    if _is_fn(node):
+        return node[1] + "(" + ",".join(_encode_fx(arg) for arg in node[2]) + ")"
     return _encode_term(node)
 
 
@@ -233,7 +269,8 @@ def parse_difference_specs(values, valid_room_ids, valid_parameter_ids):
     """Enabled calculations as expression trees.
 
     A leaf is ``(room, parameter)`` or ``("n", value)``. An operation is
-    ``("op", "+", left, right)``. ``*`` and ``/`` bind tighter than ``+``
+    ``("op", "+", left, right)``. ``min``, ``max``, and ``avg`` are
+    ``("fn", name, args)``. ``*`` and ``/`` bind tighter than ``+``
     and ``-`` when the formula was typed. A saved ``a|b`` token is still
     left-associative A − B, and ``a|add|b|mul|c`` is still ``(a + b) * c``.
     """
@@ -391,6 +428,11 @@ def formula_unit_of(node, unit_of_series):
         return None
     if _is_series(node):
         return unit_of_series(node[0], node[1]) or ""
+    if _is_fn(node):
+        units = [formula_unit_of(arg, unit_of_series) for arg in node[2]]
+        if all(unit is None for unit in units):
+            return None
+        return formula_unit(units, tuple("+" for _ in units[1:]))
     if not _is_op(node):
         return ""
     return formula_unit(
@@ -410,6 +452,9 @@ def formula_source(node, series_name) -> str:
             return format_constant(current[1])
         if _is_series(current):
             return series_name(current[0], current[1])
+        if _is_fn(current):
+            args = ", ".join(emit(arg, 0, False) for arg in current[2])
+            return f"{current[1]}({args})"
         if not _is_op(current):
             return ""
         op = current[1]
@@ -434,16 +479,17 @@ def _name_boundary(text, index) -> bool:
     if index >= len(text):
         return True
     char = text[index]
-    return char.isspace() or char in "+-*/()×÷−"
+    return char.isspace() or char in "+-*/(),×÷−"
 
 
 def parse_formula_text(text, rooms, parameters):
-    """Parse ``(Kuhinja/CO2 + Kopalnica/CO2) / 3`` into an expression tree.
+    """Parse ``avg(Kuhinja/CO2, Kopalnica/CO2)`` into an expression tree.
 
     ``rooms`` and ``parameters`` are ``(id, name)`` pairs. ``/`` between a
     known room and parameter is the series, and ``/`` between values divides.
     ``*`` and ``/`` bind tighter than ``+`` and ``-``. Parentheses group.
-    At least one series is required.
+    ``min``, ``max``, and ``avg`` take two or more values, separated by
+    commas, and are computed at each timestamp. At least one series is required.
     """
     raw = str(text or "")
     if not raw.strip():
@@ -463,6 +509,11 @@ def parse_formula_text(text, rooms, parameters):
         index = skip_space(index)
         if index >= length:
             break
+        call = _match_call(raw, index)
+        if call is not None:
+            name, index = call
+            tokens.append(("fn", name))
+            continue
         matched = None
         for room_id, room_name in room_list:
             room_name = str(room_name or "")
@@ -498,7 +549,7 @@ def parse_formula_text(text, rooms, parameters):
             tokens.append(("n", value))
             continue
         char = raw[index]
-        if char in "()":
+        if char in "(),":
             tokens.append(char)
             index += 1
             continue
@@ -519,6 +570,31 @@ def parse_formula_text(text, rooms, parameters):
     if count > MAX_FORMULA_TERMS:
         raise FormulaError(f"A formula can use at most {MAX_FORMULA_TERMS} series.")
     return node
+
+
+def _match_call(text, index):
+    """``min``/``max``/``avg`` when the next non-space character is ``(``."""
+    for name in FN_NAMES:
+        end = index + len(name)
+        if end > len(text) or text[index:end].casefold() != name:
+            continue
+        if not _name_boundary(text, end):
+            continue
+        cursor = end
+        while cursor < len(text) and text[cursor].isspace():
+            cursor += 1
+        if cursor < len(text) and text[cursor] == "(":
+            return name, cursor
+    return None
+
+
+def _is_call_token(token) -> bool:
+    return (
+        isinstance(token, tuple)
+        and len(token) == 2
+        and token[0] == "fn"
+        and token[1] in FN_NAMES
+    )
 
 
 def _match_number(text, index):
@@ -576,6 +652,28 @@ def _parse_expression_tokens(tokens):
                 raise FormulaError("Close the parenthesis.")
             nonlocal_advance()
             return node
+        if _is_call_token(current):
+            name = current[1]
+            nonlocal_advance()
+            if peek() != "(":
+                raise FormulaError(f"Expected '(' after {name}.")
+            nonlocal_advance()
+            if peek() in (None, ",", ")"):
+                raise FormulaError(f"{name} needs at least two values.")
+            args = [parse_expr()]
+            while peek() == ",":
+                nonlocal_advance()
+                if peek() in (None, ",", ")"):
+                    raise FormulaError(f"{name} has an empty argument.")
+                args.append(parse_expr())
+            if peek() != ")":
+                raise FormulaError("Close the parenthesis.")
+            nonlocal_advance()
+            if len(args) < 2:
+                raise FormulaError(f"{name} needs at least two values.")
+            if len(args) > MAX_FORMULA_TERMS:
+                raise FormulaError(f"{name} can use at most {MAX_FORMULA_TERMS} values.")
+            return ("fn", name, tuple(args))
         if is_constant(current) or _is_series(current):
             nonlocal_advance()
             return current
@@ -615,6 +713,8 @@ def evaluate_formula(node, get_series, tolerance=None):
                 return environment[current]
             if _is_op(current):
                 return _apply_op(value(current[2]), value(current[3]), current[1])
+            if _is_fn(current):
+                return _apply_fn(current[1], [value(arg) for arg in current[2]])
             return pd.Series(dtype="float64")
 
         return value(node)
@@ -688,6 +788,53 @@ def _apply_op(left, right, op):
     if not math.isfinite(value):
         return float("nan")
     return value
+
+
+def _apply_fn(name, values):
+    """Pointwise ``min``, ``max``, or ``avg``. A missing value stays missing."""
+    import pandas as pd
+
+    series_values = [value for value in values if isinstance(value, pd.Series)]
+    if not series_values:
+        numbers = []
+        for value in values:
+            try:
+                number = float(value)
+            except (TypeError, ValueError):
+                return float("nan")
+            if not math.isfinite(number):
+                return float("nan")
+            numbers.append(number)
+        if name == "min":
+            return min(numbers)
+        if name == "max":
+            return max(numbers)
+        return sum(numbers) / len(numbers)
+
+    index = series_values[0].index
+    for series in series_values[1:]:
+        index = index.union(series.index)
+    columns = []
+    for value in values:
+        if isinstance(value, pd.Series):
+            columns.append(pd.to_numeric(value, errors="coerce").reindex(index))
+        else:
+            try:
+                number = float(value)
+            except (TypeError, ValueError):
+                number = float("nan")
+            if not math.isfinite(number):
+                number = float("nan")
+            columns.append(pd.Series(number, index=index, dtype="float64"))
+    frame = pd.concat(columns, axis=1)
+    if name == "min":
+        result = frame.min(axis=1, skipna=False)
+    elif name == "max":
+        result = frame.max(axis=1, skipna=False)
+    else:
+        result = frame.mean(axis=1, skipna=False)
+    numeric = pd.to_numeric(result, errors="coerce")
+    return numeric.where(numeric.abs() < float("inf"))
 
 
 def _nearest_values(base, other, tolerance):
