@@ -132,7 +132,7 @@
           if (!err) console.log('Naročen na vse senzorje: vila/sentjane/#');
         });
 		
-		for (parameter in parameter_map) client.publish("vila/sentjane/asgard/cmd/all", parameter, { qos: 0 });
+		client.publish("vila/sentjane/asgard/cmd/all", "live_mode", { qos: 0 });
       });
 
       client.on('message', function (topic, message) {
@@ -411,14 +411,15 @@ document.addEventListener('DOMContentLoaded', function() {
 	  
 	client.on('connect', function () {
 		
-		for (parameter in parameter_map) client.publish("vila/sentjane/asgard/cmd/all", parameter, { qos: 2 });
+		//for (parameter in parameter_map) client.publish("vila/sentjane/asgard/cmd/all", parameter, { qos: 0 });
 		for (topic in mqtt_topics) client.subscribe(topic);
+		client.publish("vila/sentjane/asgard/cmd/all", "live_mode", { qos: 0 });
       });
 
 document.addEventListener('visibilitychange', () => {
 pageVisible = document.visibilityState === 'visible';
     if (pageVisible) {
-		for (parameter in parameter_map) client.publish("vila/sentjane/asgard/cmd/all", parameter, { qos: 0 });
+		client.publish("vila/sentjane/asgard/cmd/all", "live_mode", { qos: 0 });
     }
 });
 
