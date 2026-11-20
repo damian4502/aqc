@@ -14,3 +14,5 @@ class MqttSubscriptionAdmin(admin.ModelAdmin):
     list_filter = ['sensor__room', 'parameter']
     search_fields = ['topic', 'sensor__name', 'parameter__name']
     autocomplete_fields = ['sensor', 'parameter']
+    
+    save_as = True
