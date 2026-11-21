@@ -594,6 +594,9 @@ def distinct_measurement_pairs(start=None, end=None, room_id=None, parameter_id=
         if end is not None:
             query = query.filter(timestamp__lte=end)
     return list(query.values_list("sensor__room_id", "parameter_id").distinct())
+
+
+def label_frame(resampled, pairs, label_for):
     """Rename pair-key columns with ``label_for(room_id, parameter_id)``."""
     from dashboard.series_selection import pair_key
 
