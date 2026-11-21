@@ -24,10 +24,24 @@ class Parameter(models.Model):
         default=2,
         verbose_name="Number of decimal places on room cards etc.",
     )
-    
-    
+    formula = models.TextField(
+        blank=True,
+        default="",
+        verbose_name="Formula",
+        help_text=(
+            "Leave empty for a measured parameter. A formula is plotted and not stored. "
+            "Same syntax as Compare: Room/Parameter, numbers, + − * /, parentheses, "
+            "min(), max(), and avg(). The unit is the Unit field. "
+            "Names are matched as written, so rename a room or parameter and update the formula."
+        ),
+    )
+
     def __str__(self):
         return f"{self.name} ({self.unit})" if self.unit else self.name
+
+    @property
+    def is_calculated(self):
+        return bool((self.formula or "").strip())
 
     def live_rooms(self):
         from measurements.models import Measurement

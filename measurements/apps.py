@@ -2,4 +2,8 @@ from django.apps import AppConfig
 
 
 class MeasurementsConfig(AppConfig):
-    name = 'measurements'
+    default = True
+    name = "measurements"
+
+    def ready(self):
+        from . import signals  # noqa: F401

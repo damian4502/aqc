@@ -580,8 +580,14 @@ def compare_view(request):
 
     room_by_id = {room.id: room for room in rooms}
     parameter_by_id = {param.id: param for param in parameters}
+    from dashboard.parameter_formula import partition_parameters
+
+    calculated_ids = {param.id for param in parameters if param.is_calculated}
+    measured_parameter_ids, measured_explicit, calculated_series_ids = partition_parameters(
+        selected_parameter_ids, enabled_explicit, calculated_ids
+    )
     series_pairs = expand_series_pairs(
-        selected_room_ids, selected_parameter_ids, enabled_explicit
+        selected_room_ids, measured_parameter_ids, measured_explicit
     )
     pair_room_ids = {room_id for room_id, _param_id in series_pairs}
     pair_parameter_ids = {param_id for _room_id, param_id in series_pairs}
@@ -590,7 +596,7 @@ def compare_view(request):
     include_room = len(pair_rooms) != 1
     include_parameter = len(pair_parameters) != 1
     difference_specs = enabled_diffs
-    n_series_selected = len(series_pairs) + len(difference_specs)
+    n_series_selected = len(series_pairs) + len(calculated_series_ids) + len(difference_specs)
     selected_series = [
         {
             "room_id": room_id,
@@ -621,6 +627,8 @@ def compare_view(request):
     for node in difference_specs:
         for term in iter_series(node):
             event_room_ids.add(term[0])
+            if term[1] in calculated_ids:
+                continue
             if term not in seen_pairs:
                 seen_pairs.add(term)
                 query_pairs.append(term)
@@ -654,110 +662,132 @@ def compare_view(request):
     dash_labels = set()
 
     if should_compute:
-        query = Measurement.objects.filter(pairs_filter(query_pairs)).select_related(
-            "sensor__room", "parameter"
+        from dashboard.parameter_formula import (
+            FormulaError,
+            formula_catalog,
+            load_keyed_with_calculations,
         )
-        if start_date and end_date:
-            query = query.filter(timestamp__gte=start_date, timestamp__lte=end_date)
 
-        measurements = query.order_by("timestamp")
-        if not measurements.exists():
-            compute_error = "No measurements in this period for the selected series."
+        catalog_rooms, catalog_parameters, formulas = formula_catalog(rooms, parameters)
+        needed_calculated = list(calculated_series_ids)
+        for node in difference_specs:
+            for _room_id, param_id in iter_series(node):
+                if param_id in calculated_ids and param_id not in needed_calculated:
+                    needed_calculated.append(param_id)
+        raw_mode = is_raw_interval(interval_minutes)
+        try:
+            keyed, recorded_mean, calculated_map = load_keyed_with_calculations(
+                query_pairs,
+                needed_calculated,
+                start_date,
+                end_date,
+                interval_minutes,
+                fill_method=fill_method,
+                spike_factor=spike_factor,
+                spike_ceiling=spike_ceiling,
+                rooms=catalog_rooms,
+                parameters=catalog_parameters,
+                formulas=formulas,
+                tolerance="2min" if raw_mode else None,
+            )
+        except FormulaError as exc:
+            compute_error = str(exc)
         else:
-            frame = pd.DataFrame(
-                list(
-                    measurements.values(
-                        "timestamp",
-                        "value",
-                        "sensor__room_id",
-                        "parameter_id",
-                        "parameter__unit",
-                    )
+            if keyed is None:
+                keyed = pd.DataFrame()
+            elif not keyed.empty:
+                keyed = keyed.dropna(axis=1, how="all")
+            display = pd.DataFrame(index=keyed.index)
+            used_labels = set()
+            for room_id, param_id in series_pairs:
+                key = pair_key(room_id, param_id)
+                if key not in keyed.columns:
+                    continue
+                label = make_series_label(
+                    room_by_id[room_id].name,
+                    parameter_by_id[param_id].name,
+                    include_room=include_room,
+                    include_parameter=include_parameter,
                 )
-            )
-            frame["timestamp"] = pd.to_datetime(frame["timestamp"])
-            frame["parameter"] = [
-                pair_key(room_id, param_id)
-                for room_id, param_id in zip(frame["sensor__room_id"], frame["parameter_id"])
-            ]
-            recorded_mean = recorded_averages(frame)
+                if label in used_labels:
+                    label = f"{label} ({key})"
+                used_labels.add(label)
+                display[label] = keyed[key]
+                units_by_label[label] = parameter_by_id[param_id].unit or ""
+                if key in recorded_mean:
+                    sample_average_by_label[label] = recorded_mean[key]
 
-            resampled = resample_measurements(
-                frame, interval_minutes, fill_method, spike_factor=spike_factor, spike_ceiling=spike_ceiling
-            )
-            if resampled is None or resampled.empty:
-                compute_error = (
-                    "No recorded samples in this period."
-                    if is_raw_interval(interval_minutes)
-                    else "No samples after resampling."
+            for param_id in calculated_series_ids:
+                series = calculated_map.get(param_id)
+                if series is None or series.dropna().empty:
+                    continue
+                label = parameter_by_id[param_id].name
+                if label in used_labels:
+                    label = f"{label} (calculated)"
+                used_labels.add(label)
+                display = display.reindex(display.index.union(series.dropna().index))
+                display[label] = series.reindex(display.index)
+                units_by_label[label] = parameter_by_id[param_id].unit or ""
+                dash_labels.add(label)
+                formula_mean = series.dropna().mean()
+                if pd.notna(formula_mean):
+                    sample_average_by_label[label] = float(formula_mean)
+
+            def has_term(term, _keyed=keyed, _calc=calculated_map):
+                room_id, param_id = term
+                if param_id in calculated_ids:
+                    series = _calc.get(param_id)
+                    return series is not None and not series.dropna().empty
+                return pair_key(room_id, param_id) in _keyed.columns
+
+            def get_series(room_id, parameter_id, _keyed=keyed, _calc=calculated_map):
+                if parameter_id in calculated_ids:
+                    series = _calc.get(parameter_id)
+                    return series if series is not None else pd.Series(dtype="float64")
+                key = pair_key(room_id, parameter_id)
+                if key not in _keyed.columns:
+                    return pd.Series(dtype="float64")
+                return _keyed[key]
+
+            missing_diffs = []
+            for node in difference_specs:
+                series_terms = list(iter_series(node))
+                label = formula_source(node, _series_name)
+                if not series_terms or any(not has_term(term) for term in series_terms):
+                    missing_diffs.append(label)
+                    continue
+
+                series = evaluate_formula(
+                    node,
+                    get_series,
+                    tolerance="2min" if raw_mode else None,
                 )
-            else:
-                keyed = resampled.dropna(axis=1, how="all")
-                display = pd.DataFrame(index=keyed.index)
-                used_labels = set()
-                for room_id, param_id in series_pairs:
-                    key = pair_key(room_id, param_id)
-                    if key not in keyed.columns:
-                        continue
-                    label = make_series_label(
-                        room_by_id[room_id].name,
-                        parameter_by_id[param_id].name,
-                        include_room=include_room,
-                        include_parameter=include_parameter,
-                    )
-                    if label in used_labels:
-                        label = f"{label} ({key})"
-                    used_labels.add(label)
-                    display[label] = keyed[key]
-                    units_by_label[label] = parameter_by_id[param_id].unit or ""
-                    if key in recorded_mean:
-                        sample_average_by_label[label] = recorded_mean[key]
+                if series.dropna().empty:
+                    missing_diffs.append(label)
+                    continue
+                if label in used_labels:
+                    label = f"{label} ({encode_diff_entry(node)})"
+                used_labels.add(label)
+                display = display.reindex(display.index.union(series.index))
+                display[label] = series.reindex(display.index)
+                units_by_label[label] = formula_unit_of(
+                    node,
+                    lambda room_id, parameter_id: parameter_by_id[parameter_id].unit or "",
+                ) or ""
+                dash_labels.add(label)
+                formula_mean = series.dropna().mean()
+                if pd.notna(formula_mean):
+                    sample_average_by_label[label] = float(formula_mean)
 
-                raw_mode = is_raw_interval(interval_minutes)
-                missing_diffs = []
-                for node in difference_specs:
-                    series_terms = list(iter_series(node))
-                    label = formula_source(node, _series_name)
-                    if not series_terms or any(
-                        pair_key(*term) not in keyed.columns for term in series_terms
-                    ):
-                        missing_diffs.append(label)
-                        continue
-
-                    def get_series(room_id, parameter_id, _keyed=keyed):
-                        return _keyed[pair_key(room_id, parameter_id)]
-
-                    series = evaluate_formula(
-                        node,
-                        get_series,
-                        tolerance="2min" if raw_mode else None,
-                    )
-                    if series.dropna().empty:
-                        missing_diffs.append(label)
-                        continue
-                    if label in used_labels:
-                        label = f"{label} ({encode_diff_entry(node)})"
-                    used_labels.add(label)
-                    display = display.reindex(display.index.union(series.index))
-                    display[label] = series.reindex(display.index)
-                    units_by_label[label] = formula_unit_of(
-                        node,
-                        lambda room_id, parameter_id: parameter_by_id[parameter_id].unit or "",
-                    ) or ""
-                    dash_labels.add(label)
-                    formula_mean = series.dropna().mean()
-                    if pd.notna(formula_mean):
-                        sample_average_by_label[label] = float(formula_mean)
-
-                display = display.dropna(axis=1, how="all")
-                if missing_diffs:
-                    note = "No overlapping samples for " + "; ".join(missing_diffs) + "."
-                    unit_notice = f"{unit_notice} {note}".strip() if unit_notice else note
-                resampled = display
-                series_count = len(resampled.columns)
-                sample_count = int(len(resampled))
-                if series_count < 1:
-                    compute_error = "No series have data in this period."
+            display = display.dropna(axis=1, how="all")
+            if missing_diffs:
+                note = "No overlapping samples for " + "; ".join(missing_diffs) + "."
+                unit_notice = f"{unit_notice} {note}".strip() if unit_notice else note
+            resampled = display
+            series_count = len(resampled.columns)
+            sample_count = int(len(resampled))
+            if series_count < 1 and compute_error is None:
+                compute_error = "No series have data in this period."
 
     if resampled is not None and not resampled.empty and compute_error is None:
         unique_units = []

@@ -9,7 +9,7 @@
     <div class="flex justify-between items-end">
         <div>
             <h1 class="text-5xl font-bold text-white tracking-tighter">{{ parameter.name }}</h1>
-            <p class="text-slate-400 mt-1">{{ parameter.unit }} • Room comparison</p>
+            <p class="text-slate-400 mt-1">{{ parameter.unit }} • {% if parameter.is_calculated %}Calculated{% else %}Room comparison{% endif %}</p>
         </div>
         
 <select id="param-switcher" 
@@ -21,13 +21,14 @@
 	{% all_parameters as all_parameters %}
     {% for p in all_parameters %}
         {% if p.id != parameter.id %}
-        <option value="{% url 'parameter_detail' p.id %}">{{ p.name }} ({{ p.unit }})</option>
+        <option value="{% url 'parameter_detail' p.id %}">{{ p.name }} ({{ p.unit }}){% if p.formula %} (calculated){% endif %}</option>
         {% endif %}
     {% endfor %}
 </select>
     </div>
 
     <!-- Latest measurements by room -->
+    {% if not parameter.is_calculated %}
     <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6" id="latest_measurements">
         {% for m in rooms %}
 		{% latest_measurement m.id parameter.id as last_value %}
@@ -49,14 +50,91 @@
 		{% endif %}
         {% endfor %}
     </div>
+    {% endif %}
+
+    <form method="post" class="glass rounded-3xl p-6 space-y-4">
+        {% csrf_token %}
+        <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+            <label for="parameter-formula" class="text-sm font-medium text-slate-200">
+                <i class="fas fa-calculator mr-1.5 text-amber-400"></i> Formula
+            </label>
+            <span class="text-[11px] text-slate-500">Empty means this parameter is a direct measurement. A formula is plotted and not stored.</span>
+        </div>
+        <textarea id="parameter-formula" name="formula" rows="2" spellcheck="false"
+                  placeholder="avg(Kuhinja/CO2, Kopalnica/CO2, Strojnica/CO2)"
+                  class="w-full bg-slate-900 border border-slate-700 rounded-2xl px-4 py-3 text-sm text-white focus:outline-none focus:border-amber-500 font-mono">{{ formula_value|default:parameter.formula }}</textarea>
+        <div class="flex flex-wrap gap-3">
+            <select id="formula-insert-room" aria-label="Insert room"
+                    class="bg-slate-900 border border-slate-700 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:border-blue-500 min-w-[160px]">
+                <option value="">Room</option>
+                {% for room in formula_rooms %}
+                <option value="{{ room.name }}/">{{ room.name }}</option>
+                {% endfor %}
+            </select>
+            <select id="formula-insert-param" aria-label="Insert parameter"
+                    class="bg-slate-900 border border-slate-700 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:border-blue-500 min-w-[160px]">
+                <option value="">Parameter</option>
+                {% for p in formula_parameters %}
+                <option value="{{ p.name }}">{{ p.name }}{% if p.unit %} ({{ p.unit }}){% endif %}{% if p.formula %} (calculated){% endif %}</option>
+                {% endfor %}
+            </select>
+            <select id="formula-insert-op" aria-label="Insert operation"
+                    class="bg-slate-900 border border-slate-700 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:border-amber-500 min-w-[140px]">
+                <option value="">Operation</option>
+                <option value="+">+</option>
+                <option value="-">−</option>
+                <option value="*">×</option>
+                <option value="/">÷</option>
+                <option value="min(">min(</option>
+                <option value="max(">max(</option>
+                <option value="avg(">avg(</option>
+                <option value="(">(</option>
+                <option value=")">)</option>
+            </select>
+            <button type="submit" class="bg-amber-600 hover:bg-amber-500 px-5 py-3 rounded-2xl text-sm font-medium transition-all">
+                Save formula
+            </button>
+        </div>
+        <p class="text-[11px] text-slate-500">Same syntax as Compare. The unit stays the one set on this parameter. A calculated parameter is one series, not one line per room.</p>
+        {% if formula_error %}
+        <p class="text-sm text-rose-300">{{ formula_error }}</p>
+        {% endif %}
+    </form>
+    <script>
+    (function () {
+        function insertFormula(text) {
+            const el = document.getElementById('parameter-formula');
+            if (!el || !text) return;
+            const start = el.selectionStart || 0;
+            const end = el.selectionEnd || 0;
+            const before = el.value.slice(0, start);
+            const after = el.value.slice(end);
+            const pad = before && !/\s$/.test(before) && !/[\(\/,]$/.test(text) ? ' ' : '';
+            el.value = before + pad + text + after;
+            const pos = (before + pad + text).length;
+            el.focus();
+            el.setSelectionRange(pos, pos);
+        }
+        ['formula-insert-room', 'formula-insert-param', 'formula-insert-op'].forEach(function (id) {
+            const select = document.getElementById(id);
+            if (!select) return;
+            select.addEventListener('change', function () {
+                if (select.value) insertFormula(select.value);
+                select.value = '';
+            });
+        });
+    })();
+    </script>
 
     <!-- View tabs -->
+    {% if not parameter.is_calculated %}
     <div class="flex flex-wrap gap-3">
         <a href="?view=trend" class="tab-btn {% if view_type == 'trend' %}active{% endif %}">Time trend</a>
         <a href="?view=correlation" class="tab-btn {% if view_type == 'correlation' %}active{% endif %}">Room correlation</a>
         <a href="?view=hourly" class="tab-btn {% if view_type == 'hourly' %}active{% endif %}">Daily pattern</a>
         <a href="?view=weekly" class="tab-btn {% if view_type == 'weekly' %}active{% endif %}">Weekly pattern</a>
     </div>
+    {% endif %}
 
 <!-- Unified filter + export -->
 <div class="glass rounded-3xl p-6 mb-8">
@@ -204,7 +282,7 @@
 </div>
 
     <!-- Main chart -->
-    {% if fig %}
+    {% if show_chart %}
         <div class="glass rounded-3xl p-8">
             <div id="plotly-graph" class="w-full rounded-3xl overflow-hidden" style="height: 650px;"></div>
         </div>

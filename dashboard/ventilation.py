@@ -990,7 +990,13 @@ def ventilation_view(request):
         request.session["vent_fill_method"] = fill_method
         request.session["spike_factor"] = spike_factor
 
-    series_pairs = expand_series_pairs(selected_room_ids, selected_parameter_ids, [])
+    from dashboard.parameter_formula import partition_parameters
+
+    calculated_ids = {param.id for param in parameters if param.is_calculated}
+    measured_ids, _measured_explicit, calculated_series_ids = partition_parameters(
+        selected_parameter_ids, [], calculated_ids
+    )
+    series_pairs = expand_series_pairs(selected_room_ids, measured_ids, [])
     pair_rooms = [room_by_id[rid] for rid, _pid in series_pairs]
     pair_parameters = [parameter_by_id[pid] for _rid, pid in series_pairs]
     unique_rooms = {room.id for room in pair_rooms}
@@ -1001,7 +1007,7 @@ def ventilation_view(request):
     compute_error = None
     submitted = has_query_selection and bool(request.GET)
     should_compute = submitted
-    n_series = len(series_pairs)
+    n_series = len(series_pairs) + len(calculated_series_ids)
     if should_compute and n_series > MAX_SERIES:
         compute_error = (
             f"That selection would build {n_series} series (limit is {MAX_SERIES}). "
@@ -1021,51 +1027,82 @@ def ventilation_view(request):
     auto_floors = []
 
     if should_compute:
-        qs = Measurement.objects.filter(pairs_filter(series_pairs)).select_related("sensor__room", "parameter")
-        if not all_data and start_date:
-            qs = qs.filter(timestamp__gte=start_date, timestamp__lte=end_date)
-        if not qs.exists():
-            compute_error = "No measurements in this period for the selected series."
-        else:
-            frame = pd.DataFrame(
-                list(qs.order_by("timestamp").values(
-                    "timestamp", "value", "sensor__room__name", "sensor__room_id",
-                    "parameter__name", "parameter__unit", "parameter_id",
-                ))
-            )
-            frame["timestamp"] = pd.to_datetime(frame["timestamp"])
-            param_names = frame["parameter__name"].tolist()
-            param_ids = frame["parameter_id"].tolist()
-            room_ids_col = frame["sensor__room_id"].tolist()
-            labels_for_rows = [
-                make_series_label(room, param, include_room=include_room, include_parameter=include_parameter)
-                for room, param in zip(frame["sensor__room__name"], param_names)
-            ]
-            frame["parameter"] = labels_for_rows
-            unit_by_label = {}
-            param_by_label = {}
-            param_id_by_label = {}
-            room_id_by_label = {}
-            for label, unit, param_name, param_id, room_id in zip(
-                labels_for_rows,
-                frame["parameter__unit"].tolist(),
-                param_names,
-                param_ids,
-                room_ids_col,
-            ):
-                if not isinstance(unit, str):
-                    unit = ""
-                unit_by_label.setdefault(label, unit)
-                param_by_label.setdefault(label, param_name)
-                param_id_by_label.setdefault(label, param_id)
-                room_id_by_label.setdefault(label, room_id)
+        from dashboard.bin_cache import label_frame
+        from dashboard.parameter_formula import (
+            FormulaError,
+            add_calculated_columns,
+            formula_catalog,
+            load_keyed_with_calculations,
+        )
 
-            resampled = resample_measurements(
-                frame, interval_minutes, fill_method, spike_factor=spike_factor, spike_ceiling=spike_ceiling
+        catalog_rooms, catalog_parameters, formulas = formula_catalog(rooms, parameters)
+        try:
+            keyed, _raw_means, calculated = load_keyed_with_calculations(
+                series_pairs,
+                calculated_series_ids,
+                None if all_data else start_date,
+                None if all_data else end_date,
+                interval_minutes,
+                fill_method=fill_method,
+                spike_factor=spike_factor,
+                spike_ceiling=spike_ceiling,
+                rooms=catalog_rooms,
+                parameters=catalog_parameters,
+                formulas=formulas,
+                tolerance="2min" if is_raw_interval(interval_minutes) else None,
             )
-            if resampled is None or resampled.empty:
+        except FormulaError as exc:
+            compute_error = str(exc)
+            keyed, calculated = None, {}
+        unit_by_label = {}
+        param_by_label = {}
+        param_id_by_label = {}
+        room_id_by_label = {}
+        if compute_error is None:
+            resampled = label_frame(
+                keyed,
+                series_pairs,
+                lambda room_id, parameter_id: make_series_label(
+                    room_by_id[room_id].name,
+                    parameter_by_id[parameter_id].name,
+                    include_room=include_room,
+                    include_parameter=include_parameter,
+                ),
+            )
+            for room_id, parameter_id in series_pairs:
+                label = make_series_label(
+                    room_by_id[room_id].name,
+                    parameter_by_id[parameter_id].name,
+                    include_room=include_room,
+                    include_parameter=include_parameter,
+                )
+                if label not in getattr(resampled, "columns", []):
+                    continue
+                unit_by_label.setdefault(label, parameter_by_id[parameter_id].unit or "")
+                param_by_label.setdefault(label, parameter_by_id[parameter_id].name)
+                param_id_by_label.setdefault(label, parameter_id)
+                room_id_by_label.setdefault(label, room_id)
+            before = set(resampled.columns) if resampled is not None and not resampled.empty else set()
+            resampled = add_calculated_columns(
+                resampled,
+                {parameter_id: calculated.get(parameter_id) for parameter_id in calculated_series_ids},
+                parameter_by_id,
+            )
+            for parameter_id in calculated_series_ids:
+                parameter = parameter_by_id[parameter_id]
+                label = parameter.name if parameter.name not in before else f"{parameter.name} (calculated)"
+                if resampled is None or label not in resampled.columns:
+                    continue
+                unit_by_label.setdefault(label, parameter.unit or "")
+                param_by_label.setdefault(label, parameter.name)
+                param_id_by_label.setdefault(label, parameter_id)
+                room_id_by_label.setdefault(label, selected_room_ids[0] if selected_room_ids else None)
+        else:
+            resampled = pd.DataFrame()
+        if resampled is None or resampled.empty:
+            if compute_error is None:
                 compute_error = "No recorded samples in this period."
-            else:
+        else:
                 sample_count = int(len(resampled))
                 period_minimums = {}
                 if min_baseline_auto:

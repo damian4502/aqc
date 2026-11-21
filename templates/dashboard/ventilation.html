@@ -99,8 +99,9 @@
                     <label class="flex items-center gap-3 px-2 py-1.5 rounded-xl hover:bg-slate-800/80 cursor-pointer text-sm">
                         <input type="checkbox" name="parameter" value="{{ p.id }}"
                                class="param-cb accent-cyan-500 w-4 h-4"
+                               data-calculated="{% if p.is_calculated %}1{% else %}0{% endif %}"
                                {% if p.id in selected_parameter_ids %}checked{% endif %}>
-                        <span class="text-slate-200">{{ p.name }}</span>
+                        <span class="text-slate-200">{{ p.name }}{% if p.is_calculated %} <span class="text-amber-300/80 text-xs">(calculated)</span>{% endif %}</span>
                         {% if p.unit %}<span class="text-slate-500 text-xs">{{ p.unit }}</span>{% endif %}
                     </label>
                     {% empty %}
@@ -430,14 +431,16 @@ function checkedCount(sel) {
 
 function updateCounts() {
     const rooms = checkedCount('.room-cb');
-    const params = checkedCount('.param-cb');
-    const series = rooms * params;
+    const params = [...document.querySelectorAll('.param-cb:checked')];
+    const calculated = params.filter(cb => cb.dataset.calculated === '1').length;
+    const measured = params.length - calculated;
+    const series = rooms * measured + calculated;
     const roomEl = document.getElementById('room-count');
     const paramEl = document.getElementById('param-count');
     const seriesEl = document.getElementById('series-preview');
     const warnEl = document.getElementById('series-warn');
     if (roomEl) roomEl.textContent = rooms;
-    if (paramEl) paramEl.textContent = params;
+    if (paramEl) paramEl.textContent = params.length;
     if (seriesEl) seriesEl.textContent = series;
     if (warnEl) warnEl.classList.toggle('hidden', series <= MAX_SERIES);
 }

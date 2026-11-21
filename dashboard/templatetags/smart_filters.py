@@ -46,7 +46,7 @@ def latest_measurement  (room, param):
     
 @register.simple_tag
 def all_parameters  ():
-    key = "all_parameters"
+    key = "all_parameters_v2"
     
     from parameters.models import Parameter
     

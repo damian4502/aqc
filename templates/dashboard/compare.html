@@ -77,8 +77,9 @@
                     <label class="flex items-center gap-3 px-2 py-1.5 rounded-xl hover:bg-slate-800/80 cursor-pointer text-sm">
                         <input type="checkbox" name="parameter" value="{{ p.id }}"
                                class="param-cb accent-cyan-500 w-4 h-4"
+                               data-calculated="{% if p.is_calculated %}1{% else %}0{% endif %}"
                                {% if p.id in selected_parameter_ids %}checked{% endif %}>
-                        <span class="text-slate-200">{{ p.name }}</span>
+                        <span class="text-slate-200">{{ p.name }}{% if p.is_calculated %} <span class="text-amber-300/80 text-xs">(calculated)</span>{% endif %}</span>
                         {% if p.unit %}<span class="text-slate-500 text-xs">{{ p.unit }}</span>{% endif %}
                     </label>
                     {% empty %}
@@ -90,6 +91,7 @@
                     · <span id="series-preview">0</span> series
                     <span id="series-warn" class="hidden text-amber-400"> (over the {{ max_series }} limit)</span>
                 </p>
+                <p class="text-[11px] text-slate-500 mt-1">A calculated parameter is one series, not one line per room.</p>
             </div>
         </div>
 
@@ -485,11 +487,24 @@ function enabledChipKeys(containerId) {
 
 function seriesPairCount() {
     const rooms = [...document.querySelectorAll('.room-cb:checked')].map(cb => cb.value);
-    const params = [...document.querySelectorAll('.param-cb:checked')].map(cb => cb.value);
+    const params = [...document.querySelectorAll('.param-cb:checked')];
     const keys = new Set();
-    rooms.forEach(roomId => params.forEach(paramId => keys.add(roomId + ':' + paramId)));
-    enabledChipKeys('explicit-series').forEach(key => keys.add(key));
-    return keys.size + enabledChipKeys('diff-series').length;
+    const calculated = new Set();
+    params.forEach(cb => {
+        if (cb.dataset.calculated === '1') calculated.add(cb.value);
+    });
+    const measured = params.filter(cb => cb.dataset.calculated !== '1').map(cb => cb.value);
+    rooms.forEach(roomId => measured.forEach(paramId => keys.add(roomId + ':' + paramId)));
+    enabledChipKeys('explicit-series').forEach(key => {
+        const paramId = String(key).split(':')[1];
+        const box = document.querySelector('.param-cb[value="' + paramId + '"]');
+        if (box && box.dataset.calculated === '1') {
+            calculated.add(paramId);
+            return;
+        }
+        keys.add(key);
+    });
+    return keys.size + calculated.size + enabledChipKeys('diff-series').length;
 }
 
 function updateCounts() {

@@ -180,28 +180,21 @@ def export_room_csv(request, room_id):
         spike_factor = parse_spike_factor(request.GET.get('ignore_spikes'), default=0.0)
     spike_ceiling = remember_spike_ceiling(request)
 
-    qs = Measurement.objects.filter(sensor__room=room).select_related('sensor', 'parameter')
-    if not all_data:
-        qs = qs.filter(timestamp__gte=start_date, timestamp__lte=end_date)
-
-    measurements = qs.order_by('timestamp')
-
-    if not measurements.exists():
+    resampled = _chart_resampled(
+        room,
+        None,
+        start_date,
+        end_date,
+        all_data,
+        interval_minutes,
+        fill_method,
+        spike_factor,
+        spike_ceiling,
+    )
+    if resampled is None or resampled.empty:
         response = HttpResponse(content_type='text/csv')
         response['Content-Disposition'] = f'attachment; filename="{room.name}_no_data.csv"'
         return response
-
-    df = pd.DataFrame(list(measurements.values(
-        'timestamp',
-        'value',
-        'parameter__name'
-    )))
-    df['timestamp'] = pd.to_datetime(df['timestamp'])
-    df = df.rename(columns={'parameter__name': 'parameter'})
-
-    resampled = resample_measurements(
-        df, interval_minutes, fill_method, spike_factor=spike_factor, spike_ceiling=spike_ceiling
-    )
 
     resampled = resampled.reset_index()
     if 'timestamp' in resampled.columns:
@@ -818,41 +811,13 @@ def chart_data(request):
     if range_mode in ('live', 'fixed'):
         save_chart_range_mode(request, range_mode)
 
-    # === Measurements for graphs ===
-    qs = Measurement.objects.all()
-    if room:
-        qs = qs.filter(sensor__room=room)
-    if parameter:
-        qs = qs.filter(parameter=parameter)
-        
-    if not all_data and start:
-        qs = qs.filter(timestamp__gte=start, timestamp__lte=end)
-
-    measurements = qs.select_related('parameter').order_by('timestamp')
-
-    if not measurements.exists():
-        context['no_data'] = True
-        return render(request, 'dashboard/room_detail.html', context)
-
-    # Prepare DataFrame
-    if room:
-        df = pd.DataFrame(list(measurements.values('timestamp', 'value', 'parameter__name')))
-        df['timestamp'] = pd.to_datetime(df['timestamp'])
-        df = df.rename(columns={'parameter__name': 'parameter'})
-    if parameter:
-        df = pd.DataFrame(list(measurements.values('timestamp', 'value', 'sensor__room__name')))
-        df['timestamp'] = pd.to_datetime(df['timestamp'])
-        df = df.rename(columns={'sensor__room__name': 'parameter'})
-
-    # === Save / read resampling settings from session ===
+    # === Save resampling settings, then load cached bins ===
     if request.method == 'GET':
-        # If user sends new values → save to session
         if 'interval' in request.GET:
             request.session['resample_interval'] = int(request.GET.get('interval'))
         if 'fill_method' in request.GET:
             request.session['resample_fill_method'] = request.GET.get('fill_method')
 
-    # Resampling parameters
     interval_minutes = int(request.GET.get('interval', request.session.get('resample_interval', DEFAULT_RESAMPLE_MINUTES)))
     fill_method = (
         request.GET.get('fill_method')
@@ -868,7 +833,6 @@ def chart_data(request):
         if spike_factor == 0.0 and request.session.get('ignore_spikes'):
             spike_factor = 2.5
 
-    # Persist in session
     request.session['resample_interval'] = interval_minutes
     request.session['resample_fill_method'] = fill_method
     request.session['spike_factor'] = spike_factor
@@ -880,36 +844,30 @@ def chart_data(request):
     context['spike_ceiling'] = format_spike_ceiling(spike_ceiling)
     context['ignore_spikes'] = spike_factor > 0
 
-    resampled = resample_measurements(
-        df, interval_minutes, fill_method, spike_factor=spike_factor, spike_ceiling=spike_ceiling
+    resampled = _chart_resampled(
+        room,
+        parameter,
+        start,
+        end,
+        all_data,
+        interval_minutes,
+        fill_method,
+        spike_factor,
+        spike_ceiling,
     )
-    if not resampled.empty:
-        raw = is_raw_interval(interval_minutes)
-        fig = build_time_series_figure(
-            resampled,
-            title="Time trend — all recorded values" if raw else "Time trend",
-            height=700,
-            raw=raw,
-        )
+    raw = is_raw_interval(interval_minutes)
+    fig = build_time_series_figure(
+        resampled,
+        title="Time trend — all recorded values" if raw else "Time trend",
+        height=700,
+        raw=raw,
+    )
 
-        for trace in fig.data:
-            if trace.name.lower() not in show_params and '*' not in show_params:
-                trace.visible = 'legendonly'
+    for trace in fig.data:
+        name = (trace.name or "")
+        if name.lower() not in show_params and '*' not in show_params:
+            trace.visible = 'legendonly'
 
-        #context['fig'] = fig.to_html(full_html=False, include_plotlyjs='cdn')
-
-    qs = Measurement.objects.filter(
-        sensor__room=room,
-        timestamp__gte=start,
-        timestamp__lte=end
-    ).select_related('parameter').order_by('timestamp')
-
-    # ... your code for df and traces ...
-
-    #fig = go.Figure()
-    # ... add traces with visible='legendonly' where you want ...
-
-    # --- Events as vlines + annotations ---
     if want_chart_events(request):
         events = Event.objects.filter(
             timestamp__gte=start,
@@ -944,16 +902,118 @@ def chart_data(request):
                 borderpad=4,
             )
 
-    # --- Key: return pure Plotly JSON ---
     fig = apply_dark_theme(fig)
     import plotly.io as pio
     return HttpResponse(
             pio.to_json(fig, validate=False, engine='json'),
             content_type='application/json'
         )
-    return JsonResponse(fig.to_dict(), safe=False)
-    
-    
+
+
+def _chart_resampled(room, parameter, start, end, all_data, interval_minutes, fill_method, spike_factor, spike_ceiling):
+    """Wide frame for one room (columns are parameters) or one parameter (columns are rooms)."""
+    from dashboard.bin_cache import distinct_measurement_pairs, label_frame, load_resampled_pairs
+    from dashboard.parameter_formula import FormulaError, evaluate_saved_formula
+
+    if parameter is not None and parameter.is_calculated:
+        try:
+            series = evaluate_saved_formula(
+                parameter,
+                None if all_data else start,
+                None if all_data else end,
+                interval_minutes,
+                fill_method=fill_method,
+                spike_factor=spike_factor,
+                spike_ceiling=spike_ceiling,
+                tolerance="2min" if is_raw_interval(interval_minutes) else None,
+            )
+        except FormulaError:
+            series = pd.Series(dtype="float64")
+        if series is None or series.dropna().empty:
+            return pd.DataFrame()
+        frame = pd.DataFrame({parameter.name: series.dropna()})
+        frame.index.name = "timestamp"
+        return frame
+
+    pairs = distinct_measurement_pairs(
+        start,
+        end,
+        room_id=room.id if room is not None else None,
+        parameter_id=parameter.id if parameter is not None else None,
+        all_data=all_data,
+    )
+    if not pairs:
+        return pd.DataFrame()
+    keyed, _means = load_resampled_pairs(
+        pairs,
+        None if all_data else start,
+        None if all_data else end,
+        interval_minutes,
+        fill_method=fill_method,
+        spike_factor=spike_factor,
+        spike_ceiling=spike_ceiling,
+    )
+    if parameter is not None:
+        names = {
+            row_id: name
+            for row_id, name in Room.objects.filter(id__in={room_id for room_id, _pid in pairs}).values_list("id", "name")
+        }
+        return label_frame(keyed, pairs, lambda room_id, _parameter_id, names=names: names.get(room_id, str(room_id)))
+    names = {
+        row_id: name
+        for row_id, name in Parameter.objects.filter(id__in={parameter_id for _room_id, parameter_id in pairs}).values_list("id", "name")
+    }
+    return label_frame(keyed, pairs, lambda _room_id, parameter_id, names=names: names.get(parameter_id, str(parameter_id)))
+
+
+def _pattern_source(room, parameter, rooms, parameters, start, end, all_data, interval_minutes, spike_factor, spike_ceiling):
+    """One timestamp/value frame for the patterns page, from cached bins or a formula."""
+    from dashboard.bin_cache import label_frame, load_resampled_pairs
+    from dashboard.parameter_formula import FormulaError, formula_catalog, load_keyed_with_calculations
+
+    window_start = None if all_data else start
+    window_end = None if all_data else end
+    if parameter.is_calculated:
+        try:
+            catalog_rooms, catalog_parameters, formulas = formula_catalog(rooms, parameters)
+            _keyed, _means, calculated = load_keyed_with_calculations(
+                [],
+                [parameter.id],
+                window_start,
+                window_end,
+                interval_minutes,
+                fill_method="ffill",
+                spike_factor=spike_factor,
+                spike_ceiling=spike_ceiling,
+                rooms=catalog_rooms,
+                parameters=catalog_parameters,
+                formulas=formulas,
+                tolerance="2min" if is_raw_interval(interval_minutes) else None,
+            )
+        except FormulaError:
+            return pd.DataFrame()
+        series = calculated.get(parameter.id)
+    else:
+        pairs = [(room.id, parameter.id)]
+        keyed, _means = load_resampled_pairs(
+            pairs,
+            window_start,
+            window_end,
+            interval_minutes,
+            fill_method="ffill",
+            spike_factor=spike_factor,
+            spike_ceiling=spike_ceiling,
+        )
+        labeled = label_frame(keyed, pairs, lambda _room_id, _parameter_id: parameter.name)
+        if labeled.empty:
+            return pd.DataFrame()
+        series = labeled.iloc[:, 0]
+    if series is None or series.dropna().empty:
+        return pd.DataFrame()
+    values = series.dropna()
+    return pd.DataFrame({"timestamp": values.index, "value": values.to_numpy()})
+
+
 def room_graph_fragment(request, room_id):
     """Returns ONLY the graph for HTMX (fragment)"""
     room = get_object_or_404(Room, id=room_id)
@@ -1334,112 +1394,44 @@ def parameter_detail(request, parameter_id):
     context['spike_ceiling'] = format_spike_ceiling(spike_ceiling)
     context['ignore_spikes'] = spike_factor > 0  # backward compat
 
-    # Measurements for charts
-    qs = Measurement.objects.filter(parameter=parameter)
+    formula_error = None
+    if request.method == "POST":
+        from django.shortcuts import redirect
+        from dashboard.parameter_formula import FormulaError, save_parameter_formula
 
-    if not all_data:
-        qs = qs.filter(timestamp__gte=start_date, timestamp__lte=end_date)
+        try:
+            save_parameter_formula(parameter, request.POST.get("formula", ""))
+        except FormulaError as exc:
+            formula_error = str(exc)
+        else:
+            return redirect(request.path)
 
-    measurements = qs.select_related('sensor__room').order_by('timestamp')
+    if parameter.is_calculated and formula_error is None:
+        from dashboard.parameter_formula import FormulaError, validate_parameter_formula, _django_catalog
 
-    if measurements.exists():
-        df = pd.DataFrame(list(measurements.values(
-            'timestamp', 
-            'value', 
-            'sensor__room__name'
-        )))
-        df['timestamp'] = pd.to_datetime(df['timestamp'])
-        df = df.rename(columns={'sensor__room__name': 'room'})
+        try:
+            rooms, parameters, formulas = _django_catalog()
+            validate_parameter_formula(parameter.formula, rooms, parameters, formulas, parameter.id)
+        except FormulaError as exc:
+            formula_error = str(exc)
 
-        if view_type == 'trend':
-            resampled = resample_measurements(df, interval_minutes, fill_method, spike_factor=spike_factor, spike_ceiling=spike_ceiling)
-            raw = is_raw_interval(interval_minutes)
-            title = f'Time trend - {parameter.name}'
-            if raw:
-                title += ' (all recorded values)'
-            fig = build_time_series_figure(resampled, title=title, height=700, raw=raw)
-            fig = apply_dark_theme(fig)
+    context["formula_error"] = formula_error
+    context["formula_value"] = request.POST.get("formula", parameter.formula) if formula_error else parameter.formula
+    context["formula_rooms"] = Room.objects.all().order_by("order", "name")
+    context["formula_parameters"] = Parameter.objects.all().order_by("order", "name")
 
-            events = Event.objects.filter(
-                parameters=parameter,
-                timestamp__gte=start_date,
-                timestamp__lte=end_date
-            ) if context.get('show_events', True) else []
-
-
-            for event in events:
-                event_ts = timezone.localtime(event.timestamp).replace(tzinfo=None)
-                
-                fig.add_vline(
-                    x=event_ts,
-                    line_width=2.5,
-                    line_dash="dashdot",
-                    line_color=event.color,
-                )
-                
-                fig.add_annotation(
-                    x=event_ts,
-                    yref="paper",
-                    y=1.06,
-                    text=event.title,
-                    showarrow=False,
-                    xanchor="center",
-                    yanchor="bottom",
-                    font=dict(size=13, color=event.color),
-                    bgcolor="rgba(15, 23, 42, 0.92)",
-                    bordercolor=event.color,
-                    borderwidth=1,
-                    borderpad=4,
-                )
-
-            context['fig'] = fig.to_html(full_html=False, include_plotlyjs='cdn')
-
-        elif view_type == 'correlation':
-            resampled = resample_measurements(df, interval_minutes, fill_method, spike_factor=spike_factor, spike_ceiling=spike_ceiling)
-            
-            if resampled.empty or len(resampled.columns) < 2:
-                context['no_data'] = True
-            else:
-                corr_matrix = resampled.corr().round(2)
-                
-                bin_label = (
-                    "all recorded points"
-                    if is_raw_interval(interval_minutes)
-                    else f"interval: {interval_minutes} min"
-                )
-                fig = px.imshow(
-                    corr_matrix,
-                    text_auto=True,
-                    aspect="auto",
-                    color_continuous_scale='RdBu_r',
-                    title=f'Parameter correlation - {parameter.name} ({bin_label})'
-                )
-                fig.update_layout(height=650)
-                fig = apply_dark_theme(fig)
-                context['fig'] = fig.to_html(full_html=False, include_plotlyjs='cdn')
-
-        elif view_type == 'hourly':
-            df['hour'] = df['timestamp'].dt.hour
-            hourly = df.groupby(['hour', 'room'])['value'].mean().reset_index()
-            fig = px.line(hourly, x='hour', y='value', color='room',
-                         title=f'Daily pattern for {parameter.name}', markers=True)
-            fig.update_layout(xaxis=dict(tickmode='linear', dtick=1))
-            fig = apply_dark_theme(fig)
-            context['fig'] = fig.to_html(full_html=False, include_plotlyjs='cdn')
-
-        elif view_type == 'weekly':
-            df['dayofweek'] = df['timestamp'].dt.day_name()
-            weekly = df.groupby(['dayofweek', 'room'])['value'].mean().reset_index()
-            fig = px.line(weekly, x='dayofweek', y='value', color='room',
-                         title=f'Weekly pattern for {parameter.name}',
-                         category_orders={"dayofweek": ["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"]})
-            fig = apply_dark_theme(fig)
-            context['fig'] = fig.to_html(full_html=False, include_plotlyjs='cdn')
-
+    if parameter.is_calculated:
+        context["show_chart"] = True
     else:
-        context['no_data'] = True
+        exists_qs = Measurement.objects.filter(parameter=parameter)
+        if not all_data and start_date and end_date:
+            exists_qs = exists_qs.filter(timestamp__gte=start_date, timestamp__lte=end_date)
+        context["show_chart"] = exists_qs.exists()
+        if not context["show_chart"]:
+            context["no_data"] = True
 
     return render(request, 'dashboard/parameter_detail.html', context)
+
 
 def export_parameter_csv(request, parameter_id):
     from django.utils.dateparse import parse_datetime
@@ -1486,29 +1478,21 @@ def export_parameter_csv(request, parameter_id):
         spike_factor = parse_spike_factor(request.GET.get('ignore_spikes'), default=0.0)
     spike_ceiling = remember_spike_ceiling(request)
 
-    # Fetch measurements
-    qs = Measurement.objects.filter(parameter=parameter).select_related('sensor__room')
-    if not all_data:
-        qs = qs.filter(timestamp__gte=start_date, timestamp__lte=end_date)
-
-    measurements = qs.order_by('timestamp')
-
-    if not measurements.exists():
-        # Empty CSV
+    resampled = _chart_resampled(
+        None,
+        parameter,
+        start_date,
+        end_date,
+        all_data,
+        interval_minutes,
+        fill_method,
+        spike_factor,
+        spike_ceiling,
+    )
+    if resampled is None or resampled.empty:
         response = HttpResponse(content_type='text/csv')
         response['Content-Disposition'] = f'attachment; filename="{parameter.name}_no_data.csv"'
         return response
-
-    df = pd.DataFrame(list(measurements.values(
-        'timestamp', 'value', 'sensor__room__name'
-    )))
-    df['timestamp'] = pd.to_datetime(df['timestamp'])
-    df = df.rename(columns={'sensor__room__name': 'room'})
-
-    # Resampling — pivot column is auto-detected (parameter vs room)
-    resampled = resample_measurements(
-        df, interval_minutes, fill_method, spike_factor=spike_factor, spike_ceiling=spike_ceiling
-    )
 
     # Prepare for CSV
     resampled = resampled.reset_index()
@@ -1771,8 +1755,14 @@ def correlations_view(request):
 
     room_by_id = {room.id: room for room in rooms}
     parameter_by_id = {param.id: param for param in parameters}
+    from dashboard.parameter_formula import partition_parameters
+
+    calculated_ids = {param.id for param in parameters if param.is_calculated}
+    measured_ids, measured_explicit, calculated_series_ids = partition_parameters(
+        selected_parameter_ids, enabled_explicit, calculated_ids
+    )
     series_pairs = expand_series_pairs(
-        selected_room_ids, selected_parameter_ids, enabled_explicit
+        selected_room_ids, measured_ids, measured_explicit
     )
     pair_room_ids = {room_id for room_id, _param_id in series_pairs}
     pair_parameter_ids = {param_id for _room_id, param_id in series_pairs}
@@ -1780,7 +1770,7 @@ def correlations_view(request):
     pair_parameters = [param for param in parameters if param.id in pair_parameter_ids]
     include_room = len(pair_rooms) != 1
     include_parameter = len(pair_parameters) != 1
-    n_series_selected = len(series_pairs)
+    n_series_selected = len(series_pairs) + len(calculated_series_ids)
     selected_series = [
         {
             "room_id": room_id,
@@ -1822,49 +1812,59 @@ def correlations_view(request):
         compute_error = "Select at least one room and one parameter, or add individual series."
 
     if should_compute:
-        qs = Measurement.objects.filter(pairs_filter(series_pairs)).select_related(
-            "sensor__room", "parameter"
+        from dashboard.bin_cache import label_frame
+        from dashboard.parameter_formula import (
+            FormulaError,
+            add_calculated_columns,
+            formula_catalog,
+            load_keyed_with_calculations,
         )
-        if not all_data and start_date:
-            qs = qs.filter(timestamp__gte=start_date, timestamp__lte=end_date)
 
-        measurements = qs.order_by("timestamp")
-        if not measurements.exists():
-            compute_error = "No measurements in this period for the selected series."
-        else:
-            df = pd.DataFrame(
-                list(
-                    measurements.values(
-                        "timestamp",
-                        "value",
-                        "sensor__room__name",
-                        "parameter__name",
-                    )
-                )
+        catalog_rooms, catalog_parameters, formulas = formula_catalog(rooms, parameters)
+        try:
+            keyed, _raw_means, calculated = load_keyed_with_calculations(
+                series_pairs,
+                calculated_series_ids,
+                None if all_data else start_date,
+                None if all_data else end_date,
+                interval_minutes,
+                fill_method=fill_method,
+                spike_factor=spike_factor,
+                spike_ceiling=spike_ceiling,
+                rooms=catalog_rooms,
+                parameters=catalog_parameters,
+                formulas=formulas,
+                tolerance="2min" if is_raw_interval(interval_minutes) else None,
             )
-            df["timestamp"] = pd.to_datetime(df["timestamp"])
-            df["parameter"] = [
-                make_series_label(
-                    room,
-                    param,
+        except FormulaError as exc:
+            compute_error = str(exc)
+            keyed, calculated = None, {}
+        if compute_error is None:
+            resampled = label_frame(
+                keyed,
+                series_pairs,
+                lambda room_id, parameter_id: make_series_label(
+                    room_by_id[room_id].name,
+                    parameter_by_id[parameter_id].name,
                     include_room=include_room,
                     include_parameter=include_parameter,
-                )
-                for room, param in zip(
-                    df["sensor__room__name"], df["parameter__name"]
-                )
-            ]
-
-            resampled = resample_measurements(
-                df, interval_minutes, fill_method, spike_factor=spike_factor, spike_ceiling=spike_ceiling
+                ),
             )
-            if resampled is None or resampled.empty:
+            resampled = add_calculated_columns(
+                resampled,
+                {parameter_id: calculated.get(parameter_id) for parameter_id in calculated_series_ids},
+                parameter_by_id,
+            )
+        else:
+            resampled = pd.DataFrame()
+        if resampled is None or resampled.empty:
+            if compute_error is None:
                 compute_error = (
                     "No recorded samples in this period."
                     if is_raw_interval(interval_minutes)
                     else "No overlapping samples after resampling."
                 )
-            else:
+        else:
                 resampled = resampled.dropna(axis=1, how="all")
                 series_count = len(resampled.columns)
                 sample_count = int(len(resampled))
@@ -2117,33 +2117,21 @@ def patterns_view(request):
         should_compute = False
 
     if should_compute:
-        qs = Measurement.objects.filter(
-            sensor__room=selected_room,
-            parameter=selected_parameter,
+        source = _pattern_source(
+            selected_room,
+            selected_parameter,
+            rooms,
+            parameters,
+            start_date,
+            end_date,
+            all_data,
+            interval_minutes,
+            spike_factor,
+            spike_ceiling,
         )
-        if not all_data and start_date:
-            qs = qs.filter(timestamp__gte=start_date, timestamp__lte=end_date)
-        measurements = qs.order_by("timestamp")
-        if not measurements.exists():
+        if source is None or source.empty:
             compute_error = "No measurements in this period for that room and parameter."
         else:
-            df = pd.DataFrame(
-                list(measurements.values("timestamp", "value", "parameter__name"))
-            )
-            df["timestamp"] = pd.to_datetime(df["timestamp"])
-            df = df.rename(columns={"parameter__name": "parameter"})
-            resampled = resample_measurements(
-                df, interval_minutes, "ffill", spike_factor=spike_factor, spike_ceiling=spike_ceiling
-            )
-            if resampled is None or resampled.empty:
-                source = df[["timestamp", "value"]]
-            else:
-                col = resampled.columns[0]
-                series = resampled[col].dropna()
-                source = pd.DataFrame(
-                    {"timestamp": series.index, "value": series.to_numpy()}
-                )
-
             buckets = calendar_hour_means(source)
             prepared = prepare_frame(buckets)
             if prepared.empty:
@@ -2160,6 +2148,8 @@ def patterns_view(request):
 
                 unit = selected_parameter.unit or ""
                 title_base = f"{selected_parameter.name} — {selected_room.name}"
+                if selected_parameter.is_calculated:
+                    title_base = f"{selected_parameter.name} (calculated)"
 
                 hourly_plot = hourly.copy()
                 hourly_plot["weekdays"] = hourly_wd["mean"]
