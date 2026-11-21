@@ -8,6 +8,7 @@ import pandas as pd
 from dashboard.bin_cache import (
     _DictCache,
     floor_bin,
+    label_frame,
     load_binned_pairs,
     local_to_aware,
 )
@@ -206,6 +207,15 @@ class BinCacheTests(unittest.TestCase):
         self.assertAlmostEqual(float(frame.iloc[0, 0]), 10.0)
         self.assertAlmostEqual(means[pair_key(1, 5)], 10.0)
         self.assertEqual(len(cache.data), 0)
+
+
+class LabelFrameTests(unittest.TestCase):
+    def test_duplicate_pairs_do_not_add_a_parenthetical_series(self):
+        index = pd.to_datetime(["2026-01-01 13:00", "2026-01-01 14:00"])
+        keyed = pd.DataFrame({pair_key(1, 2): [50.0, 51.0]}, index=index)
+        pairs = [(1, 2), (1, 2), (1, 2)]
+        frame = label_frame(keyed, pairs, lambda room_id, parameter_id: "Kopalnica")
+        self.assertEqual(list(frame.columns), ["Kopalnica"])
 
 
 if __name__ == "__main__":

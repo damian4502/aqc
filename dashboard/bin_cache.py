@@ -593,7 +593,11 @@ def distinct_measurement_pairs(start=None, end=None, room_id=None, parameter_id=
             query = query.filter(timestamp__gte=start)
         if end is not None:
             query = query.filter(timestamp__lte=end)
-    return list(query.values_list("sensor__room_id", "parameter_id").distinct())
+    # Drop Measurement.ordering (timestamp). Otherwise DISTINCT keeps one row
+    # per timestamp and the same room is plotted twice, once as "Name (id:id)".
+    return list(
+        query.order_by().values_list("sensor__room_id", "parameter_id").distinct()
+    )
 
 
 def label_frame(resampled, pairs, label_for):
@@ -604,10 +608,12 @@ def label_frame(resampled, pairs, label_for):
         return pd.DataFrame()
     frame = pd.DataFrame(index=resampled.index)
     used = set()
+    seen = set()
     for room_id, parameter_id in pairs:
         key = pair_key(room_id, parameter_id)
-        if key not in resampled.columns:
+        if key in seen or key not in resampled.columns:
             continue
+        seen.add(key)
         label = str(label_for(room_id, parameter_id))
         if label in used:
             label = f"{label} ({key})"
