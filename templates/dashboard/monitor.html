@@ -65,16 +65,18 @@
     <div id="monitor-setup" class="glass rounded-3xl p-6 space-y-4">
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <div>
-                <div class="text-sm text-slate-400 mb-2 font-medium">Parametri</div>
-                <div id="param-choices" class="bg-slate-900/70 border border-slate-700 rounded-2xl p-2 max-h-56 overflow-y-auto space-y-1"></div>
-                <p class="text-[11px] text-slate-500 mt-2">Izračunani parametri se računajo v brskalniku iz živih MQTT vrednosti. Skala je samodejno z-score, če so enote različne, sicer surova vrednost. Ročno lahko izbereš eno ali drugo.</p>
+                <label class="block text-sm text-slate-400 mb-2 font-medium" for="add-param">Parameter</label>
+                <select id="add-param" class="w-full bg-slate-900 border border-slate-700 rounded-2xl px-5 py-3 text-lg">
+                    <option value="">-- Izberi parameter --</option>
+                </select>
+                <p class="text-[11px] text-slate-500 mt-2">Globalni izračun se doda takoj. Prostor dodaš posebej. Skala je samodejno z-score, če so enote različne. Ročno lahko izbereš vrednost ali z-score.</p>
             </div>
             <div>
                 <label class="block text-sm text-slate-400 mb-2 font-medium" for="add-room">Prostor</label>
                 <select id="add-room" class="w-full bg-slate-900 border border-slate-700 rounded-2xl px-5 py-3 text-lg">
                     <option value="">-- Izberi prostor --</option>
                 </select>
-                <p class="text-[11px] text-slate-500 mt-2">Doda prostor za vsak izbran parameter. Globalna formula je ena serija, brez prostora.</p>
+                <p class="text-[11px] text-slate-500 mt-2">Doda prostor samo za parameter, ki je izbran zgoraj. »Dodaj vse prostore« to naredi enkrat, ob kliku.</p>
             </div>
         </div>
         <div class="flex flex-wrap gap-3">
