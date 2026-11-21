@@ -22,7 +22,7 @@
     const topics = {};
     (catalog.topics || []).forEach(function (row) { topics[row.topic] = row; });
 
-    const state = { paramIds: [], roomIds: [], entries: [], smooth: true, scale: "auto" };
+    const state = { activeParamId: null, entries: [], smooth: true, scale: "auto" };
     const latest = {};
     const seriesByKey = new Map();
     let chart = null;
@@ -35,8 +35,16 @@
         return param && !param.global;
     }
 
-    function checkedParams() {
-        return state.paramIds.map(function (id) { return paramById.get(id); }).filter(Boolean);
+    function paramsInUse() {
+        const seen = new Set();
+        const params = [];
+        state.entries.forEach(function (entry) {
+            if (seen.has(entry.paramId)) return;
+            seen.add(entry.paramId);
+            const param = paramById.get(entry.paramId);
+            if (param) params.push(param);
+        });
+        return params;
     }
 
     function distinctParamCount() {
@@ -196,7 +204,7 @@
             if (node.t === "fn") (node.a || []).forEach(function (arg) { walkNode(arg, stack); });
             if (node.t === "s" || node.t === "x") walk(paramById.get(node.p), stack);
         }
-        checkedParams().forEach(function (param) { walk(param, new Set()); });
+        paramsInUse().forEach(function (param) { walk(param, new Set()); });
         return names;
     }
 
@@ -207,8 +215,11 @@
 
     function syncSubscriptions() {
         if (typeof client === "undefined" || !client) return;
-        const rooms = new Set(state.roomIds);
-        checkedParams().forEach(function (param) { collectRooms(param, rooms, new Set()); });
+        const rooms = new Set();
+        state.entries.forEach(function (entry) {
+            if (entry.roomId != null) rooms.add(entry.roomId);
+        });
+        paramsInUse().forEach(function (param) { collectRooms(param, rooms, new Set()); });
         const wanted = new Set();
         Object.keys(topics).forEach(function (topic) {
             if (rooms.has(topics[topic].roomId)) wanted.add(topic);
@@ -244,52 +255,31 @@
         return PALETTE[index % PALETTE.length];
     }
 
+    function paramLabel(param) {
+        let text = param.name;
+        if (param.global) text += " (izračun)";
+        else if (param.roomBound) text += " (po prostorih)";
+        if (param.formula && !param.ast) text += " (napaka formule)";
+        if (param.unit) text += " · " + param.unit;
+        return text;
+    }
+
     function renderChoices() {
-        const box = document.getElementById("param-choices");
-        if (!box) return;
-        box.innerHTML = "";
-        (catalog.parameters || []).forEach(function (param) {
-            const label = document.createElement("label");
-            label.className = "flex items-center gap-2 px-2 py-1 rounded-xl hover:bg-slate-800/80 cursor-pointer text-sm";
-            const input = document.createElement("input");
-            input.type = "checkbox";
-            input.className = "param-pick accent-cyan-500 w-4 h-4";
-            input.value = String(param.id);
-            input.checked = state.paramIds.indexOf(param.id) !== -1;
-            input.addEventListener("change", function () { toggleParam(param.id, input.checked); });
-            const text = document.createElement("span");
-            text.className = "text-slate-200";
-            text.textContent = param.name;
-            label.appendChild(input);
-            label.appendChild(text);
-            if (param.global) {
-                const tag = document.createElement("span");
-                tag.className = "text-amber-300/80 text-xs";
-                tag.textContent = "(izračun)";
-                label.appendChild(tag);
-            } else if (param.roomBound) {
-                const tag = document.createElement("span");
-                tag.className = "text-amber-300/80 text-xs";
-                tag.textContent = "(po prostorih)";
-                label.appendChild(tag);
-            }
-            if (param.formula && !param.ast) {
-                const tag = document.createElement("span");
-                tag.className = "text-red-400/80 text-xs";
-                tag.textContent = "(napaka formule)";
-                label.appendChild(tag);
-            }
-            if (param.unit) {
-                const unit = document.createElement("span");
-                unit.className = "text-slate-500 text-xs";
-                unit.textContent = param.unit;
-                label.appendChild(unit);
-            }
-            box.appendChild(label);
-        });
+        const paramSelect = document.getElementById("add-param");
+        if (paramSelect) {
+            const current = String(state.activeParamId || "");
+            paramSelect.innerHTML = '<option value="">-- Izberi parameter --</option>';
+            (catalog.parameters || []).forEach(function (param) {
+                const option = document.createElement("option");
+                option.value = String(param.id);
+                option.textContent = paramLabel(param);
+                paramSelect.appendChild(option);
+            });
+            if (current && paramById.has(Number(current))) paramSelect.value = current;
+        }
         const roomSelect = document.getElementById("add-room");
         if (!roomSelect) return;
-        const current = roomSelect.value;
+        const currentRoom = roomSelect.value;
         roomSelect.innerHTML = '<option value="">-- Izberi prostor --</option>';
         (catalog.rooms || []).forEach(function (room) {
             const option = document.createElement("option");
@@ -297,20 +287,14 @@
             option.textContent = room.name;
             roomSelect.appendChild(option);
         });
-        roomSelect.value = current;
+        roomSelect.value = currentRoom;
     }
 
-    function toggleParam(paramId, on) {
-        const param = paramById.get(paramId);
-        if (!param) return;
-        if (on) {
-            if (state.paramIds.indexOf(paramId) === -1) state.paramIds.push(paramId);
-            if (param.global) addEntry(null, paramId);
-            else state.roomIds.forEach(function (roomId) { addEntry(roomId, paramId); });
-        } else {
-            state.paramIds = state.paramIds.filter(function (id) { return id !== paramId; });
-            state.entries = state.entries.filter(function (entry) { return entry.paramId !== paramId; });
-        }
+    function selectParam(paramId) {
+        paramId = parseInt(paramId, 10);
+        state.activeParamId = paramById.has(paramId) ? paramId : null;
+        const param = paramById.get(state.activeParamId);
+        if (param && param.global) addEntry(null, param.id);
         commit();
     }
 
@@ -322,58 +306,42 @@
         const key = entryKey({ roomId: roomId, paramId: paramId });
         if (state.entries.some(function (entry) { return entryKey(entry) === key; })) return;
         state.entries.push({ roomId: roomId, paramId: paramId });
-        if (roomId != null && state.roomIds.indexOf(roomId) === -1) state.roomIds.push(roomId);
     }
 
     function addRoom(roomId) {
         roomId = parseInt(roomId, 10);
-        if (!roomId) return;
-        if (state.roomIds.indexOf(roomId) === -1) state.roomIds.push(roomId);
-        checkedParams().forEach(function (param) {
-            if (isRoomScoped(param)) addEntry(roomId, param.id);
-        });
+        const param = paramById.get(state.activeParamId);
+        if (!roomId || !param || !isRoomScoped(param)) return;
+        addEntry(roomId, param.id);
         commit();
     }
 
     function addAllRooms() {
-        const rooms = new Set();
-        checkedParams().forEach(function (param) {
-            if (!isRoomScoped(param)) return;
-            if (param.roomBound) {
-                (catalog.rooms || []).forEach(function (room) { rooms.add(room.id); });
-            } else {
-                (param.liveRooms || []).forEach(function (id) { rooms.add(id); });
-            }
-        });
-        rooms.forEach(function (roomId) {
-            if (state.roomIds.indexOf(roomId) === -1) state.roomIds.push(roomId);
-            checkedParams().forEach(function (param) {
-                if (isRoomScoped(param)) addEntry(roomId, param.id);
-            });
-        });
+        const param = paramById.get(state.activeParamId);
+        if (!param || !isRoomScoped(param)) return;
+        const rooms = param.roomBound
+            ? (catalog.rooms || []).map(function (room) { return room.id; })
+            : (param.liveRooms || []).slice();
+        rooms.forEach(function (roomId) { addEntry(roomId, param.id); });
         commit();
     }
 
     function removeEntry(key) {
         const before = state.entries.length;
         state.entries = state.entries.filter(function (entry) { return entryKey(entry) !== key; });
-        const still = new Set(state.entries.map(function (entry) { return entry.roomId; }));
-        state.roomIds = state.roomIds.filter(function (id) { return still.has(id); });
         if (state.entries.length !== before) commit();
     }
 
     function removeAllRooms() {
         if (!window.confirm("Res želiš odstraniti vse serije iz tabele in grafa?")) return;
         state.entries = [];
-        state.roomIds = [];
         clearChart();
         commit();
     }
 
     function save() {
         const payload = JSON.stringify({
-            paramIds: state.paramIds,
-            roomIds: state.roomIds,
+            activeParamId: state.activeParamId,
             entries: state.entries,
             smooth: state.smooth,
             scale: state.scale,
@@ -387,13 +355,16 @@
         let data = {};
         try { data = JSON.parse(raw || "{}"); } catch (err) { data = {}; }
         applyingRemote = true;
-        state.paramIds = (data.paramIds || []).map(Number).filter(function (id) { return paramById.has(id); });
-        state.roomIds = (data.roomIds || []).map(Number).filter(function (id) { return roomById.has(id); });
         state.entries = (data.entries || []).filter(function (entry) {
             return paramById.has(entry.paramId) && (entry.roomId == null || roomById.has(entry.roomId));
         }).map(function (entry) {
             return { roomId: entry.roomId == null ? null : Number(entry.roomId), paramId: Number(entry.paramId) };
         });
+        const storedParam = Number(data.activeParamId);
+        state.activeParamId = paramById.has(storedParam) ? storedParam : null;
+        if (!state.activeParamId && state.entries.length) {
+            state.activeParamId = state.entries[state.entries.length - 1].paramId;
+        }
         state.smooth = data.smooth !== false;
         state.scale = data.scale === "z" || data.scale === "raw" ? data.scale : "auto";
         const smoothBox = document.getElementById("smooth-curve");
@@ -401,8 +372,7 @@
         const scaleBox = document.getElementById("scale-mode");
         if (scaleBox) scaleBox.value = state.scale;
         lastSaved = JSON.stringify({
-            paramIds: state.paramIds,
-            roomIds: state.roomIds,
+            activeParamId: state.activeParamId,
             entries: state.entries,
             smooth: state.smooth,
             scale: state.scale,
@@ -715,6 +685,12 @@
     }
 
     function bindUi() {
+        const addParamSelect = document.getElementById("add-param");
+        if (addParamSelect) {
+            addParamSelect.addEventListener("change", function () {
+                selectParam(addParamSelect.value);
+            });
+        }
         const addRoomSelect = document.getElementById("add-room");
         if (addRoomSelect) {
             addRoomSelect.addEventListener("change", function () {
