@@ -764,7 +764,9 @@ def _column_colors(columns, room, parameter):
     rooms = {item.name: item for item in Room.objects.all()}
     parameters = {item.name: item for item in Parameter.objects.all()}
     colors = {}
-    for col in columns or []:
+    if columns is None:
+        columns = []
+    for col in columns:
         text = str(col)
         base = text.split(" (", 1)[0]
         if text in rooms or base in rooms:
