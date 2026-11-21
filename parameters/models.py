@@ -31,7 +31,9 @@ class Parameter(models.Model):
         help_text=(
             "Leave empty for a measured parameter. A formula is plotted and not stored. "
             "Same syntax as Compare: Room/Parameter, numbers, + − * /, parentheses, "
-            "min(), max(), and avg(). The unit is the Unit field. "
+            "min(), max(), and avg(). Use x/Parameter for the current room, for example "
+            "(x/PM10 / Outdoor/PM10) * 100 — that is one line per room. A formula that "
+            "names every room is one series. The unit is the Unit field. "
             "Names are matched as written, so rename a room or parameter and update the formula."
         ),
     )
@@ -42,6 +44,14 @@ class Parameter(models.Model):
     @property
     def is_calculated(self):
         return bool((self.formula or "").strip())
+
+    @property
+    def is_room_bound(self):
+        """True when the formula uses x/Parameter and is evaluated per room."""
+        if not self.is_calculated:
+            return False
+        from dashboard.series_selection import formula_is_room_bound
+        return formula_is_room_bound(self.formula)
 
     def live_rooms(self):
         from measurements.models import Measurement

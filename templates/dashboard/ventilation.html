@@ -99,9 +99,9 @@
                     <label class="flex items-center gap-3 px-2 py-1.5 rounded-xl hover:bg-slate-800/80 cursor-pointer text-sm">
                         <input type="checkbox" name="parameter" value="{{ p.id }}"
                                class="param-cb accent-cyan-500 w-4 h-4"
-                               data-calculated="{% if p.is_calculated %}1{% else %}0{% endif %}"
+                               data-calculated="{% if p.is_calculated and not p.is_room_bound %}1{% else %}0{% endif %}"
                                {% if p.id in selected_parameter_ids %}checked{% endif %}>
-                        <span class="text-slate-200">{{ p.name }}{% if p.is_calculated %} <span class="text-amber-300/80 text-xs">(calculated)</span>{% endif %}</span>
+                        <span class="text-slate-200">{{ p.name }}{% if p.is_room_bound %} <span class="text-amber-300/80 text-xs">(per room)</span>{% elif p.is_calculated %} <span class="text-amber-300/80 text-xs">(calculated)</span>{% endif %}</span>
                         {% if p.unit %}<span class="text-slate-500 text-xs">{{ p.unit }}</span>{% endif %}
                     </label>
                     {% empty %}

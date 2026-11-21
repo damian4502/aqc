@@ -9,6 +9,7 @@ specific traces do not require the full cross product. A trailing ``:0``
 from __future__ import annotations
 
 import math
+import re
 
 # Query tokens stay URL-safe. ``+`` would be decoded as a space.
 OP_TOKENS = {
@@ -41,6 +42,32 @@ def _is_series(node) -> bool:
         and isinstance(node[0], int)
         and isinstance(node[1], int)
     )
+
+
+def _is_x_series(node) -> bool:
+    """``("x", parameter_id)`` is the current room, not a named room."""
+    return (
+        isinstance(node, tuple)
+        and len(node) == 2
+        and node[0] == "x"
+        and not isinstance(node[1], bool)
+        and isinstance(node[1], int)
+    )
+
+
+_X_ROOM = re.compile(r"(?:^|[^0-9A-Za-z_])x\s*/", re.IGNORECASE)
+
+
+def formula_is_room_bound(text) -> bool:
+    """True when a formula uses ``x/Parameter`` for the current room.
+
+    A room literally named ``x`` loses: the placeholder is reserved.
+    """
+    return _X_ROOM.search(str(text or "")) is not None
+
+
+def _is_leaf(node) -> bool:
+    return is_constant(node) or _is_series(node) or _is_x_series(node)
 
 
 def _is_fn(node) -> bool:
@@ -149,19 +176,30 @@ def _parse_constant_value(text):
 
 
 def parse_formula_term(token, valid_room_ids, valid_parameter_ids):
-    """A ``room:parameter`` pair or a ``n:<number>`` constant."""
+    """A ``room:parameter`` pair, an ``x:parameter`` current-room leaf, or ``n:<number>``."""
     text = str(token).strip()
-    if text.lower().startswith("n:"):
+    folded = text.lower()
+    if folded.startswith("n:"):
         number = _parse_constant_value(text[2:])
         if number is None:
             return None
         return ("n", number)
+    if folded.startswith("x:"):
+        try:
+            parameter_id = int(text[2:])
+        except (TypeError, ValueError):
+            return None
+        if parameter_id not in set(valid_parameter_ids):
+            return None
+        return ("x", parameter_id)
     return _one_pair(text, valid_room_ids, valid_parameter_ids)
 
 
 def _encode_term(term) -> str:
     if is_constant(term):
         return "n:" + format_constant(term[1])
+    if _is_x_series(term):
+        return "x:" + str(int(term[1]))
     return pair_key(*term)
 
 
@@ -178,18 +216,21 @@ def _left_chain(node):
     ops = []
     rights = []
     current = node
-    while _is_op(current) and (is_constant(current[3]) or _is_series(current[3])):
+    while _is_op(current) and _is_leaf(current[3]):
         ops.append(current[1])
         rights.append(current[3])
         current = current[2]
-    if not (is_constant(current) or _is_series(current)):
+    if not _is_leaf(current):
         return None
     return (current, *reversed(rights)), tuple(reversed(ops))
 
 
 def iter_series(node):
-    """Series leaves of a formula, left to right. The same pair can repeat."""
-    if _is_series(node):
+    """Series leaves of a formula, left to right. The same pair can repeat.
+
+    An ``x`` leaf is ``("x", parameter_id)`` until :func:`bind_room` replaces it.
+    """
+    if _is_series(node) or _is_x_series(node):
         yield node
     elif _is_op(node):
         yield from iter_series(node[2])
@@ -197,6 +238,21 @@ def iter_series(node):
     elif _is_fn(node):
         for arg in node[2]:
             yield from iter_series(arg)
+
+
+def bind_room(node, room_id):
+    """Replace ``x/Parameter`` leaves with ``(room_id, parameter)``.
+
+    Named rooms stay as written. Call this before :func:`evaluate_formula`.
+    """
+    room_id = int(room_id)
+    if _is_x_series(node):
+        return (room_id, int(node[1]))
+    if _is_op(node):
+        return ("op", node[1], bind_room(node[2], room_id), bind_room(node[3], room_id))
+    if _is_fn(node):
+        return ("fn", node[1], tuple(bind_room(arg, room_id) for arg in node[2]))
+    return node
 
 
 def _series_count(node) -> int:
@@ -337,7 +393,7 @@ def parse_difference_entries(values, valid_room_ids, valid_parameter_ids):
                     terms.append(term)
                 if not valid or len(terms) < 2 or len(terms) > MAX_FORMULA_TERMS:
                     continue
-                if not any(_is_series(term) for term in terms):
+                if not any(_is_series(term) or _is_x_series(term) for term in terms):
                     continue
                 node = _fold_left(terms, ops)
         if node in seen:
@@ -426,7 +482,7 @@ def formula_unit_of(node, unit_of_series):
     """
     if is_constant(node):
         return None
-    if _is_series(node):
+    if _is_series(node) or _is_x_series(node):
         return unit_of_series(node[0], node[1]) or ""
     if _is_fn(node):
         units = [formula_unit_of(arg, unit_of_series) for arg in node[2]]
@@ -450,7 +506,7 @@ def formula_source(node, series_name) -> str:
     def emit(current, parent_prec, is_right):
         if is_constant(current):
             return format_constant(current[1])
-        if _is_series(current):
+        if _is_x_series(current) or _is_series(current):
             return series_name(current[0], current[1])
         if _is_fn(current):
             args = ", ".join(emit(arg, 0, False) for arg in current[2])
@@ -485,11 +541,12 @@ def _name_boundary(text, index) -> bool:
 def parse_formula_text(text, rooms, parameters):
     """Parse ``avg(Kuhinja/CO2, Kopalnica/CO2)`` into an expression tree.
 
-    ``rooms`` and ``parameters`` are ``(id, name)`` pairs. ``/`` between a
-    known room and parameter is the series, and ``/`` between values divides.
-    ``*`` and ``/`` bind tighter than ``+`` and ``-``. Parentheses group.
-    ``min``, ``max``, and ``avg`` take two or more values, separated by
-    commas, and are computed at each timestamp. At least one series is required.
+    ``/`` between a known room and parameter is the series, and ``/`` between
+    values divides. ``x/Parameter`` (any case, spaces allowed) is the current
+    room and wins over a room that is actually named ``x``. ``*`` and ``/``
+    bind tighter than ``+`` and ``-``. Parentheses group. ``min``, ``max``,
+    and ``avg`` take two or more values, separated by commas, and are computed
+    at each timestamp. At least one series is required.
     """
     raw = str(text or "")
     if not raw.strip():
@@ -515,30 +572,46 @@ def parse_formula_text(text, rooms, parameters):
             tokens.append(("fn", name))
             continue
         matched = None
-        for room_id, room_name in room_list:
-            room_name = str(room_name or "")
-            if not room_name:
-                continue
-            end = index + len(room_name)
-            if raw[index:end].casefold() != room_name.casefold():
-                continue
-            slash = skip_space(end)
-            if slash >= length or raw[slash] != "/":
-                continue
-            name_at = skip_space(slash + 1)
-            for param_id, param_name in param_list:
-                param_name = str(param_name or "")
-                if not param_name:
+        if raw[index] in "xX" and _name_boundary(raw, index + 1):
+            slash = skip_space(index + 1)
+            if slash < length and raw[slash] == "/":
+                name_at = skip_space(slash + 1)
+                for param_id, param_name in param_list:
+                    param_name = str(param_name or "")
+                    if not param_name:
+                        continue
+                    param_end = name_at + len(param_name)
+                    if raw[name_at:param_end].casefold() != param_name.casefold():
+                        continue
+                    if not _name_boundary(raw, param_end):
+                        continue
+                    matched = (("x", int(param_id)), param_end)
+                    break
+        if matched is None:
+            for room_id, room_name in room_list:
+                room_name = str(room_name or "")
+                if not room_name:
                     continue
-                param_end = name_at + len(param_name)
-                if raw[name_at:param_end].casefold() != param_name.casefold():
+                end = index + len(room_name)
+                if raw[index:end].casefold() != room_name.casefold():
                     continue
-                if not _name_boundary(raw, param_end):
+                slash = skip_space(end)
+                if slash >= length or raw[slash] != "/":
                     continue
-                matched = ((int(room_id), int(param_id)), param_end)
-                break
-            if matched:
-                break
+                name_at = skip_space(slash + 1)
+                for param_id, param_name in param_list:
+                    param_name = str(param_name or "")
+                    if not param_name:
+                        continue
+                    param_end = name_at + len(param_name)
+                    if raw[name_at:param_end].casefold() != param_name.casefold():
+                        continue
+                    if not _name_boundary(raw, param_end):
+                        continue
+                    matched = ((int(room_id), int(param_id)), param_end)
+                    break
+                if matched:
+                    break
         if matched:
             tokens.append(matched[0])
             index = matched[1]
@@ -674,7 +747,7 @@ def _parse_expression_tokens(tokens):
             if len(args) > MAX_FORMULA_TERMS:
                 raise FormulaError(f"{name} can use at most {MAX_FORMULA_TERMS} values.")
             return ("fn", name, tuple(args))
-        if is_constant(current) or _is_series(current):
+        if is_constant(current) or _is_series(current) or _is_x_series(current):
             nonlocal_advance()
             return current
         raise FormulaError("Expected a series, a number, or '('.")
@@ -709,7 +782,7 @@ def evaluate_formula(node, get_series, tolerance=None):
         def value(current):
             if is_constant(current):
                 return float(current[1])
-            if _is_series(current):
+            if _is_series(current) or _is_x_series(current):
                 return environment[current]
             if _is_op(current):
                 return _apply_op(value(current[2]), value(current[3]), current[1])

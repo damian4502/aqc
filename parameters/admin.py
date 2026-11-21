@@ -50,4 +50,8 @@ class ParameterAdmin(admin.ModelAdmin):
 
     @admin.display(description="Kind")
     def kind(self, obj):
-        return "Calculated" if obj.is_calculated else "Measured"
+        if obj.is_room_bound:
+            return "Per room"
+        if obj.is_calculated:
+            return "Calculated"
+        return "Measured"

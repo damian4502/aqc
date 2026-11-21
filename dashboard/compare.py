@@ -582,7 +582,10 @@ def compare_view(request):
     parameter_by_id = {param.id: param for param in parameters}
     from dashboard.parameter_formula import partition_parameters
 
-    calculated_ids = {param.id for param in parameters if param.is_calculated}
+    calculated_ids = {
+        param.id for param in parameters
+        if param.is_calculated and not param.is_room_bound
+    }
     measured_parameter_ids, measured_explicit, calculated_series_ids = partition_parameters(
         selected_parameter_ids, enabled_explicit, calculated_ids
     )
@@ -611,6 +614,8 @@ def compare_view(request):
     ]
 
     def _series_name(room_id, parameter_id):
+        if room_id == "x":
+            return f"x/{parameter_by_id[parameter_id].name}"
         return f"{room_by_id[room_id].name}/{parameter_by_id[parameter_id].name}"
 
     selected_diffs = [
@@ -626,6 +631,8 @@ def compare_view(request):
     event_room_ids = set(pair_room_ids)
     for node in difference_specs:
         for term in iter_series(node):
+            if term[0] == "x":
+                continue
             event_room_ids.add(term[0])
             if term[1] in calculated_ids:
                 continue
@@ -671,7 +678,10 @@ def compare_view(request):
         catalog_rooms, catalog_parameters, formulas = formula_catalog(rooms, parameters)
         needed_calculated = list(calculated_series_ids)
         for node in difference_specs:
-            for _room_id, param_id in iter_series(node):
+            for term in iter_series(node):
+                if term[0] == "x":
+                    continue
+                param_id = term[1]
                 if param_id in calculated_ids and param_id not in needed_calculated:
                     needed_calculated.append(param_id)
         raw_mode = is_raw_interval(interval_minutes)
@@ -735,12 +745,16 @@ def compare_view(request):
 
             def has_term(term, _keyed=keyed, _calc=calculated_map):
                 room_id, param_id = term
+                if room_id == "x":
+                    return False
                 if param_id in calculated_ids:
                     series = _calc.get(param_id)
                     return series is not None and not series.dropna().empty
                 return pair_key(room_id, param_id) in _keyed.columns
 
             def get_series(room_id, parameter_id, _keyed=keyed, _calc=calculated_map):
+                if room_id == "x":
+                    return pd.Series(dtype="float64")
                 if parameter_id in calculated_ids:
                     series = _calc.get(parameter_id)
                     return series if series is not None else pd.Series(dtype="float64")

@@ -992,7 +992,10 @@ def ventilation_view(request):
 
     from dashboard.parameter_formula import partition_parameters
 
-    calculated_ids = {param.id for param in parameters if param.is_calculated}
+    calculated_ids = {
+        param.id for param in parameters
+        if param.is_calculated and not param.is_room_bound
+    }
     measured_ids, _measured_explicit, calculated_series_ids = partition_parameters(
         selected_parameter_ids, [], calculated_ids
     )

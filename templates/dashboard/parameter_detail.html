@@ -9,7 +9,7 @@
     <div class="flex justify-between items-end">
         <div>
             <h1 class="text-5xl font-bold text-white tracking-tighter">{{ parameter.name }}</h1>
-            <p class="text-slate-400 mt-1">{{ parameter.unit }} • {% if parameter.is_calculated %}Calculated{% else %}Room comparison{% endif %}</p>
+            <p class="text-slate-400 mt-1">{{ parameter.unit }} • {% if parameter.is_room_bound %}Per room{% elif parameter.is_calculated %}Calculated{% else %}Room comparison{% endif %}</p>
         </div>
         
 <select id="param-switcher" 
@@ -21,7 +21,7 @@
 	{% all_parameters as all_parameters %}
     {% for p in all_parameters %}
         {% if p.id != parameter.id %}
-        <option value="{% url 'parameter_detail' p.id %}">{{ p.name }} ({{ p.unit }}){% if p.formula %} (calculated){% endif %}</option>
+        <option value="{% url 'parameter_detail' p.id %}">{{ p.name }} ({{ p.unit }}){% if p.is_room_bound %} (per room){% elif p.formula %} (calculated){% endif %}</option>
         {% endif %}
     {% endfor %}
 </select>
@@ -61,12 +61,13 @@
             <span class="text-[11px] text-slate-500">Empty means this parameter is a direct measurement. A formula is plotted and not stored.</span>
         </div>
         <textarea id="parameter-formula" name="formula" rows="2" spellcheck="false"
-                  placeholder="avg(Kuhinja/CO2, Kopalnica/CO2, Strojnica/CO2)"
+                  placeholder="(x/PM10 / Zunanji zrak/PM10) * 100"
                   class="w-full bg-slate-900 border border-slate-700 rounded-2xl px-4 py-3 text-sm text-white focus:outline-none focus:border-amber-500 font-mono">{{ formula_value|default:parameter.formula }}</textarea>
         <div class="flex flex-wrap gap-3">
             <select id="formula-insert-room" aria-label="Insert room"
                     class="bg-slate-900 border border-slate-700 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:border-blue-500 min-w-[160px]">
                 <option value="">Room</option>
+                <option value="x/">x (this room)</option>
                 {% for room in formula_rooms %}
                 <option value="{{ room.name }}/">{{ room.name }}</option>
                 {% endfor %}
@@ -75,7 +76,7 @@
                     class="bg-slate-900 border border-slate-700 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:border-blue-500 min-w-[160px]">
                 <option value="">Parameter</option>
                 {% for p in formula_parameters %}
-                <option value="{{ p.name }}">{{ p.name }}{% if p.unit %} ({{ p.unit }}){% endif %}{% if p.formula %} (calculated){% endif %}</option>
+                <option value="{{ p.name }}">{{ p.name }}{% if p.unit %} ({{ p.unit }}){% endif %}{% if p.is_room_bound %} (per room){% elif p.formula %} (calculated){% endif %}</option>
                 {% endfor %}
             </select>
             <select id="formula-insert-op" aria-label="Insert operation"
@@ -95,7 +96,7 @@
                 Save formula
             </button>
         </div>
-        <p class="text-[11px] text-slate-500">Same syntax as Compare. The unit stays the one set on this parameter. A calculated parameter is one series, not one line per room.</p>
+        <p class="text-[11px] text-slate-500">Same syntax as Compare. The unit stays the one set on this parameter. Use x/Parameter for this room, for example (x/PM10 / Zunanji zrak/PM10) * 100 — one line per room. A formula that names every room is one series.</p>
         {% if formula_error %}
         <p class="text-sm text-rose-300">{{ formula_error }}</p>
         {% endif %}

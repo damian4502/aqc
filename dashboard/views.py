@@ -910,10 +910,98 @@ def chart_data(request):
         )
 
 
+def _merge_wide(left, right):
+    """Column-union of two wide frames. Empty sides are skipped."""
+    if left is None or getattr(left, "empty", True):
+        return right if right is not None else pd.DataFrame()
+    if right is None or getattr(right, "empty", True):
+        return left
+    frame = left.reindex(left.index.union(right.index))
+    for column in right.columns:
+        label = column
+        if label in frame.columns:
+            label = f"{column} (formula)"
+        frame[label] = right[column].reindex(frame.index)
+    frame.index.name = "timestamp"
+    return frame
+
+
+def _formula_window(start, end, all_data):
+    return (None, None) if all_data else (start, end)
+
+
+def _bound_room_ids(parameter, start, end, all_data, catalog_rooms, catalog_parameters, formulas):
+    """Rooms that have the measured series an ``x`` leaf reads in this window."""
+    from dashboard.parameter_formula import x_measured_parameter_ids
+
+    catalog_ids = [room_id for room_id, _name in catalog_rooms]
+    wanted = x_measured_parameter_ids(
+        parameter.id, formulas, catalog_rooms, catalog_parameters
+    )
+    if not wanted:
+        return catalog_ids
+    query = Measurement.objects.filter(parameter_id__in=wanted)
+    if not all_data:
+        if start is not None:
+            query = query.filter(timestamp__gte=start)
+        if end is not None:
+            query = query.filter(timestamp__lte=end)
+    found = set(query.order_by().values_list("sensor__room_id", flat=True).distinct())
+    return [room_id for room_id in catalog_ids if room_id in found]
+
+
+def _load_formula_frame(pairs, calculated_ids, start, end, all_data, interval_minutes, fill_method, spike_factor, spike_ceiling):
+    from dashboard.parameter_formula import FormulaError, formula_catalog, load_keyed_with_calculations
+
+    rooms = list(Room.objects.all())
+    parameters = list(Parameter.objects.all())
+    catalog_rooms, catalog_parameters, formulas = formula_catalog(rooms, parameters)
+    window_start, window_end = _formula_window(start, end, all_data)
+    try:
+        keyed, _means, calculated = load_keyed_with_calculations(
+            pairs,
+            calculated_ids,
+            window_start,
+            window_end,
+            interval_minutes,
+            fill_method=fill_method,
+            spike_factor=spike_factor,
+            spike_ceiling=spike_ceiling,
+            rooms=catalog_rooms,
+            parameters=catalog_parameters,
+            formulas=formulas,
+            tolerance="2min" if is_raw_interval(interval_minutes) else None,
+        )
+    except FormulaError:
+        return pd.DataFrame(), {}, rooms, parameters, formulas
+    return keyed, calculated, rooms, parameters, formulas
+
+
 def _chart_resampled(room, parameter, start, end, all_data, interval_minutes, fill_method, spike_factor, spike_ceiling):
     """Wide frame for one room (columns are parameters) or one parameter (columns are rooms)."""
     from dashboard.bin_cache import distinct_measurement_pairs, label_frame, load_resampled_pairs
-    from dashboard.parameter_formula import FormulaError, evaluate_saved_formula
+    from dashboard.parameter_formula import FormulaError, evaluate_saved_formula, formula_catalog
+
+    if parameter is not None and parameter.is_room_bound:
+        rooms = list(Room.objects.all())
+        parameters = list(Parameter.objects.all())
+        catalog_rooms, catalog_parameters, formulas = formula_catalog(rooms, parameters)
+        try:
+            room_ids = _bound_room_ids(
+                parameter, start, end, all_data, catalog_rooms, catalog_parameters, formulas
+            )
+        except FormulaError:
+            return pd.DataFrame()
+        if not room_ids:
+            return pd.DataFrame()
+        pairs = [(room_id, parameter.id) for room_id in room_ids]
+        keyed, _calculated, _rooms, _parameters, _formulas = _load_formula_frame(
+            pairs, [], start, end, all_data, interval_minutes, fill_method, spike_factor, spike_ceiling
+        )
+        names = {row_id: name for row_id, name in catalog_rooms}
+        return label_frame(
+            keyed, pairs, lambda room_id, _parameter_id, names=names: names.get(room_id, str(room_id))
+        )
 
     if parameter is not None and parameter.is_calculated:
         try:
@@ -942,38 +1030,84 @@ def _chart_resampled(room, parameter, start, end, all_data, interval_minutes, fi
         parameter_id=parameter.id if parameter is not None else None,
         all_data=all_data,
     )
-    if not pairs:
-        return pd.DataFrame()
-    keyed, _means = load_resampled_pairs(
-        pairs,
-        None if all_data else start,
-        None if all_data else end,
-        interval_minutes,
-        fill_method=fill_method,
-        spike_factor=spike_factor,
-        spike_ceiling=spike_ceiling,
-    )
-    if parameter is not None:
-        names = {
-            row_id: name
-            for row_id, name in Room.objects.filter(id__in={room_id for room_id, _pid in pairs}).values_list("id", "name")
-        }
-        return label_frame(keyed, pairs, lambda room_id, _parameter_id, names=names: names.get(room_id, str(room_id)))
-    names = {
-        row_id: name
-        for row_id, name in Parameter.objects.filter(id__in={parameter_id for _room_id, parameter_id in pairs}).values_list("id", "name")
-    }
-    return label_frame(keyed, pairs, lambda _room_id, parameter_id, names=names: names.get(parameter_id, str(parameter_id)))
+    frame = pd.DataFrame()
+    if pairs:
+        keyed, _means = load_resampled_pairs(
+            pairs,
+            None if all_data else start,
+            None if all_data else end,
+            interval_minutes,
+            fill_method=fill_method,
+            spike_factor=spike_factor,
+            spike_ceiling=spike_ceiling,
+        )
+        if parameter is not None:
+            names = {
+                row_id: name
+                for row_id, name in Room.objects.filter(id__in={room_id for room_id, _pid in pairs}).values_list("id", "name")
+            }
+            frame = label_frame(keyed, pairs, lambda room_id, _parameter_id, names=names: names.get(room_id, str(room_id)))
+        else:
+            names = {
+                row_id: name
+                for row_id, name in Parameter.objects.filter(id__in={parameter_id for _room_id, parameter_id in pairs}).values_list("id", "name")
+            }
+            frame = label_frame(keyed, pairs, lambda _room_id, parameter_id, names=names: names.get(parameter_id, str(parameter_id)))
+
+    if parameter is None and room is not None:
+        for item in Parameter.objects.all():
+            if not item.is_room_bound:
+                continue
+            keyed, _calculated, _rooms, _parameters, _formulas = _load_formula_frame(
+                [(room.id, item.id)],
+                [],
+                start,
+                end,
+                all_data,
+                interval_minutes,
+                fill_method,
+                spike_factor,
+                spike_ceiling,
+            )
+            extra = label_frame(
+                keyed,
+                [(room.id, item.id)],
+                lambda _room_id, parameter_id, name=item.name: name,
+            )
+            frame = _merge_wide(frame, extra)
+    return frame
 
 
 def _pattern_source(room, parameter, rooms, parameters, start, end, all_data, interval_minutes, spike_factor, spike_ceiling):
     """One timestamp/value frame for the patterns page, from cached bins or a formula."""
     from dashboard.bin_cache import label_frame, load_resampled_pairs
     from dashboard.parameter_formula import FormulaError, formula_catalog, load_keyed_with_calculations
+    from dashboard.series_selection import pair_key
 
     window_start = None if all_data else start
     window_end = None if all_data else end
-    if parameter.is_calculated:
+    if parameter.is_room_bound:
+        try:
+            catalog_rooms, catalog_parameters, formulas = formula_catalog(rooms, parameters)
+            keyed, _means, _calculated = load_keyed_with_calculations(
+                [(room.id, parameter.id)],
+                [],
+                window_start,
+                window_end,
+                interval_minutes,
+                fill_method="ffill",
+                spike_factor=spike_factor,
+                spike_ceiling=spike_ceiling,
+                rooms=catalog_rooms,
+                parameters=catalog_parameters,
+                formulas=formulas,
+                tolerance="2min" if is_raw_interval(interval_minutes) else None,
+            )
+        except FormulaError:
+            return pd.DataFrame()
+        key = pair_key(room.id, parameter.id)
+        series = keyed[key] if keyed is not None and key in getattr(keyed, "columns", []) else None
+    elif parameter.is_calculated:
         try:
             catalog_rooms, catalog_parameters, formulas = formula_catalog(rooms, parameters)
             _keyed, _means, calculated = load_keyed_with_calculations(
@@ -1757,7 +1891,10 @@ def correlations_view(request):
     parameter_by_id = {param.id: param for param in parameters}
     from dashboard.parameter_formula import partition_parameters
 
-    calculated_ids = {param.id for param in parameters if param.is_calculated}
+    calculated_ids = {
+        param.id for param in parameters
+        if param.is_calculated and not param.is_room_bound
+    }
     measured_ids, measured_explicit, calculated_series_ids = partition_parameters(
         selected_parameter_ids, enabled_explicit, calculated_ids
     )
@@ -2148,7 +2285,7 @@ def patterns_view(request):
 
                 unit = selected_parameter.unit or ""
                 title_base = f"{selected_parameter.name} — {selected_room.name}"
-                if selected_parameter.is_calculated:
+                if selected_parameter.is_calculated and not selected_parameter.is_room_bound:
                     title_base = f"{selected_parameter.name} (calculated)"
 
                 hourly_plot = hourly.copy()

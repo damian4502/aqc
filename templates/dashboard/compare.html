@@ -77,9 +77,9 @@
                     <label class="flex items-center gap-3 px-2 py-1.5 rounded-xl hover:bg-slate-800/80 cursor-pointer text-sm">
                         <input type="checkbox" name="parameter" value="{{ p.id }}"
                                class="param-cb accent-cyan-500 w-4 h-4"
-                               data-calculated="{% if p.is_calculated %}1{% else %}0{% endif %}"
+                               data-calculated="{% if p.is_calculated and not p.is_room_bound %}1{% else %}0{% endif %}"
                                {% if p.id in selected_parameter_ids %}checked{% endif %}>
-                        <span class="text-slate-200">{{ p.name }}{% if p.is_calculated %} <span class="text-amber-300/80 text-xs">(calculated)</span>{% endif %}</span>
+                        <span class="text-slate-200">{{ p.name }}{% if p.is_room_bound %} <span class="text-amber-300/80 text-xs">(per room)</span>{% elif p.is_calculated %} <span class="text-amber-300/80 text-xs">(calculated)</span>{% endif %}</span>
                         {% if p.unit %}<span class="text-slate-500 text-xs">{{ p.unit }}</span>{% endif %}
                     </label>
                     {% empty %}
@@ -91,7 +91,7 @@
                     · <span id="series-preview">0</span> series
                     <span id="series-warn" class="hidden text-amber-400"> (over the {{ max_series }} limit)</span>
                 </p>
-                <p class="text-[11px] text-slate-500 mt-1">A calculated parameter is one series, not one line per room.</p>
+                <p class="text-[11px] text-slate-500 mt-1">A formula that names every room is one series. x/Parameter is one line per room.</p>
             </div>
         </div>
 
@@ -208,7 +208,7 @@
                 {% endfor %}
             </div>
             <p id="diff-empty" class="text-[11px] text-slate-500 mt-3 {% if selected_diffs %}hidden{% endif %}">No calculations yet. The series do not have to be checked above. Click a calculation to load it into the field. Uncheck to leave it off the next chart.</p>
-            <p class="text-[11px] text-slate-500 mt-1">Write Room/Parameter, numbers, + − * /, and min(), max(), avg(). Each function takes two or more values, separated by commas, and is computed at each time. Parentheses group. * and / happen before + and −, so A − B * C is A − (B * C). The dropdowns insert at the cursor: a room inserts its name and a slash. Up to 24 series. Raw values show the result. With all recorded values, other series are paired to the first within 2 minutes.</p>
+            <p class="text-[11px] text-slate-500 mt-1">Write Room/Parameter, numbers, + − * /, and min(), max(), avg(). Each function takes two or more values, separated by commas, and is computed at each time. Parentheses group. * and / happen before + and −, so A − B * C is A − (B * C). The dropdowns insert at the cursor: a room inserts its name and a slash. Up to 24 series. Raw values show the result. With all recorded values, other series are paired to the first within 2 minutes. x/Parameter is for a saved parameter, not this box: it means the current room.</p>
         </div>
 
         <div class="glass rounded-3xl p-6">
