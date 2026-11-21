@@ -607,19 +607,19 @@
                 dataset.data.push(null);
             } else {
                 const target = targetFor(series.entry);
-                let shown = target;
-                if (state.smooth && Number.isFinite(series.prev) && Number.isFinite(target)) {
-                    const delta = target - series.prev;
+                let goal = target;
+                if (zscore) {
+                    if (Number.isFinite(target)) noteSample(series, target);
+                    goal = series.zN >= 5 && Number.isFinite(target) ? zOf(series, target) : null;
+                }
+                let shown = goal;
+                if (state.smooth && Number.isFinite(series.prev) && Number.isFinite(goal)) {
+                    const delta = goal - series.prev;
                     series.ema = (((Number.isFinite(series.ema) ? series.ema : 0) * 100) + delta) / 101;
                     shown = series.prev + (series.ema / 51);
                 }
                 if (Number.isFinite(shown)) series.prev = shown;
-                let y = shown;
-                if (zscore && Number.isFinite(shown)) {
-                    noteSample(series, Number.isFinite(target) ? target : shown);
-                    y = zOf(series, shown);
-                }
-                series.display = Number.isFinite(y) ? y : null;
+                series.display = Number.isFinite(shown) ? shown : null;
                 dataset.data.push(series.display);
                 dataset.tension = state.smooth ? 0.35 : 0;
                 dataset.borderColor = series.color;
