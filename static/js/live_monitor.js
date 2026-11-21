@@ -22,7 +22,7 @@
     const topics = {};
     (catalog.topics || []).forEach(function (row) { topics[row.topic] = row; });
 
-    const state = { paramIds: [], roomIds: [], entries: [], smooth: true };
+    const state = { paramIds: [], roomIds: [], entries: [], smooth: true, scale: "auto" };
     const latest = {};
     const seriesByKey = new Map();
     let chart = null;
@@ -45,13 +45,19 @@
         return ids.size;
     }
 
-    function zscoreOn() {
+    function unitsDiffer() {
         const units = new Set();
         state.entries.forEach(function (entry) {
             const param = paramById.get(entry.paramId);
             units.add(((param && param.unit) || "").trim());
         });
         return units.size > 1;
+    }
+
+    function zscoreOn() {
+        if (state.scale === "z") return true;
+        if (state.scale === "raw") return false;
+        return unitsDiffer();
     }
 
     function seriesColor(room, param) {
@@ -370,6 +376,7 @@
             roomIds: state.roomIds,
             entries: state.entries,
             smooth: state.smooth,
+            scale: state.scale,
         });
         if (payload === lastSaved) return;
         lastSaved = payload;
@@ -388,13 +395,17 @@
             return { roomId: entry.roomId == null ? null : Number(entry.roomId), paramId: Number(entry.paramId) };
         });
         state.smooth = data.smooth !== false;
+        state.scale = data.scale === "z" || data.scale === "raw" ? data.scale : "auto";
         const smoothBox = document.getElementById("smooth-curve");
         if (smoothBox) smoothBox.checked = state.smooth;
+        const scaleBox = document.getElementById("scale-mode");
+        if (scaleBox) scaleBox.value = state.scale;
         lastSaved = JSON.stringify({
             paramIds: state.paramIds,
             roomIds: state.roomIds,
             entries: state.entries,
             smooth: state.smooth,
+            scale: state.scale,
         });
         applyingRemote = false;
         renderChoices();
@@ -582,6 +593,7 @@
             if (lastScale) clearChart();
             lastScale = zscore ? "z" : "v";
             chart.options.scales.y.title.text = zscore ? "z-score" : "Vrednost";
+            safeUpdate();
         }
     }
 
@@ -727,6 +739,15 @@
         if (openChart) openChart.addEventListener("click", function () { openPane("chart"); });
         const openTable = document.getElementById("open-table-window");
         if (openTable) openTable.addEventListener("click", function () { openPane("table"); });
+        const scaleMode = document.getElementById("scale-mode");
+        if (scaleMode) {
+            scaleMode.value = state.scale;
+            scaleMode.addEventListener("change", function () {
+                state.scale = scaleMode.value === "z" || scaleMode.value === "raw" ? scaleMode.value : "auto";
+                updateScaleBadge(zscoreOn());
+                save();
+            });
+        }
         const smooth = document.getElementById("smooth-curve");
         if (smooth) {
             smooth.checked = state.smooth;

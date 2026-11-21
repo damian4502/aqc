@@ -67,7 +67,7 @@
             <div>
                 <div class="text-sm text-slate-400 mb-2 font-medium">Parametri</div>
                 <div id="param-choices" class="bg-slate-900/70 border border-slate-700 rounded-2xl p-2 max-h-56 overflow-y-auto space-y-1"></div>
-                <p class="text-[11px] text-slate-500 mt-2">Izračunani parametri se računajo v brskalniku iz živih MQTT vrednosti. Z-score se uporabi samo, če so na grafu parametri z različnimi enotami. Enaka enota ostane surova vrednost.</p>
+                <p class="text-[11px] text-slate-500 mt-2">Izračunani parametri se računajo v brskalniku iz živih MQTT vrednosti. Skala je samodejno z-score, če so enote različne, sicer surova vrednost. Ročno lahko izbereš eno ali drugo.</p>
             </div>
             <div>
                 <label class="block text-sm text-slate-400 mb-2 font-medium" for="add-room">Prostor</label>
@@ -102,6 +102,14 @@
             <div class="flex flex-wrap justify-between items-center gap-3 mb-4">
                 <h2 class="text-lg font-semibold">Graf <span id="scale-badge" class="text-slate-400 text-sm font-normal">vrednost</span></h2>
                 <div class="flex flex-wrap gap-2 items-center">
+                    <label class="flex items-center gap-2 text-sm text-slate-300">
+                        Skala
+                        <select id="scale-mode" class="bg-slate-900 border border-slate-700 rounded-xl px-3 py-1.5 text-sm">
+                            <option value="auto">Samodejno</option>
+                            <option value="raw">Vrednost</option>
+                            <option value="z">z-score</option>
+                        </select>
+                    </label>
                     <label class="flex items-center gap-2 text-sm text-slate-300">
                         <input type="checkbox" id="smooth-curve" class="accent-amber-500 w-4 h-4" checked>
                         Glajenje
