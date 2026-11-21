@@ -46,7 +46,12 @@
     }
 
     function zscoreOn() {
-        return distinctParamCount() > 1;
+        const units = new Set();
+        state.entries.forEach(function (entry) {
+            const param = paramById.get(entry.paramId);
+            units.add(((param && param.unit) || "").trim());
+        });
+        return units.size > 1;
     }
 
     function seriesColor(room, param) {
