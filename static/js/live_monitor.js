@@ -224,7 +224,7 @@
             const ident = sensorIdent(topic);
             if (!ident) return;
             names.forEach(function (name) {
-                client.publish("vila/sentjane/asgard/cmd/" + ident, name, { qos: 0 });
+                client.publish("vila/sentjane/asgard/cmd/" + ident, "live_mode", { qos: 0 });
             });
         });
     }
@@ -746,6 +746,7 @@
         window.setInterval(tick, 41);
         window.setInterval(publishLive, 9000);
         publishLive();
+		document.addEventListener('visibilitychange', publishLive);
     });
 
     window.addEventListener("storage", function (event) {
