@@ -33,6 +33,13 @@ class Room(models.Model):
         default=999,
     )
     air_flow = models.ForeignKey(Parameter, null=True, default=None, on_delete=models.SET_NULL)
+    color = models.CharField(
+        max_length=7,
+        blank=True,
+        default="",
+        verbose_name="Chart color",
+        help_text="Hex color such as #34d399. Leave empty to keep the automatic chart color.",
+    )
     
     
     def get_aqi(self):

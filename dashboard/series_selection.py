@@ -531,6 +531,30 @@ def formula_source(node, series_name) -> str:
     return emit(node, 0, False)
 
 
+def formula_ast_json(node):
+    """JSON-ready tree for the live monitor. ``None`` is not a formula node."""
+    if is_constant(node):
+        return {"t": "n", "v": float(node[1])}
+    if _is_x_series(node):
+        return {"t": "x", "p": int(node[1])}
+    if _is_series(node):
+        return {"t": "s", "r": int(node[0]), "p": int(node[1])}
+    if _is_op(node):
+        return {
+            "t": "op",
+            "o": node[1],
+            "l": formula_ast_json(node[2]),
+            "r": formula_ast_json(node[3]),
+        }
+    if _is_fn(node):
+        return {
+            "t": "fn",
+            "n": node[1],
+            "a": [formula_ast_json(arg) for arg in node[2]],
+        }
+    return None
+
+
 def _name_boundary(text, index) -> bool:
     if index >= len(text):
         return True

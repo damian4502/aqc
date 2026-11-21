@@ -10,6 +10,7 @@ class ParameterAdminForm(forms.ModelForm):
         fields = "__all__"
         widgets = {
             "formula": forms.Textarea(attrs={"rows": 4, "cols": 80}),
+            "color": forms.TextInput(attrs={"placeholder": "#38bdf8", "size": 10}),
         }
 
     def clean_formula(self):
@@ -40,11 +41,22 @@ class ParameterAdminForm(forms.ModelForm):
             raise forms.ValidationError(str(exc)) from exc
         return text
 
+    def clean_color(self):
+        from dashboard.chart_colors import normalize_color
+
+        raw = (self.cleaned_data.get("color") or "").strip()
+        if not raw:
+            return ""
+        color = normalize_color(raw)
+        if not color:
+            raise forms.ValidationError("Use a hex color such as #38bdf8, or leave it empty.")
+        return color
+
 
 @admin.register(Parameter)
 class ParameterAdmin(admin.ModelAdmin):
     form = ParameterAdminForm
-    list_display = ["name", "unit", "kind", "description"]
+    list_display = ["name", "unit", "kind", "color", "description"]
     search_fields = ["name", "formula"]
     list_filter = ["name"]
 

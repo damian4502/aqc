@@ -682,9 +682,11 @@ def _dark(fig, height: int):
     return fig
 
 
-def build_summary_figure(summary: list[dict]):
+def build_summary_figure(summary: list[dict], color_by_label=None):
     """Horizontal bars of median ACH. Empty when nothing was accepted."""
     import plotly.graph_objects as go
+
+    from dashboard.chart_colors import normalize_color
 
     rows = [row for row in summary if row["n"] and row["median_ach"] is not None]
     if not rows:
@@ -692,7 +694,10 @@ def build_summary_figure(summary: list[dict]):
     # Plotly draws the first category at the bottom; reverse so the fastest
     # clearance (already sorted first) sits at the top.
     rows = list(reversed(rows))
-    colors = [_PALETTE[i % len(_PALETTE)] for i in range(len(rows))]
+    colors = []
+    for index, row in enumerate(rows):
+        custom = normalize_color((color_by_label or {}).get(row["label"]))
+        colors.append(custom or _PALETTE[index % len(_PALETTE)])
     fig = go.Figure(
         go.Bar(
             y=[row["label"] for row in rows],
@@ -725,7 +730,7 @@ def build_summary_figure(summary: list[dict]):
     return _dark(fig, height=max(280, 70 + 42 * len(rows)))
 
 
-def build_fit_figure(segments: list[dict], limit: int = 12):
+def build_fit_figure(segments: list[dict], limit: int = 12, color_by_label=None):
     """One panel per series: the decay with the highest R² and its fit."""
     import plotly.graph_objects as go
     from plotly.subplots import make_subplots
@@ -748,7 +753,9 @@ def build_fit_figure(segments: list[dict], limit: int = 12):
     fig = make_subplots(rows=rows, cols=cols, subplot_titles=titles, vertical_spacing=0.12)
     for i, item in enumerate(chosen):
         r, c = divmod(i, cols)
-        color = _PALETTE[i % len(_PALETTE)]
+        from dashboard.chart_colors import normalize_color
+
+        color = normalize_color((color_by_label or {}).get(item["label"])) or _PALETTE[i % len(_PALETTE)]
         fig.add_trace(
             go.Scatter(
                 x=item["t_hours"],
@@ -1162,8 +1169,23 @@ def ventilation_view(request):
                     segments_frame(segments).to_csv(response, index=False)
                     return response
 
-                bar = build_summary_figure(summary)
-                fits = build_fit_figure(segments)
+                from dashboard.chart_colors import pick_series_color
+
+                color_by_label = {}
+                prefer = "parameter" if include_parameter and not include_room else "room"
+                for label, parameter_id in param_id_by_label.items():
+                    room_id = room_id_by_label.get(label)
+                    room = room_by_id.get(room_id) if room_id is not None else None
+                    parameter = parameter_by_id.get(parameter_id)
+                    chosen = pick_series_color(
+                        getattr(room, "color", "") if room is not None else "",
+                        getattr(parameter, "color", "") if parameter is not None else "",
+                        prefer=prefer,
+                    )
+                    if chosen:
+                        color_by_label[label] = chosen
+                bar = build_summary_figure(summary, color_by_label)
+                fits = build_fit_figure(segments, color_by_label=color_by_label)
                 if bar is not None:
                     bar_html = bar.to_html(full_html=False, include_plotlyjs="cdn")
                 if fits is not None:

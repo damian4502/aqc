@@ -117,9 +117,11 @@ def apply_dark_theme(fig, animate=True):
 
     # Neon + animations only for line/scatter graphs (not for imshow/heatmap)
     if hasattr(fig, 'data') and len(fig.data) > 0 and fig.data[0].type in ['scatter', 'scattergl']:
+        from dashboard.chart_colors import preserve_line_style
+
         for trace in fig.data:
             trace.update(
-                line=dict(width=3.8),
+                line=preserve_line_style(trace),
                 marker=dict(size=5)
             )
         
@@ -236,15 +238,65 @@ def custom_dashboard(request, dashboard_id):
     
 #@cache_page(60)
 def monitor(request):
-    context = {}
-    context['parameters'] = Parameter.objects.all().order_by('name')
-    context['rooms'] = Room.objects.all().order_by('order')
-    
+    from dashboard.chart_colors import normalize_color
+    from dashboard.series_selection import FormulaError, formula_ast_json, parse_formula_text
     from sensors.models import MqttSubscription
-    context["mqtt_topics"] = MqttSubscription.objects.all()
 
-
-    return render(request, 'dashboard/monitor.html', context)
+    parameters = list(Parameter.objects.all().order_by("order", "name"))
+    rooms = list(Room.objects.all().order_by("order", "name"))
+    catalog_rooms = [(room.id, room.name) for room in rooms]
+    catalog_parameters = [(param.id, param.name) for param in parameters]
+    payload_parameters = []
+    for param in parameters:
+        ast = None
+        if (param.formula or "").strip():
+            try:
+                ast = formula_ast_json(parse_formula_text(
+                    param.formula, catalog_rooms, catalog_parameters
+                ))
+            except FormulaError:
+                ast = None
+        live_rooms = []
+        if not param.is_calculated:
+            live_rooms = [int(room_id) for room_id in (param.live_rooms() or []) if room_id]
+        payload_parameters.append({
+            "id": param.id,
+            "name": param.name,
+            "identifier": param.identifier,
+            "unit": param.unit or "",
+            "decimals": int(param.format_decimals or 0),
+            "color": normalize_color(param.color),
+            "formula": bool((param.formula or "").strip()),
+            "roomBound": bool(param.is_room_bound),
+            "global": bool(param.is_calculated and not param.is_room_bound),
+            "ast": ast,
+            "liveRooms": live_rooms,
+        })
+    payload_rooms = [
+        {"id": room.id, "name": room.name, "color": normalize_color(room.color)}
+        for room in rooms
+    ]
+    payload_topics = []
+    for topic in MqttSubscription.objects.select_related("sensor", "sensor__room"):
+        if topic.sensor_id is None or topic.sensor.room_id is None:
+            continue
+        payload_topics.append({
+            "topic": topic.topic,
+            "roomId": topic.sensor.room_id,
+            "sensorId": topic.sensor_id,
+        })
+    pane = request.GET.get("pane")
+    if pane not in ("chart", "table"):
+        pane = ""
+    context = {
+        "monitor_catalog": {
+            "rooms": payload_rooms,
+            "parameters": payload_parameters,
+            "topics": payload_topics,
+        },
+        "pane": pane,
+    }
+    return render(request, "dashboard/monitor.html", context)
 
 
 def room_detail(request, room_id):
@@ -654,18 +706,27 @@ def resample_measurements(df, interval_minutes=15, fill_method='ffill', ignore_s
     return resampled
 
 
-def build_time_series_figure(frame, title, height=700, raw=False):
+def build_time_series_figure(frame, title, height=700, raw=False, color_by_name=None):
     """Line chart from a wide time-indexed frame.
 
     Raw mode plots each column on its own timestamps. A shared index would
     insert the other series' sample times as gaps and break the line.
+    ``color_by_name`` overrides the automatic color only for named series.
     """
     import plotly.graph_objects as go
+
+    from dashboard.chart_colors import normalize_color
 
     if frame is None or getattr(frame, "empty", True):
         fig = go.Figure()
         fig.update_layout(title=title, height=height)
         return fig
+
+    colors = {
+        str(name): normalize_color(color)
+        for name, color in (color_by_name or {}).items()
+        if normalize_color(color)
+    }
 
     if raw:
         fig = go.Figure()
@@ -673,18 +734,59 @@ def build_time_series_figure(frame, title, height=700, raw=False):
             series = frame[col].dropna()
             if series.empty:
                 continue
+            line = dict(width=2.2)
+            color = colors.get(str(col))
+            if color:
+                line["color"] = color
             fig.add_trace(go.Scattergl(
                 x=list(series.index),
                 y=[float(value) for value in series.to_numpy()],
                 name=str(col),
                 mode="lines",
                 connectgaps=True,
-                line=dict(width=2.2),
+                line=line,
             ))
         fig.update_layout(title=title, height=height, hovermode="x unified")
         return fig
 
-    return px.line(frame, x=frame.index, y=frame.columns, title=title, height=height)
+    fig = px.line(frame, x=frame.index, y=frame.columns, title=title, height=height)
+    for trace in fig.data:
+        color = colors.get(str(trace.name or ""))
+        if color:
+            trace.update(line={"color": color})
+    return fig
+
+
+def _column_colors(columns, room, parameter):
+    """Automatic colors stay when neither the room nor the parameter has one."""
+    from dashboard.chart_colors import pick_series_color
+
+    rooms = {item.name: item for item in Room.objects.all()}
+    parameters = {item.name: item for item in Parameter.objects.all()}
+    colors = {}
+    for col in columns or []:
+        text = str(col)
+        base = text.split(" (", 1)[0]
+        if text in rooms or base in rooms:
+            room_obj = rooms.get(text) or rooms.get(base)
+            param_obj = parameter
+            prefer = "room"
+        elif text in parameters or base in parameters:
+            room_obj = room
+            param_obj = parameters.get(text) or parameters.get(base)
+            prefer = "parameter"
+        else:
+            room_obj = room
+            param_obj = parameter
+            prefer = "room" if parameter is not None else "parameter"
+        color = pick_series_color(
+            getattr(room_obj, "color", "") if room_obj is not None else "",
+            getattr(param_obj, "color", "") if param_obj is not None else "",
+            prefer=prefer,
+        )
+        if color:
+            colors[text] = color
+    return colors
 
 import plotly.graph_objects as go
 
@@ -861,6 +963,7 @@ def chart_data(request):
         title="Time trend — all recorded values" if raw else "Time trend",
         height=700,
         raw=raw,
+        color_by_name=_column_colors(getattr(resampled, "columns", []), room, parameter),
     )
 
     for trace in fig.data:
@@ -1444,7 +1547,13 @@ def dashboard(request):
         'sensor__room__name': 'room'
     })
 
-    # Main graph: all parameters over time
+    from dashboard.chart_colors import normalize_color
+
+    color_map = {
+        name: normalize_color(color)
+        for name, color in Parameter.objects.values_list("name", "color")
+        if normalize_color(color)
+    }
     fig_main = px.line(
         df, 
         x='timestamp', 
@@ -1452,7 +1561,8 @@ def dashboard(request):
         color='parameter',
         facet_col='room',
         title='Measurements by rooms and parameters (last 7 days)',
-        labels={'value': 'Value', 'timestamp': 'Time'}
+        labels={'value': 'Value', 'timestamp': 'Time'},
+        color_discrete_map=color_map or None,
     )
     fig_main.update_layout(height=700)
 
@@ -2287,6 +2397,15 @@ def patterns_view(request):
                 title_base = f"{selected_parameter.name} — {selected_room.name}"
                 if selected_parameter.is_calculated and not selected_parameter.is_room_bound:
                     title_base = f"{selected_parameter.name} (calculated)"
+                from dashboard.chart_colors import pick_series_color
+
+                series_color = pick_series_color(
+                    selected_room.color,
+                    selected_parameter.color,
+                    prefer="parameter",
+                )
+                all_days_color = series_color or "#38bdf8"
+                weekly_color = series_color or "#818cf8"
 
                 hourly_plot = hourly.copy()
                 hourly_plot["weekdays"] = hourly_wd["mean"]
@@ -2297,7 +2416,7 @@ def patterns_view(request):
                     y=hourly_plot["mean"],
                     name="All days",
                     mode="lines+markers",
-                    line=dict(color="#38bdf8", width=3),
+                    line=dict(color=all_days_color, width=3),
                     customdata=hourly_plot["count"],
                     hovertemplate="Hour %{x}:00<br>Mean: %{y:.2f} "
                     + unit
@@ -2336,7 +2455,7 @@ def patterns_view(request):
                     legend=dict(orientation="h", y=1.08),
                 )
                 fig_h = apply_dark_theme(fig_h, animate=False)
-                fig_h.update_traces(line_color="#38bdf8", selector=dict(name="All days"))
+                fig_h.update_traces(line_color=all_days_color, selector=dict(name="All days"))
                 fig_h.update_traces(line_color="#34d399", selector=dict(name="Mon–Fri"))
                 fig_h.update_traces(line_color="#f59e0b", selector=dict(name="Sat–Sun"))
                 fig_hourly = fig_h.to_html(full_html=False, include_plotlyjs="cdn")
@@ -2346,7 +2465,7 @@ def patterns_view(request):
                     x=weekly["day_name"],
                     y=weekly["mean"],
                     mode="lines+markers",
-                    line=dict(color="#818cf8", width=3),
+                    line=dict(color=weekly_color, width=3),
                     customdata=weekly["count"],
                     hovertemplate="%{x}<br>Mean: %{y:.2f} "
                     + unit
@@ -2368,7 +2487,7 @@ def patterns_view(request):
                     showlegend=False,
                 )
                 fig_w = apply_dark_theme(fig_w, animate=False)
-                fig_w.update_traces(line_color="#818cf8")
+                fig_w.update_traces(line_color=weekly_color)
                 fig_weekly = fig_w.to_html(full_html=False, include_plotlyjs="cdn")
 
                 z = heat_mean.values.astype(float)

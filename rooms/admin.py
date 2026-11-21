@@ -1,10 +1,33 @@
-from .models import Room, Parameter, Event, RoomGroup   # dodaj nova modela
+from django import forms
 from django.contrib import admin
-from .models import Room
+
+from .models import Event, Room, RoomGroup
+
+
+class RoomAdminForm(forms.ModelForm):
+    class Meta:
+        model = Room
+        fields = "__all__"
+        widgets = {
+            "color": forms.TextInput(attrs={"placeholder": "#34d399", "size": 10}),
+        }
+
+    def clean_color(self):
+        from dashboard.chart_colors import normalize_color
+
+        raw = (self.cleaned_data.get("color") or "").strip()
+        if not raw:
+            return ""
+        color = normalize_color(raw)
+        if not color:
+            raise forms.ValidationError("Use a hex color such as #34d399, or leave it empty.")
+        return color
+
 
 @admin.register(Room)
 class RoomAdmin(admin.ModelAdmin):
-    list_display = ['name', 'description', 'created_at']
+    form = RoomAdminForm
+    list_display = ['name', 'color', 'description', 'created_at']
     search_fields = ['name']
     list_filter = ['created_at']
 

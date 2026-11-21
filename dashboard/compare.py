@@ -259,6 +259,7 @@ def build_compare_figure(
     title="Compare series",
     individual_timeline=False,
     dash_labels=None,
+    color_by_label=None,
 ):
     """Dark overlay of selected series. Hover always includes the raw value.
 
@@ -282,6 +283,7 @@ def build_compare_figure(
     primary_unit = unique_units[0] if unique_units else ""
 
     fig = go.Figure()
+    custom_colors = color_by_label or {}
     for index, col in enumerate(plotted.columns):
         label = str(col)
         raw_col = raw_frame[col] if col in getattr(raw_frame, "columns", []) else plotted[col]
@@ -294,7 +296,7 @@ def build_compare_figure(
         else:
             x_values = list(plotted.index)
         unit = units_by_label.get(label, "") or ""
-        color = SERIES_COLORS[index % len(SERIES_COLORS)]
+        color = custom_colors.get(label) or SERIES_COLORS[index % len(SERIES_COLORS)]
         custom = [[_fmt_hover_raw(value), unit] for value in raw_col]
         fig.add_trace(
             go.Scattergl(
@@ -665,6 +667,7 @@ def compare_view(request):
 
     resampled = None
     units_by_label = {}
+    color_by_label = {}
     sample_average_by_label = {}
     dash_labels = set()
 
@@ -724,6 +727,16 @@ def compare_view(request):
                 used_labels.add(label)
                 display[label] = keyed[key]
                 units_by_label[label] = parameter_by_id[param_id].unit or ""
+                from dashboard.chart_colors import pick_series_color
+
+                prefer = "parameter" if include_parameter and not include_room else "room"
+                chosen = pick_series_color(
+                    room_by_id[room_id].color,
+                    parameter_by_id[param_id].color,
+                    prefer=prefer,
+                )
+                if chosen:
+                    color_by_label[label] = chosen
                 if key in recorded_mean:
                     sample_average_by_label[label] = recorded_mean[key]
 
@@ -738,6 +751,11 @@ def compare_view(request):
                 display = display.reindex(display.index.union(series.dropna().index))
                 display[label] = series.reindex(display.index)
                 units_by_label[label] = parameter_by_id[param_id].unit or ""
+                from dashboard.chart_colors import pick_series_color
+
+                chosen = pick_series_color("", parameter_by_id[param_id].color, prefer="parameter")
+                if chosen:
+                    color_by_label[label] = chosen
                 dash_labels.add(label)
                 formula_mean = series.dropna().mean()
                 if pd.notna(formula_mean):
@@ -886,6 +904,7 @@ def compare_view(request):
             title=title,
             individual_timeline=raw_mode,
             dash_labels=dash_labels,
+            color_by_label=color_by_label,
         )
         fig = apply_dark_theme(fig, animate=False)
         # Theme helper is tuned for single-series room charts: restore overlay

@@ -37,6 +37,13 @@ class Parameter(models.Model):
             "Names are matched as written, so rename a room or parameter and update the formula."
         ),
     )
+    color = models.CharField(
+        max_length=7,
+        blank=True,
+        default="",
+        verbose_name="Chart color",
+        help_text="Hex color such as #38bdf8. Leave empty to keep the automatic chart color.",
+    )
 
     def __str__(self):
         return f"{self.name} ({self.unit})" if self.unit else self.name
