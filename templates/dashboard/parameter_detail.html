@@ -550,6 +550,8 @@ async function loadGraph(extraParams = {override: true}) {
     const url = `/api/chart-data/?${params.toString()}`;
 
     try {
+		try {Plotly.relayout(currentGraphDiv, {'title.text': 'Loading'});} catch {}
+		//currentGraphDiv.layout.title.text = "Loading...";
         const res = await fetch(url, { signal: loadGraphAbortController.signal });
         if (!res.ok) return;
         const figJson = await res.json();
@@ -559,7 +561,7 @@ async function loadGraph(extraParams = {override: true}) {
         const isUpdate = currentGraphDiv.data && currentGraphDiv.data.length > 0;
 
         if (isUpdate) {
-            await Plotly.react(currentGraphDiv, figJson.data, figJson.layout, { responsive: true });
+            if (currentGraphDiv.layout.yaxis.autorange || extraParams['override']) await Plotly.react(currentGraphDiv, figJson.data, figJson.layout, { responsive: true });
         } else {
             await Plotly.newPlot(currentGraphDiv, figJson.data, figJson.layout, { responsive: true });
         }
@@ -710,7 +712,7 @@ function setupLiveRefresh() {
     const now = new Date();
     if (endDate.getTime() <= now.getTime()) return;
 
-    const intervalMin = Math.max(0.1, parseInt(document.getElementById('interval')?.value || '0', 10) || 0);
+    const intervalMin = Math.max(0.01, parseInt(document.getElementById('interval')?.value || '0', 10) || 0);
     const periodMs = intervalMin * 60 * 1000;
 
     liveRefreshTimer = setInterval(() => {
@@ -721,8 +723,8 @@ function setupLiveRefresh() {
             liveRefreshTimer = null;
             return;
         }
-        scheduleLoadGraph({ immediate: true, force: true, clearQuick: false, override: false });
-    }, periodMs);
+        if (currentGraphDiv.layout.yaxis.autorange && getPageVisibility()) scheduleLoadGraph({ immediate: true, force: true, clearQuick: false, override: false });
+    }, 1000);
 }
 
 function scheduleLoadGraph(options = {}) {
