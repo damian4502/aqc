@@ -293,6 +293,12 @@
 <script>
 let pageVisible = true;
 
+function getPageVisibility() {
+	pageVisible = document.visibilityState === 'visible';
+	
+	return pageVisible;
+}
+
 document.addEventListener('visibilitychange', () => {
     pageVisible = document.visibilityState === 'visible';
     
