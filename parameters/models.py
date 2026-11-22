@@ -31,7 +31,8 @@ class Parameter(models.Model):
         help_text=(
             "Leave empty for a measured parameter. A formula is plotted and not stored. "
             "Same syntax as Compare: Room/Parameter, numbers, + − * /, parentheses, "
-            "min(), max(), and avg(). Use x/Parameter for the current room, for example "
+            "min(), max(), avg(), and range(). range() is the highest minus the lowest. "
+            "Use x/Parameter for the current room, for example "
             "(x/PM10 / Outdoor/PM10) * 100 — that is one line per room. A formula that "
             "names every room is one series. The unit is the Unit field. "
             "Names are matched as written, so rename a room or parameter and update the formula."

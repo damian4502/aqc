@@ -122,6 +122,7 @@
             if (node.n === "min") return Math.min.apply(null, args);
             if (node.n === "max") return Math.max.apply(null, args);
             if (node.n === "avg") return args.reduce(function (sum, value) { return sum + value; }, 0) / args.length;
+            if (node.n === "range") return Math.max.apply(null, args) - Math.min.apply(null, args);
         }
         return null;
     }

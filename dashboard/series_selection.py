@@ -24,7 +24,7 @@ OP_TOKENS = {
 }
 TOKEN_FOR_OP = {"+": "add", "-": "sub", "*": "mul", "/": "div"}
 OP_SYMBOLS = {"+": "+", "-": "−", "*": "×", "/": "÷"}
-FN_NAMES = ("min", "max", "avg")
+FN_NAMES = ("min", "max", "avg", "range")
 MAX_FORMULA_TERMS = 24
 _PREC = {"+": 1, "-": 1, "*": 2, "/": 2}
 _FX_WORD = {"+": "add", "-": "sub", "*": "mul", "/": "div"}
@@ -77,7 +77,7 @@ def _is_fn(node) -> bool:
         and node[0] == "fn"
         and node[1] in FN_NAMES
         and isinstance(node[2], tuple)
-        and len(node[2]) >= 2
+        and len(node[2]) >= 1
     )
 
 
@@ -292,7 +292,9 @@ def _parse_fx(body, valid_room_ids, valid_parameter_ids):
                     pos += 1
                     continue
                 break
-            if pos >= len(body) or body[pos] != ")" or len(args) < 2:
+            if pos >= len(body) or body[pos] != ")" or not args:
+                return None
+            if name != "range" and len(args) < 2:
                 return None
             pos += 1
             return ("fn", name, tuple(args))
@@ -325,8 +327,8 @@ def parse_difference_specs(values, valid_room_ids, valid_parameter_ids):
     """Enabled calculations as expression trees.
 
     A leaf is ``(room, parameter)`` or ``("n", value)``. An operation is
-    ``("op", "+", left, right)``. ``min``, ``max``, and ``avg`` are
-    ``("fn", name, args)``. ``*`` and ``/`` bind tighter than ``+``
+    ``("op", "+", left, right)``. ``min``, ``max``, ``avg``, and ``range`` are
+    ``("fn", name, args)``. ``range`` is max minus min. ``*`` and ``/`` bind tighter than ``+``
     and ``-`` when the formula was typed. A saved ``a|b`` token is still
     left-associative A − B, and ``a|add|b|mul|c`` is still ``(a + b) * c``.
     """
@@ -569,8 +571,9 @@ def parse_formula_text(text, rooms, parameters):
     values divides. ``x/Parameter`` (any case, spaces allowed) is the current
     room and wins over a room that is actually named ``x``. ``*`` and ``/``
     bind tighter than ``+`` and ``-``. Parentheses group. ``min``, ``max``,
-    and ``avg`` take two or more values, separated by commas, and are computed
-    at each timestamp. At least one series is required.
+    and ``avg`` take two or more values. ``range`` takes one or more and is
+    the highest minus the lowest. Arguments are separated by commas and are
+    computed at each timestamp. At least one series is required.
     """
     raw = str(text or "")
     if not raw.strip():
@@ -670,7 +673,7 @@ def parse_formula_text(text, rooms, parameters):
 
 
 def _match_call(text, index):
-    """``min``/``max``/``avg`` when the next non-space character is ``(``."""
+    """``min``/``max``/``avg``/``range`` when the next non-space character is ``(``."""
     for name in FN_NAMES:
         end = index + len(name)
         if end > len(text) or text[index:end].casefold() != name:
@@ -755,8 +758,13 @@ def _parse_expression_tokens(tokens):
             if peek() != "(":
                 raise FormulaError(f"Expected '(' after {name}.")
             nonlocal_advance()
+            need = 1 if name == "range" else 2
             if peek() in (None, ",", ")"):
-                raise FormulaError(f"{name} needs at least two values.")
+                raise FormulaError(
+                    f"{name} needs at least one value."
+                    if need == 1
+                    else f"{name} needs at least two values."
+                )
             args = [parse_expr()]
             while peek() == ",":
                 nonlocal_advance()
@@ -766,8 +774,12 @@ def _parse_expression_tokens(tokens):
             if peek() != ")":
                 raise FormulaError("Close the parenthesis.")
             nonlocal_advance()
-            if len(args) < 2:
-                raise FormulaError(f"{name} needs at least two values.")
+            if len(args) < need:
+                raise FormulaError(
+                    f"{name} needs at least one value."
+                    if need == 1
+                    else f"{name} needs at least two values."
+                )
             if len(args) > MAX_FORMULA_TERMS:
                 raise FormulaError(f"{name} can use at most {MAX_FORMULA_TERMS} values.")
             return ("fn", name, tuple(args))
@@ -888,7 +900,10 @@ def _apply_op(left, right, op):
 
 
 def _apply_fn(name, values):
-    """Pointwise ``min``, ``max``, or ``avg``. A missing value stays missing."""
+    """Pointwise ``min``, ``max``, ``avg``, or ``range``. A missing value stays missing.
+
+    ``range`` is the highest value minus the lowest at that timestamp.
+    """
     import pandas as pd
 
     series_values = [value for value in values if isinstance(value, pd.Series)]
@@ -906,6 +921,8 @@ def _apply_fn(name, values):
             return min(numbers)
         if name == "max":
             return max(numbers)
+        if name == "range":
+            return max(numbers) - min(numbers)
         return sum(numbers) / len(numbers)
 
     index = series_values[0].index
@@ -928,6 +945,8 @@ def _apply_fn(name, values):
         result = frame.min(axis=1, skipna=False)
     elif name == "max":
         result = frame.max(axis=1, skipna=False)
+    elif name == "range":
+        result = frame.max(axis=1, skipna=False) - frame.min(axis=1, skipna=False)
     else:
         result = frame.mean(axis=1, skipna=False)
     numeric = pd.to_numeric(result, errors="coerce")
