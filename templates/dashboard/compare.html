@@ -1150,7 +1150,9 @@ async function refreshLiveChart() {
     if (start) params.set('start', start);
     if (end) params.set('end', end);	
     try {
-		if (getPageVisibility()) {
+		// only do live refresh if page is visible and user is not applying custom x-y zoom
+		// beacuse loading new data will reset layout axis
+		if (getPageVisibility() && document.getElementById('compare-plot').layout.xaxis.autorange) {
 			const res = await fetch(window.location.pathname + '?' + params.toString(), {
 				headers: { Accept: 'application/json' },
 			});
@@ -1158,23 +1160,22 @@ async function refreshLiveChart() {
 			const fig = await res.json();
 			const gd = document.getElementById('compare-plot');
 			if (!fig || !fig.data || !gd || typeof Plotly === 'undefined') return;
-			Plotly.react(gd, fig.data, fig.layout, { responsive: true });
+			
+			// double check if chart has not been zoomed in during request fetch
+			// we don't want to reset the chart if user is actively zooming in
+			if (gd.layout.xaxis.autorange) Plotly.react(gd, fig.data, fig.layout, { responsive: true });
 		}
     } catch (err) {
         console.error('Live refresh failed', err);
 	}
+	// using Timeout instead of Interval to avoid making requests faster than receiving responses and flooding the server with more and more requests
 	liveTimer = setTimeout(refreshLiveChart, 1000);
 }
 
 function setupLiveRefresh() {
-    if (liveTimer) {
-        clearInterval(liveTimer);
-        liveTimer = null;
-    }
     if (chartRangeMode !== 'live' || !document.getElementById('compare-plot')) return;
     const end = parseLocalInput(document.getElementById('end_date')?.value);
     if (!end || end.getTime() <= Date.now()) return;
-    const intervalMin = Math.max(1, parseInt(document.getElementById('interval')?.value || '1', 10) || 1);
     refreshLiveChart();
 }
 
