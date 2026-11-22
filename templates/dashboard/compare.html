@@ -338,8 +338,7 @@
                 <button type="button" data-days="0"   class="quick-date-btn px-4 py-2.5 text-sm rounded-2xl {% if active_quick == 'all' %}bg-blue-600 text-white{% else %}bg-slate-800 hover:bg-slate-700{% endif %}">All</button>
                 <button type="button" id="apply-zoom-btn"
                         title="Set From/To to the current chart zoom"
-                        {% if not fig %}disabled{% endif %}
-                        class="inline-flex items-center px-4 py-2.5 text-sm rounded-2xl transition-all {% if request.GET.zoomed == '1' %}bg-blue-600 text-white{% else %}bg-slate-800 hover:bg-slate-700{% endif %} {% if not fig %}opacity-40 cursor-not-allowed{% endif %}">
+                        class="inline-flex items-center px-4 py-2.5 text-sm rounded-2xl transition-all {% if request.GET.zoomed == '1' %}bg-blue-600 text-white{% else %}bg-slate-800 hover:bg-slate-700{% endif %}">
                     <i class="fas fa-search-plus mr-1"></i>
                     Zoom
                 </button>
@@ -358,73 +357,54 @@
                         class="bg-slate-800 hover:bg-slate-700 px-5 py-3 rounded-2xl text-sm font-medium transition-all">
                     Reset
                 </button>
-                <button type="submit"
+                <button type="button" id="refresh-compare-btn"
                         class="bg-blue-600 hover:bg-blue-500 px-6 py-3 rounded-2xl text-sm font-medium transition-all">
-                    Draw comparison
+                    Refresh chart
                 </button>
-                {% if fig %}
-                <button type="submit" name="format" value="csv"
+                <button type="button" id="export-csv-btn"
                         class="bg-emerald-600 hover:bg-emerald-500 px-6 py-3 rounded-2xl text-sm font-medium transition-all flex items-center gap-2">
                     <i class="fas fa-download"></i>
                     Export CSV
                 </button>
-                {% endif %}
             </div>
             <p class="text-[11px] text-slate-500 mt-3">
-                Live hides To and redraws the chart at the resampling interval.
+                The chart loads on its own and redraws when rooms, parameters, series, or calculations change.
+                Live hides To and redraws at the resampling interval.
                 Click a legend item to hide a series. Hover shows both the plotted
                 value and the original measurement.
             </p>
         </div>
     </form>
 
-    {% if compute_error %}
-    <div class="glass rounded-3xl p-8 border-l-4 border-amber-500">
-        <p class="text-amber-200">{{ compute_error }}</p>
+    <div id="compare-error" class="hidden glass rounded-3xl p-8 border-l-4 border-amber-500">
+        <p class="text-amber-200"></p>
     </div>
-    {% elif not has_query_selection %}
-    <div class="glass rounded-3xl p-16 text-center">
-        <i class="fas fa-chart-area text-4xl text-slate-600 mb-4"></i>
-        <p class="text-slate-300 text-lg">Select rooms and parameters, then draw the overlay.</p>
-        <p class="text-slate-500 text-sm mt-2">
-            Same parameter in two rooms shows how a quantity travels through the house.
-            Two parameters in one room show which moves first.
-        </p>
-    </div>
-    {% endif %}
-
-    {% if unit_notice %}
-    <div class="glass rounded-3xl p-6 border-l-4 border-sky-500">
-        <p class="text-sky-200 text-sm">{{ unit_notice }}</p>
-    </div>
-    {% endif %}
-
-    {% if fig %}
-    <div class="flex flex-wrap gap-3 text-xs">
-        <span class="px-3 py-1.5 rounded-full bg-slate-800 text-slate-300">{{ series_count }} series</span>
-        <span class="px-3 py-1.5 rounded-full bg-slate-800 text-slate-300">{{ sample_count }} {{ sample_label|default:"bins" }}</span>
-        {% if period_label %}
-        <span class="px-3 py-1.5 rounded-full bg-slate-800 text-slate-300">{{ period_label }}</span>
-        {% endif %}
-        <span class="px-3 py-1.5 rounded-full bg-slate-800 text-slate-300">
-            {% if normalize == 'off' %}Raw{% elif normalize == 'zscore' %}Z-score{% else %}Min-max{% endif %}
-        </span>
-        {% if dual_axis %}
-        <span class="px-3 py-1.5 rounded-full bg-slate-800 text-slate-300">Dual Y-axis</span>
-        {% endif %}
-        {% if event_count %}
-        <span class="px-3 py-1.5 rounded-full bg-slate-800 text-slate-300">{{ event_count }} events</span>
-        {% endif %}
+    <div id="compare-notice" class="hidden glass rounded-3xl p-6 border-l-4 border-sky-500">
+        <p class="text-sky-200 text-sm"></p>
     </div>
 
-    <div class="glass rounded-3xl p-4 sm:p-8 overflow-x-auto">
-        <div id="compare-chart" class="w-full rounded-3xl overflow-hidden">
-            {{ fig|safe }}
+    <div id="compare-badges" class="hidden flex flex-wrap gap-3 text-xs"></div>
+
+    <div id="compare-chart-card" class="glass rounded-3xl p-4 sm:p-8 overflow-x-auto relative">
+        <div id="compare-empty" class="hidden py-16 text-center">
+            <i class="fas fa-chart-area text-4xl text-slate-600 mb-4"></i>
+            <p class="text-slate-300 text-lg">Select rooms and parameters to draw the overlay.</p>
+            <p class="text-slate-500 text-sm mt-2">
+                Same parameter in two rooms shows how a quantity travels through the house.
+                Two parameters in one room show which moves first.
+            </p>
+        </div>
+        <div id="compare-chart" class="hidden w-full rounded-3xl overflow-hidden">
+            <div id="compare-plot" class="w-full" style="min-height: 640px;"></div>
+        </div>
+        <div id="chart-loading" class="pointer-events-none absolute left-1/2 top-6 -translate-x-1/2 z-20" aria-hidden="false">
+            <span class="inline-flex items-center justify-center w-9 h-9 rounded-full bg-slate-950/85 border border-slate-600 text-sky-300 shadow-lg">
+                <i class="fas fa-spinner fa-spin text-lg" aria-hidden="true"></i>
+            </span>
         </div>
     </div>
 
-    {% if stats_rows %}
-    <div class="glass rounded-3xl p-6">
+    <div id="compare-stats" class="hidden glass rounded-3xl p-6">
         <h2 class="text-xl font-semibold text-white mb-4">Series summary (raw values)</h2>
         <div class="overflow-x-auto">
             <table class="w-full text-sm">
@@ -441,32 +421,17 @@
                         <th class="py-2 font-medium text-right">Last</th>
                     </tr>
                 </thead>
-                <tbody>
-                    {% for row in stats_rows %}
-                    <tr class="border-b border-slate-800/80">
-                        <td class="py-2.5 pr-4 text-slate-200">{{ row.label }}</td>
-                        <td class="py-2.5 pr-4 text-slate-400">{{ row.unit }}</td>
-                        <td class="py-2.5 pr-4 text-right text-slate-400 tabular-nums">{{ row.n }}</td>
-                        <td class="py-2.5 pr-4 text-right text-slate-300 tabular-nums">{% if row.average != None %}{{ row.average|floatformat:2 }}{% else %}—{% endif %}</td>
-                        <td class="py-2.5 pr-4 text-right text-slate-300 tabular-nums">{% if row.min != None %}{{ row.min|floatformat:2 }}{% else %}—{% endif %}</td>
-                        <td class="py-2.5 pr-4 text-right text-slate-300 tabular-nums">{% if row.max != None %}{{ row.max|floatformat:2 }}{% else %}—{% endif %}</td>
-                        <td class="py-2.5 pr-4 text-right text-slate-300 tabular-nums">{% if row.mean != None %}{{ row.mean|floatformat:2 }}{% else %}—{% endif %}</td>
-                        <td class="py-2.5 pr-4 text-right text-slate-300 tabular-nums">{% if row.std != None %}{{ row.std|floatformat:2 }}{% else %}—{% endif %}</td>
-                        <td class="py-2.5 text-right text-slate-300 tabular-nums">{% if row.last != None %}{{ row.last|floatformat:2 }}{% else %}—{% endif %}</td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
+                <tbody id="compare-stats-body"></tbody>
             </table>
             <p class="text-[11px] text-slate-500 mt-3">Average is the mean of recorded measurements. Mean is the mean of the plotted series, so resampled bins and filled gaps count.</p>
         </div>
     </div>
-    {% endif %}
-    {% endif %}
 
 </div>
 {% endblock %}
 
 {% block scripts %}
+<script src="https://cdn.plot.ly/plotly-3.5.0.min.js"></script>
 {{ formula_catalog|json_script:"formula-catalog" }}
 <script>
 const GROUPS = {{ groups_json|default:'[]'|safe }};
@@ -524,6 +489,7 @@ function updateCounts() {
     if (warnEl) warnEl.classList.toggle('hidden', series <= MAX_SERIES);
     if (emptyEl) emptyEl.classList.toggle('hidden', document.querySelectorAll('#explicit-series .series-chip').length > 0);
     if (diffEmptyEl) diffEmptyEl.classList.toggle('hidden', document.querySelectorAll('#diff-series .series-chip').length > 0);
+    scheduleCompareLoad();
 }
 
 function seriesLoadButton(text) {
@@ -999,14 +965,14 @@ function liveEndDate() {
 }
 
 function applyQuickRange(btn) {
-    const form = document.getElementById('compare-form');
     const startInput = document.getElementById('start_date');
     const endInput = document.getElementById('end_date');
     const days = btn.dataset.days;
     const hours = btn.dataset.hours;
     const now = new Date();
     clearPeriodFlags();
-    setHidden('range_mode', 'live');
+    chartRangeMode = 'live';
+    paintRangeMode();
     if (days === '0') {
         setHidden('all_data', 'true');
         startInput.value = '2020-01-01T00:00';
@@ -1017,7 +983,13 @@ function applyQuickRange(btn) {
         startInput.value = toLocalInput(start);
     }
     endInput.value = toLocalInput(liveEndDate());
-    form.submit();
+    document.querySelectorAll('.quick-date-btn, #apply-zoom-btn').forEach((b) => {
+        b.classList.remove('bg-blue-600', 'text-white');
+        if (!b.classList.contains('bg-slate-800')) b.classList.add('bg-slate-800');
+    });
+    btn.classList.add('bg-blue-600', 'text-white');
+    btn.classList.remove('bg-slate-800');
+    scheduleCompareLoad({ immediate: true });
 }
 
 function parseLocalDate(input) {
@@ -1093,9 +1065,10 @@ function applyChartZoomToPeriod() {
     startInput.value = toLocalInput(start);
     endInput.value = toLocalInput(end);
     clearPeriodFlags();
-    setHidden('range_mode', 'fixed');
+    chartRangeMode = 'fixed';
+    paintRangeMode();
     setHidden('zoomed', '1');
-    form.submit();
+    scheduleCompareLoad({ immediate: true });
 }
 
 function syncRawIntervalUi() {
@@ -1136,7 +1109,7 @@ function setRangeMode(mode) {
     const endInput = document.getElementById('end_date');
     if (endInput) endInput.value = toLocalInput(chartRangeMode === 'live' ? liveEndDate() : new Date());
     clearPeriodFlags();
-    document.getElementById('compare-form').submit();
+    scheduleCompareLoad({ immediate: true });
 }
 
 function parseLocalInput(value) {
@@ -1146,41 +1119,39 @@ function parseLocalInput(value) {
 }
 
 async function refreshLiveChart() {
-    const params = new URLSearchParams(window.location.search);
-    params.set('format', 'json');
-    params.set('range_mode', 'live');
-    const start = document.getElementById('start_date')?.value;
-    const end = document.getElementById('end_date')?.value;
-    if (start) params.set('start', start);
-    if (end) params.set('end', end);	
+    if (liveTimer) {
+        clearTimeout(liveTimer);
+        liveTimer = null;
+    }
+    if (chartRangeMode !== 'live') return;
+    const end = parseLocalInput(document.getElementById('end_date')?.value);
+    if (!end || end.getTime() <= Date.now()) return;
+    const gd = document.getElementById('compare-plot');
     try {
-		// only do live refresh if page is visible and user is not applying custom x-y zoom
-		// beacuse loading new data will reset layout axis
-		if (getPageVisibility() && document.getElementById('compare-plot').layout.xaxis.autorange) {
-			const res = await fetch(window.location.pathname + '?' + params.toString(), {
-				headers: { Accept: 'application/json' },
-			});
-			if (!res.ok) return;
-			const fig = await res.json();
-			const gd = document.getElementById('compare-plot');
-			if (!fig || !fig.data || !gd || typeof Plotly === 'undefined') return;
-			
-			// double check if chart has not been zoomed in during request fetch
-			// we don't want to reset the chart if user is actively zooming in
-			if (gd.layout.xaxis.autorange) Plotly.react(gd, fig.data, fig.layout, { responsive: true });
-		}
+        // Skip while the page is hidden or the user is zoomed in. A reload
+        // would put the axes back to autorange.
+        const zoomed = gd && gd.layout && gd.layout.xaxis && gd.layout.xaxis.autorange === false;
+        if (getPageVisibility() && !zoomed) {
+            await loadCompareChart({ quiet: true, keepZoom: true });
+        }
     } catch (err) {
         console.error('Live refresh failed', err);
-	}
-	// using Timeout instead of Interval to avoid making requests faster than receiving responses and flooding the server with more and more requests
-	liveTimer = setTimeout(refreshLiveChart, 1000);
+    }
+    if (chartRangeMode === 'live' && !liveTimer) liveTimer = setTimeout(refreshLiveChart, 1000);
 }
 
 function setupLiveRefresh() {
-    if (chartRangeMode !== 'live' || !document.getElementById('compare-plot')) return;
+    if (chartRangeMode !== 'live' || !document.getElementById('compare-plot')) {
+        if (liveTimer) {
+            clearTimeout(liveTimer);
+            liveTimer = null;
+        }
+        return;
+    }
     const end = parseLocalInput(document.getElementById('end_date')?.value);
     if (!end || end.getTime() <= Date.now()) return;
-    refreshLiveChart();
+    if (liveTimer) return;
+    liveTimer = setTimeout(refreshLiveChart, 1000);
 }
 
 function resetCompare() {
@@ -1194,17 +1165,232 @@ function resetCompare() {
     const name = document.getElementById('template-name');
     if (name) name.value = '';
     updateCounts();
-    document.getElementById('compare-form').submit();
+}
+
+let compareLoadSeq = 0;
+let compareTimer = null;
+let compareBusy = false;
+
+function setChartLoading(on) {
+    const el = document.getElementById('chart-loading');
+    if (!el) return;
+    el.classList.toggle('hidden', !on);
+    el.setAttribute('aria-hidden', on ? 'false' : 'true');
+}
+
+function compareQuery() {
+    document.querySelectorAll('.series-chip').forEach(syncSeriesToken);
+    return new URLSearchParams(new FormData(document.getElementById('compare-form')));
+}
+
+function scheduleCompareLoad(options = {}) {
+    if (!document.getElementById('compare-form')) return;
+    const immediate = !!options.immediate;
+    if (compareTimer) {
+        clearTimeout(compareTimer);
+        compareTimer = null;
+    }
+    const run = () => {
+        compareTimer = null;
+        loadCompareChart();
+    };
+    if (immediate) run();
+    else compareTimer = setTimeout(run, 200);
+}
+
+function fmtStat(value) {
+    if (value === null || value === undefined || value === '') return '—';
+    const number = Number(value);
+    return Number.isFinite(number) ? number.toFixed(2) : '—';
+}
+
+function paintBadges(meta, hasChart) {
+    const el = document.getElementById('compare-badges');
+    if (!el) return;
+    el.replaceChildren();
+    if (!hasChart) {
+        el.classList.add('hidden');
+        return;
+    }
+    const norm = { off: 'Raw', zscore: 'Z-score', minmax: 'Min-max' }[meta.normalize] || '';
+    const bits = [
+        meta.series_count ? meta.series_count + ' series' : '',
+        meta.sample_count || meta.sample_count === 0 ? meta.sample_count + ' ' + (meta.sample_label || 'bins') : '',
+        meta.period_label || '',
+        norm,
+        meta.dual_axis ? 'Dual Y-axis' : '',
+        meta.event_count ? meta.event_count + ' events' : '',
+    ].filter(Boolean);
+    bits.forEach((text) => {
+        const span = document.createElement('span');
+        span.className = 'px-3 py-1.5 rounded-full bg-slate-800 text-slate-300';
+        span.textContent = text;
+        el.appendChild(span);
+    });
+    el.classList.toggle('hidden', !bits.length);
+}
+
+function paintStats(rows, hasChart) {
+    const wrap = document.getElementById('compare-stats');
+    const body = document.getElementById('compare-stats-body');
+    if (!wrap || !body) return;
+    body.replaceChildren();
+    if (!hasChart || !rows || !rows.length) {
+        wrap.classList.add('hidden');
+        return;
+    }
+    const classes = [
+        'py-2.5 pr-4 text-slate-200',
+        'py-2.5 pr-4 text-slate-400',
+        'py-2.5 pr-4 text-right text-slate-400 tabular-nums',
+        'py-2.5 pr-4 text-right text-slate-300 tabular-nums',
+        'py-2.5 pr-4 text-right text-slate-300 tabular-nums',
+        'py-2.5 pr-4 text-right text-slate-300 tabular-nums',
+        'py-2.5 pr-4 text-right text-slate-300 tabular-nums',
+        'py-2.5 pr-4 text-right text-slate-300 tabular-nums',
+        'py-2.5 text-right text-slate-300 tabular-nums',
+    ];
+    rows.forEach((row) => {
+        const tr = document.createElement('tr');
+        tr.className = 'border-b border-slate-800/80';
+        [
+            row.label || '',
+            row.unit || '',
+            row.n,
+            fmtStat(row.average),
+            fmtStat(row.min),
+            fmtStat(row.max),
+            fmtStat(row.mean),
+            fmtStat(row.std),
+            fmtStat(row.last),
+        ].forEach((text, index) => {
+            const td = document.createElement('td');
+            td.className = classes[index];
+            td.textContent = text == null ? '—' : String(text);
+            tr.appendChild(td);
+        });
+        body.appendChild(tr);
+    });
+    wrap.classList.remove('hidden');
+}
+
+async function paintCompareResult(fig) {
+    const meta = fig.meta || {};
+    const hasChart = Array.isArray(fig.data) && fig.data.length > 0 && !meta.error;
+    const needsSelection = meta.error === 'Select at least one room and one parameter, or add an individual series.';
+    const empty = document.getElementById('compare-empty');
+    const chart = document.getElementById('compare-chart');
+    const errorEl = document.getElementById('compare-error');
+    const noticeEl = document.getElementById('compare-notice');
+    if (empty) empty.classList.toggle('hidden', hasChart || (!!meta.error && !needsSelection));
+    if (chart) chart.classList.toggle('hidden', !hasChart);
+    if (errorEl) {
+        errorEl.classList.toggle('hidden', hasChart || !meta.error || needsSelection);
+        const p = errorEl.querySelector('p');
+        if (p) p.textContent = meta.error || '';
+    }
+    if (noticeEl) {
+        noticeEl.classList.toggle('hidden', !meta.notice);
+        const p = noticeEl.querySelector('p');
+        if (p) p.textContent = meta.notice || '';
+    }
+    paintBadges(meta, hasChart);
+    paintStats(meta.stats, hasChart);
+    const gd = document.getElementById('compare-plot');
+    if (!gd || typeof Plotly === 'undefined') return;
+    if (!hasChart) {
+        if (gd.data) Plotly.purge(gd);
+        return;
+    }
+    const config = { responsive: true, displaylogo: false };
+    if (gd.data && gd.data.length) await Plotly.react(gd, fig.data, fig.layout || {}, config);
+    else await Plotly.newPlot(gd, fig.data, fig.layout || {}, config);
+    Plotly.Plots.resize(gd);
+}
+
+async function loadCompareChart(options = {}) {
+    const quiet = !!options.quiet;
+    if (quiet && compareBusy) return;
+    const seq = quiet ? compareLoadSeq : ++compareLoadSeq;
+    if (!quiet) {
+        compareBusy = true;
+        setChartLoading(true);
+    }
+    const params = compareQuery();
+    const shown = new URLSearchParams(params);
+    shown.delete('format');
+    const qs = shown.toString();
+    if (!quiet) history.replaceState(null, '', window.location.pathname + (qs ? '?' + qs : ''));
+    params.set('format', 'json');
+    try {
+        const res = await fetch(window.location.pathname + '?' + params.toString(), {
+            headers: { Accept: 'application/json' },
+        });
+        if (seq !== compareLoadSeq) return;
+        if (!res.ok) throw new Error('Chart request failed');
+        const fig = await res.json();
+        if (seq !== compareLoadSeq) return;
+        if (options.keepZoom) {
+            const gd = document.getElementById('compare-plot');
+            if (gd && gd.layout && gd.layout.xaxis && gd.layout.xaxis.autorange === false) return;
+        }
+        await paintCompareResult(fig);
+        if (!quiet) setupLiveRefresh();
+    } catch (err) {
+        if (seq !== compareLoadSeq) return;
+        console.error('Compare chart failed', err);
+    } finally {
+        if (!quiet && seq === compareLoadSeq) {
+            compareBusy = false;
+            setChartLoading(false);
+        }
+    }
+}
+
+async function exportCompareCsv() {
+    document.querySelectorAll('.series-chip').forEach(syncSeriesToken);
+    const params = new URLSearchParams(new FormData(document.getElementById('compare-form')));
+    params.set('format', 'csv');
+    const res = await fetch(window.location.pathname + '?' + params.toString());
+    if (!res.ok) return;
+    const blob = await res.blob();
+    const type = res.headers.get('Content-Type') || '';
+    if (type.indexOf('text/csv') === -1 && type.indexOf('application/csv') === -1) return;
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    const match = (res.headers.get('Content-Disposition') || '').match(/filename="([^"]+)"/);
+    link.download = match ? match[1] : 'compare.csv';
+    link.click();
+    URL.revokeObjectURL(url);
 }
 
 document.addEventListener('DOMContentLoaded', () => {
     const modeEl = document.getElementById('range-mode');
     chartRangeMode = modeEl && modeEl.dataset.initial === 'live' ? 'live' : 'fixed';
     paintRangeMode();
-    setupLiveRefresh();
     syncRawIntervalUi();
     const intervalEl = document.getElementById('interval');
-    if (intervalEl) intervalEl.addEventListener('change', syncRawIntervalUi);
+    if (intervalEl) intervalEl.addEventListener('change', () => {
+        syncRawIntervalUi();
+        scheduleCompareLoad({ immediate: true });
+    });
+    ['fill_method', 'normalize', 'spike_factor'].forEach((id) => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.addEventListener('change', () => scheduleCompareLoad({ immediate: true }));
+    });
+    const ceiling = document.getElementById('spike_ceiling');
+    if (ceiling) {
+        ceiling.addEventListener('change', () => scheduleCompareLoad({ immediate: true }));
+        ceiling.addEventListener('keydown', (e) => {
+            if (e.key !== 'Enter') return;
+            e.preventDefault();
+            scheduleCompareLoad({ immediate: true });
+        });
+    }
+    const eventsBox = document.querySelector('input[name="events"][type="checkbox"]');
+    if (eventsBox) eventsBox.addEventListener('change', () => scheduleCompareLoad({ immediate: true }));
     updateCounts();
     document.querySelectorAll('.room-cb, .param-cb').forEach(cb => {
         cb.addEventListener('change', updateCounts);
@@ -1238,8 +1424,14 @@ document.addEventListener('DOMContentLoaded', () => {
     ['start_date', 'end_date'].forEach(id => {
         const el = document.getElementById(id);
         if (!el) return;
-        el.addEventListener('input', clearPeriodFlags);
-        el.addEventListener('change', clearPeriodFlags);
+        el.addEventListener('input', () => {
+            clearPeriodFlags();
+            scheduleCompareLoad();
+        });
+        el.addEventListener('change', () => {
+            clearPeriodFlags();
+            scheduleCompareLoad({ immediate: true });
+        });
     });
     const zoomBtn = document.getElementById('apply-zoom-btn');
     if (zoomBtn) {
@@ -1249,25 +1441,33 @@ document.addEventListener('DOMContentLoaded', () => {
             applyChartZoomToPeriod();
         });
     }
+    const refreshBtn = document.getElementById('refresh-compare-btn');
+    if (refreshBtn) refreshBtn.addEventListener('click', () => scheduleCompareLoad({ immediate: true }));
+    const exportBtn = document.getElementById('export-csv-btn');
+    if (exportBtn) exportBtn.addEventListener('click', exportCompareCsv);
     const form = document.getElementById('compare-form');
     if (form) {
         form.addEventListener('submit', (e) => {
             document.querySelectorAll('.series-chip').forEach(syncSeriesToken);
             const submitter = e.submitter;
-            if (submitter && (submitter.name === 'load_template' || submitter.name === 'template_delete')) return;
+            if (submitter && (submitter.name === 'load_template' || submitter.name === 'template_delete' || submitter.name === 'template_action')) return;
+            e.preventDefault();
             const input = document.getElementById('formula-input');
-            if (!input || !input.value.trim()) return;
-            const parsed = parseFormulaText(input.value);
-            if (!parsed.ok) {
-                e.preventDefault();
-                const error = document.getElementById('formula-error');
-                if (error) {
-                    error.textContent = parsed.error;
-                    error.classList.remove('hidden');
+            if (input && input.value.trim()) {
+                const parsed = parseFormulaText(input.value);
+                if (!parsed.ok) {
+                    const error = document.getElementById('formula-error');
+                    if (error) {
+                        error.textContent = parsed.error;
+                        error.classList.remove('hidden');
+                    }
+                    return;
                 }
+                addDifference();
+                input.value = '';
                 return;
             }
-            addDifference();
+            scheduleCompareLoad({ immediate: true });
         });
     }
 });

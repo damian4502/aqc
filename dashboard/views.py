@@ -1007,7 +1007,7 @@ def chart_data(request):
                 borderpad=4,
             )
 
-    fig = apply_dark_theme(fig)
+    fig = apply_dark_theme(fig, animate=False)
     import plotly.io as pio
     return HttpResponse(
             pio.to_json(fig, validate=False, engine='json'),

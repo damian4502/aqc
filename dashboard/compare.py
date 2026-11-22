@@ -665,6 +665,12 @@ def compare_view(request):
     elif has_query_selection and n_series_selected == 0:
         compute_error = "Select at least one room and one parameter, or add an individual series."
 
+    response_format = (request.GET.get("format") or "").strip().lower()
+    # The page itself stays light. The chart is fetched as JSON, the same way
+    # a parameter page loads its graph.
+    if should_compute and response_format not in ("json", "csv"):
+        should_compute = False
+
     resampled = None
     units_by_label = {}
     color_by_label = {}
@@ -941,13 +947,6 @@ def compare_view(request):
         )
         compare_figure = fig
 
-    if request.GET.get("format") == "json":
-        from django.http import JsonResponse
-
-        if compare_figure is None:
-            return JsonResponse({"error": compute_error or "No chart"}, status=400)
-        return JsonResponse(json.loads(compare_figure.to_json()))
-
     period_label = "all data" if all_data else None
     if load_chart_range_mode(request) == "live" and start_date and not all_data:
         period_label = f"{timezone.localtime(start_date).strftime('%d %b %Y %H:%M')} – now"
@@ -956,6 +955,26 @@ def compare_view(request):
             f"{timezone.localtime(start_date).strftime('%d %b %Y %H:%M')} – "
             f"{timezone.localtime(end_date).strftime('%d %b %Y %H:%M')}"
         )
+
+    if response_format == "json":
+        from django.http import JsonResponse
+
+        figure = {"data": [], "layout": {}}
+        if compare_figure is not None:
+            figure = json.loads(compare_figure.to_json())
+        figure["meta"] = {
+            "error": compute_error,
+            "notice": unit_notice,
+            "series_count": series_count,
+            "sample_count": sample_count,
+            "sample_label": "points" if is_raw_interval(interval_minutes) else "bins",
+            "period_label": period_label,
+            "normalize": normalize,
+            "dual_axis": dual_axis,
+            "event_count": event_count,
+            "stats": stats_rows,
+        }
+        return JsonResponse(figure)
 
     groups_payload = [
         {

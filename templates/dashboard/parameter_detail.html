@@ -286,7 +286,14 @@
     <!-- Main chart -->
     {% if show_chart %}
         <div class="glass rounded-3xl p-8">
-            <div id="plotly-graph" class="w-full rounded-3xl overflow-hidden" style="height: 650px;"></div>
+            <div class="relative">
+                <div id="plotly-graph" class="w-full rounded-3xl overflow-hidden" style="height: 650px;"></div>
+                <div id="chart-loading" class="hidden pointer-events-none absolute left-1/2 top-4 -translate-x-1/2 z-20" aria-hidden="true">
+                    <span class="inline-flex items-center justify-center w-9 h-9 rounded-full bg-slate-950/85 border border-slate-600 text-sky-300 shadow-lg">
+                        <i class="fas fa-spinner fa-spin text-lg" aria-hidden="true"></i>
+                    </span>
+                </div>
+            </div>
         </div>
     {% elif no_data %}
         <div class="glass rounded-3xl p-16 text-center">
@@ -547,12 +554,12 @@ async function loadGraph(extraParams = {override: true}) {
         loadGraphAbortController.abort();
     }
     loadGraphAbortController = new AbortController();
+    const seq = ++chartLoadSeq;
+    setChartLoading(true);
 
     const url = `/api/chart-data/?${params.toString()}`;
 
     try {
-		try {Plotly.relayout(currentGraphDiv, {'title.text': 'Loading'});} catch {}
-		//currentGraphDiv.layout.title.text = "Loading...";
         const res = await fetch(url, { signal: loadGraphAbortController.signal });
         if (!res.ok) return;
         const figJson = await res.json();
@@ -609,6 +616,8 @@ async function loadGraph(extraParams = {override: true}) {
     } catch (err) {
         if (err && err.name === 'AbortError') return;
         console.error('Failed to load graph', err);
+    } finally {
+        if (seq === chartLoadSeq) setChartLoading(false);
     }
 }
 
@@ -617,6 +626,14 @@ let loadGraphTimer = null;
 let loadGraphAbortController = null;
 let lastLoadGraphKey = '';
 let liveRefreshTimer = null;
+let chartLoadSeq = 0;
+
+function setChartLoading(on) {
+    const el = document.getElementById('chart-loading');
+    if (!el) return;
+    el.classList.toggle('hidden', !on);
+    el.setAttribute('aria-hidden', on ? 'false' : 'true');
+}
 
 function getFilterKey() {
     return [

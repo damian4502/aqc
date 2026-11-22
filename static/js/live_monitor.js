@@ -258,9 +258,9 @@
 
     function paramLabel(param) {
         let text = param.name;
-        if (param.global) text += " (izračun)";
-        else if (param.roomBound) text += " (po prostorih)";
-        if (param.formula && !param.ast) text += " (napaka formule)";
+        if (param.global) text += " (calculated)";
+        else if (param.roomBound) text += " (per room)";
+        if (param.formula && !param.ast) text += " (formula error)";
         if (param.unit) text += " · " + param.unit;
         return text;
     }
@@ -269,7 +269,7 @@
         const paramSelect = document.getElementById("add-param");
         if (paramSelect) {
             const current = String(state.activeParamId || "");
-            paramSelect.innerHTML = '<option value="">-- Izberi parameter --</option>';
+            paramSelect.innerHTML = '<option value="">-- Select a parameter --</option>';
             (catalog.parameters || []).forEach(function (param) {
                 const option = document.createElement("option");
                 option.value = String(param.id);
@@ -281,7 +281,7 @@
         const roomSelect = document.getElementById("add-room");
         if (!roomSelect) return;
         const currentRoom = roomSelect.value;
-        roomSelect.innerHTML = '<option value="">-- Izberi prostor --</option>';
+        roomSelect.innerHTML = '<option value="">-- Select a room --</option>';
         (catalog.rooms || []).forEach(function (room) {
             const option = document.createElement("option");
             option.value = String(room.id);
@@ -334,7 +334,7 @@
     }
 
     function removeAllRooms() {
-        if (!window.confirm("Res želiš odstraniti vse serije iz tabele in grafa?")) return;
+        if (!window.confirm("Remove every series from the table and the chart?")) return;
         state.entries = [];
         clearChart();
         commit();
@@ -535,7 +535,7 @@
                 scales: {
                     y: {
                         beginAtZero: false,
-                        title: { display: true, text: "Vrednost", color: "#94a3b8" },
+                        title: { display: true, text: "Value", color: "#94a3b8" },
                         grid: { color: "rgba(148,163,184,0.15)" },
                         ticks: { color: "#94a3b8", maxTicksLimit: 8 },
                     },
@@ -557,13 +557,13 @@
 
     function updateScaleBadge(zscore) {
         const badge = document.getElementById("scale-badge");
-        if (badge) badge.textContent = zscore ? "z-score" : "vrednost";
+        if (badge) badge.textContent = zscore ? "z-score" : "value";
         const note = document.getElementById("stat-source");
-        if (note) note.textContent = zscore ? "z-score na grafu" : "iz trenutnih vrednosti";
+        if (note) note.textContent = "from current values";
         if (chart && lastScale !== (zscore ? "z" : "v")) {
             if (lastScale) clearChart();
             lastScale = zscore ? "z" : "v";
-            chart.options.scales.y.title.text = zscore ? "z-score" : "Vrednost";
+            chart.options.scales.y.title.text = zscore ? "z-score" : "Value";
             safeUpdate();
         }
     }
@@ -599,7 +599,7 @@
         }
         const zscore = zscoreOn();
         updateScaleBadge(zscore);
-        const time = new Date().toLocaleTimeString("sl-SI", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+        const time = new Date().toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
         chart.data.labels.push(time);
         if (chart.data.labels.length > MAX_POINTS) chart.data.labels.shift();
         chart.data.datasets.forEach(function (dataset) {
@@ -640,11 +640,9 @@
         const maxEl = document.getElementById("stat-max");
         const rangeEl = document.getElementById("stat-range");
         if (!minEl || !maxEl || !rangeEl) return;
-        const zscore = zscoreOn();
         const values = [];
         seriesByKey.forEach(function (series) {
-            const value = zscore ? series.display : series.latest;
-            if (Number.isFinite(value)) values.push(value);
+            if (Number.isFinite(series.latest)) values.push(series.latest);
         });
         if (!values.length) {
             minEl.textContent = "--";

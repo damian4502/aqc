@@ -56,9 +56,9 @@
     <div id="monitor-heading" class="flex flex-wrap justify-between items-center gap-3">
         <h1 class="text-4xl font-bold text-white">Live monitor</h1>
         <div class="flex flex-wrap gap-2">
-            <button type="button" id="open-table-window" class="bg-slate-800 hover:bg-slate-700 text-white text-sm px-4 py-2 rounded-2xl">Tabela v oknu</button>
-            <button type="button" id="open-chart-window" class="bg-slate-800 hover:bg-slate-700 text-white text-sm px-4 py-2 rounded-2xl">Graf v oknu</button>
-            <a href="/dashboard/" class="text-blue-400 hover:text-blue-300 flex items-center gap-2 px-2">← Nazaj</a>
+            <button type="button" id="open-table-window" class="bg-slate-800 hover:bg-slate-700 text-white text-sm px-4 py-2 rounded-2xl">Table in a window</button>
+            <button type="button" id="open-chart-window" class="bg-slate-800 hover:bg-slate-700 text-white text-sm px-4 py-2 rounded-2xl">Chart in a window</button>
+            <a href="/dashboard/" class="text-blue-400 hover:text-blue-300 flex items-center gap-2 px-2">← Back</a>
         </div>
     </div>
 
@@ -67,33 +67,33 @@
             <div>
                 <label class="block text-sm text-slate-400 mb-2 font-medium" for="add-param">Parameter</label>
                 <select id="add-param" class="w-full bg-slate-900 border border-slate-700 rounded-2xl px-5 py-3 text-lg">
-                    <option value="">-- Izberi parameter --</option>
+                    <option value="">-- Select a parameter --</option>
                 </select>
-                <p class="text-[11px] text-slate-500 mt-2">Globalni izračun se doda takoj. Prostor dodaš posebej. Skala je samodejno z-score, če so enote različne. Ročno lahko izbereš vrednost ali z-score.</p>
+                <p class="text-[11px] text-slate-500 mt-2">A global calculation is added immediately. Add a room separately. The scale is z-score automatically when the units differ. You can force the raw value or z-score.</p>
             </div>
             <div>
-                <label class="block text-sm text-slate-400 mb-2 font-medium" for="add-room">Prostor</label>
+                <label class="block text-sm text-slate-400 mb-2 font-medium" for="add-room">Room</label>
                 <select id="add-room" class="w-full bg-slate-900 border border-slate-700 rounded-2xl px-5 py-3 text-lg">
-                    <option value="">-- Izberi prostor --</option>
+                    <option value="">-- Select a room --</option>
                 </select>
-                <p class="text-[11px] text-slate-500 mt-2">Doda prostor samo za parameter, ki je izbran zgoraj. »Dodaj vse prostore« to naredi enkrat, ob kliku.</p>
+                <p class="text-[11px] text-slate-500 mt-2">Adds a room only for the parameter selected above. “Add all rooms” does that once, when you click it.</p>
             </div>
         </div>
         <div class="flex flex-wrap gap-3">
-            <button type="button" id="add-all-rooms" class="bg-emerald-600 hover:bg-emerald-500 text-white font-medium px-5 py-3 rounded-2xl">Dodaj vse prostore</button>
-            <button type="button" id="remove-all-rooms" class="bg-red-600 hover:bg-red-500 text-white font-medium px-5 py-3 rounded-2xl">Odstrani vse</button>
-            <button type="button" id="clear-chart-setup" class="bg-slate-700 hover:bg-slate-600 text-white font-medium px-5 py-3 rounded-2xl">Počisti graf</button>
+            <button type="button" id="add-all-rooms" class="bg-emerald-600 hover:bg-emerald-500 text-white font-medium px-5 py-3 rounded-2xl">Add all rooms</button>
+            <button type="button" id="remove-all-rooms" class="bg-red-600 hover:bg-red-500 text-white font-medium px-5 py-3 rounded-2xl">Remove all</button>
+            <button type="button" id="clear-chart-setup" class="bg-slate-700 hover:bg-slate-600 text-white font-medium px-5 py-3 rounded-2xl">Clear chart</button>
         </div>
     </div>
 
     <div class="grid grid-cols-1 lg:grid-cols-12 gap-8">
         <div id="monitor-table" class="lg:col-span-5 glass rounded-3xl p-6">
-            <h2 class="text-lg font-semibold mb-4">Trenutne vrednosti</h2>
+            <h2 class="text-lg font-semibold mb-4">Current values</h2>
             <table class="w-full">
                 <thead>
                     <tr class="border-b border-slate-700">
-                        <th class="text-left py-3 px-3">Serija</th>
-                        <th class="text-right py-3 px-3">Vrednost</th>
+                        <th class="text-left py-3 px-3">Series</th>
+                        <th class="text-right py-3 px-3">Value</th>
                     </tr>
                 </thead>
                 <tbody id="delta-table" class="divide-y divide-slate-800"></tbody>
@@ -102,39 +102,39 @@
 
         <div id="monitor-chart-card" class="lg:col-span-7 glass rounded-3xl p-6">
             <div class="flex flex-wrap justify-between items-center gap-3 mb-4">
-                <h2 class="text-lg font-semibold">Graf <span id="scale-badge" class="text-slate-400 text-sm font-normal">vrednost</span></h2>
+                <h2 class="text-lg font-semibold">Chart <span id="scale-badge" class="text-slate-400 text-sm font-normal">value</span></h2>
                 <div class="flex flex-wrap gap-2 items-center">
                     <label class="flex items-center gap-2 text-sm text-slate-300">
-                        Skala
+                        Scale
                         <select id="scale-mode" class="bg-slate-900 border border-slate-700 rounded-xl px-3 py-1.5 text-sm">
-                            <option value="auto">Samodejno</option>
-                            <option value="raw">Vrednost</option>
+                            <option value="auto">Auto</option>
+                            <option value="raw">Value</option>
                             <option value="z">z-score</option>
                         </select>
                     </label>
                     <label class="flex items-center gap-2 text-sm text-slate-300">
                         <input type="checkbox" id="smooth-curve" class="accent-amber-500 w-4 h-4" checked>
-                        Glajenje
+                        Smoothing
                     </label>
-                    <button type="button" id="clear-chart" class="bg-slate-800 hover:bg-slate-700 text-sm px-4 py-2 rounded-2xl">Počisti graf</button>
-                    <button type="button" id="full-chart" class="bg-slate-800 hover:bg-slate-700 text-sm px-4 py-2 rounded-2xl">Celoten zaslon</button>
-                    <button type="button" id="exit-full" class="bg-slate-800 hover:bg-slate-700 text-sm px-4 py-2 rounded-2xl items-center">Zapri</button>
+                    <button type="button" id="clear-chart" class="bg-slate-800 hover:bg-slate-700 text-sm px-4 py-2 rounded-2xl">Clear chart</button>
+                    <button type="button" id="full-chart" class="bg-slate-800 hover:bg-slate-700 text-sm px-4 py-2 rounded-2xl">Full screen</button>
+                    <button type="button" id="exit-full" class="bg-slate-800 hover:bg-slate-700 text-sm px-4 py-2 rounded-2xl items-center">Close</button>
                 </div>
             </div>
             <div id="chart-stats" class="mb-4 px-1 flex flex-wrap items-center gap-x-8 gap-y-1 text-sm text-slate-300">
                 <div class="flex items-baseline gap-2">
-                    <span class="text-slate-400">Najnižja:</span>
+                    <span class="text-slate-400">Lowest:</span>
                     <span id="stat-min" class="font-mono text-emerald-400 font-semibold text-base tabular-nums">--</span>
                 </div>
                 <div class="flex items-baseline gap-2">
-                    <span class="text-slate-400">Najvišja:</span>
+                    <span class="text-slate-400">Highest:</span>
                     <span id="stat-max" class="font-mono text-red-400 font-semibold text-base tabular-nums">--</span>
                 </div>
                 <div class="flex items-baseline gap-2">
-                    <span class="text-slate-400">Razpon:</span>
+                    <span class="text-slate-400">Range:</span>
                     <span id="stat-range" class="font-mono text-amber-400 font-semibold text-base tabular-nums">--</span>
                 </div>
-                <div id="stat-source" class="text-[10px] text-slate-500 ml-auto">iz trenutnih vrednosti</div>
+                <div id="stat-source" class="text-[10px] text-slate-500 ml-auto">from current values</div>
             </div>
             <div id="delta-chart-box" style="height: 460px;">
                 <canvas id="deltaChart"></canvas>
