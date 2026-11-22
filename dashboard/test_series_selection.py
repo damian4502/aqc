@@ -326,3 +326,34 @@ class FormulaTextTests(SimpleTestCase):
             parse_formula_text("min(1, 2)", ROOMS, PARAMS)
         with self.assertRaises(FormulaError):
             parse_formula_text("avg(Kuhinja/CO2,)", ROOMS, PARAMS)
+
+    def test_range_is_highest_minus_lowest(self):
+        text = "range(Kuhinja/CO2, Kopalnica/CO2, Strojnica/CO2)"
+        node = parse_formula_text(text, ROOMS, PARAMS)
+        self.assertEqual(node, ("fn", "range", ((1, 5), (2, 5), (3, 5))))
+        self.assertEqual(
+            formula_source(node, lambda room, param: f"{dict(ROOMS)[room]}/{dict(PARAMS)[param]}"),
+            text,
+        )
+        encoded = encode_diff_entry(node)
+        self.assertEqual(encoded, "fx:range(1:5,2:5,3:5)")
+        self.assertEqual(parse_difference_specs([encoded], {1, 2, 3}, {5})[0], node)
+
+        index = pd.date_range("2026-01-01", periods=2, freq="h")
+        kitchen = pd.Series([400.0, None], index=index)
+        bath = pd.Series([430.0, 470.0], index=index)
+        utility = pd.Series([460.0, 450.0], index=index)
+
+        def lookup(room, param):
+            return {1: kitchen, 2: bath, 3: utility}[room]
+
+        values = evaluate_formula(node, lookup)
+        self.assertEqual(float(values.iloc[0]), 60.0)
+        self.assertTrue(pd.isna(values.iloc[1]))
+        single = evaluate_formula(
+            parse_formula_text("range(Kuhinja/CO2)", ROOMS, PARAMS),
+            lookup,
+        )
+        self.assertEqual(float(single.iloc[0]), 0.0)
+        with self.assertRaises(FormulaError):
+            parse_formula_text("range()", ROOMS, PARAMS)

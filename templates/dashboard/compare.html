@@ -192,6 +192,7 @@
                     <option value="min(">min(</option>
                     <option value="max(">max(</option>
                     <option value="avg(">avg(</option>
+                    <option value="range(">range(</option>
                     <option value="(">(</option>
                     <option value=")">)</option>
                 </select>
@@ -208,7 +209,7 @@
                 {% endfor %}
             </div>
             <p id="diff-empty" class="text-[11px] text-slate-500 mt-3 {% if selected_diffs %}hidden{% endif %}">No calculations yet. The series do not have to be checked above. Click a calculation to load it into the field. Uncheck to leave it off the next chart.</p>
-            <p class="text-[11px] text-slate-500 mt-1">Write Room/Parameter, numbers, + − * /, and min(), max(), avg(). Each function takes two or more values, separated by commas, and is computed at each time. Parentheses group. * and / happen before + and −, so A − B * C is A − (B * C). The dropdowns insert at the cursor: a room inserts its name and a slash. Up to 24 series. Raw values show the result. With all recorded values, other series are paired to the first within 2 minutes. x/Parameter is for a saved parameter, not this box: it means the current room.</p>
+            <p class="text-[11px] text-slate-500 mt-1">Write Room/Parameter, numbers, + − * /, and min(), max(), avg(), range(). min, max, and avg take two or more values. range takes one or more and is the highest minus the lowest. Values are separated by commas and computed at each time. Parentheses group. * and / happen before + and −, so A − B * C is A − (B * C). The dropdowns insert at the cursor: a room inserts its name and a slash. Up to 24 series. Raw values show the result. With all recorded values, other series are paired to the first within 2 minutes. x/Parameter is for a saved parameter, not this box: it means the current room.</p>
         </div>
 
         <div class="glass rounded-3xl p-6">
@@ -665,7 +666,7 @@ function nameBoundary(text, index) {
 }
 
 function matchCall(text, index) {
-    const found = /^(min|max|avg)/i.exec(text.slice(index));
+    const found = /^(range|min|max|avg)/i.exec(text.slice(index));
     if (!found || !nameBoundary(text, index + found[0].length)) return null;
     let cursor = index + found[0].length;
     while (cursor < text.length && /\s/.test(text[cursor])) cursor += 1;
@@ -788,11 +789,12 @@ function parseFormulaText(raw) {
         }
         if (Array.isArray(current) && current[0] === 'fn' && current.length === 2) {
             const name = current[1];
+            const need = name === 'range' ? 1 : 2;
             take();
             if (peek() !== '(') throw new Error("Expected '(' after " + name + ".");
             take();
             if (peek() == null || peek() === ',' || peek() === ')') {
-                throw new Error(name + ' needs at least two values.');
+                throw new Error(name + (need === 1 ? ' needs at least one value.' : ' needs at least two values.'));
             }
             const args = [parseExpr()];
             while (peek() === ',') {
@@ -804,7 +806,9 @@ function parseFormulaText(raw) {
             }
             if (peek() !== ')') throw new Error('Close the parenthesis.');
             take();
-            if (args.length < 2) throw new Error(name + ' needs at least two values.');
+            if (args.length < need) {
+                throw new Error(name + (need === 1 ? ' needs at least one value.' : ' needs at least two values.'));
+            }
             if (args.length > FORMULA_MAX_SERIES) {
                 throw new Error(name + ' can use at most ' + FORMULA_MAX_SERIES + ' values.');
             }
