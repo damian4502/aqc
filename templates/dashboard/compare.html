@@ -1148,19 +1148,22 @@ async function refreshLiveChart() {
     const start = document.getElementById('start_date')?.value;
     const end = document.getElementById('end_date')?.value;
     if (start) params.set('start', start);
-    if (end) params.set('end', end);
+    if (end) params.set('end', end);	
     try {
-        const res = await fetch(window.location.pathname + '?' + params.toString(), {
-            headers: { Accept: 'application/json' },
-        });
-        if (!res.ok) return;
-        const fig = await res.json();
-        const gd = document.getElementById('compare-plot');
-        if (!fig || !fig.data || !gd || typeof Plotly === 'undefined') return;
-        Plotly.react(gd, fig.data, fig.layout, { responsive: true });
+		if (getPageVisibility()) {
+			const res = await fetch(window.location.pathname + '?' + params.toString(), {
+				headers: { Accept: 'application/json' },
+			});
+			if (!res.ok) return;
+			const fig = await res.json();
+			const gd = document.getElementById('compare-plot');
+			if (!fig || !fig.data || !gd || typeof Plotly === 'undefined') return;
+			Plotly.react(gd, fig.data, fig.layout, { responsive: true });
+		}
     } catch (err) {
         console.error('Live refresh failed', err);
-    }
+	}
+	liveTimer = setTimeout(refreshLiveChart, 1000);
 }
 
 function setupLiveRefresh() {
@@ -1172,7 +1175,7 @@ function setupLiveRefresh() {
     const end = parseLocalInput(document.getElementById('end_date')?.value);
     if (!end || end.getTime() <= Date.now()) return;
     const intervalMin = Math.max(1, parseInt(document.getElementById('interval')?.value || '1', 10) || 1);
-    liveTimer = setInterval(refreshLiveChart, intervalMin * 60 * 1000);
+    refreshLiveChart();
 }
 
 function resetCompare() {
