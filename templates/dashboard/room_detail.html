@@ -440,7 +440,7 @@ function adjustYAxisToVisibleRangeWithData(gd, xRangeFromEvent = null) {
     }
 }
 // Main graph loader
-async function loadGraph(extraParams = {}) {
+async function loadGraph(extraParams = {override: true}) {
     const params = new URLSearchParams({
 		room_id: {{room.id}},
         start: document.getElementById('start_date')?.value || '',
@@ -465,6 +465,8 @@ async function loadGraph(extraParams = {}) {
 
     // Cancel in-flight request so rapid picker steps keep only the latest range
     if (typeof loadGraphAbortController !== 'undefined' && loadGraphAbortController) {
+		// overrride is set to false for live updates in case the previous request is still loading we don't want to cancel it, but abort this one and wait for the previous one to finish.
+		if (!extraParams['override']) return;
         loadGraphAbortController.abort();
     }
     loadGraphAbortController = new AbortController();
@@ -472,6 +474,8 @@ async function loadGraph(extraParams = {}) {
     const url = `/api/chart-data/?${params.toString()}`;
 
     try {
+		try {Plotly.relayout(currentGraphDiv, {'title.text': 'Loading'});} catch {}
+		//currentGraphDiv.layout.title.text = "Loading...";
         const res = await fetch(url, { signal: loadGraphAbortController.signal });
         if (!res.ok) return;
         const figJson = await res.json();
@@ -481,7 +485,8 @@ async function loadGraph(extraParams = {}) {
         const isUpdate = currentGraphDiv.data && currentGraphDiv.data.length > 0;
 
         if (isUpdate) {
-            await Plotly.react(currentGraphDiv, figJson.data, figJson.layout, { responsive: true });
+			// if override is false (live chart updates) only update chart if in autorange, if not user is zooming in to custom x-y axis, reloading data would reset his zoom. This has already been checked in setupLiveRefresh(), but we need to double check in case the user has zoomed in during request response time. In this case we discard the response, new one will be made as soon as the user goes back to autorange.
+            if (currentGraphDiv.layout.yaxis.autorange || extraParams['override']) await Plotly.react(currentGraphDiv, figJson.data, figJson.layout, { responsive: true });
         } else {
             await Plotly.newPlot(currentGraphDiv, figJson.data, figJson.layout, { responsive: true });
         }
@@ -519,6 +524,8 @@ async function loadGraph(extraParams = {}) {
                 Plotly.relayout(currentGraphDiv, { 'yaxis.autorange': true });
             }
         });
+		
+		loadGraphAbortController = null;
 
         // After a successful load, (re)start live polling if end is in the future
         setupLiveRefresh();
@@ -527,6 +534,7 @@ async function loadGraph(extraParams = {}) {
         console.error('Failed to load graph', err);
     }
 }
+
 
 // Debounced graph reload so rapid hour/minute steps do not spam the API
 let loadGraphTimer = null;
@@ -630,9 +638,7 @@ function setupLiveRefresh() {
     const now = new Date();
     if (endDate.getTime() <= now.getTime()) return;
 
-    const intervalMin = Math.max(1, parseInt(document.getElementById('interval')?.value || '60', 10) || 60);
-    const periodMs = intervalMin * 60 * 1000;
-
+	// refresh interval is 1s, we chack if we are still waiting for previous response (for long date ranges it can take multiple seconds) in loadGraph() and skip new requests until we receive complete response data.
     liveRefreshTimer = setInterval(() => {
         // Stop automatically once the selected end is no longer in the future
         const endNow = parseDateTimeLocalValue(document.getElementById('end_date')?.value);
@@ -641,12 +647,14 @@ function setupLiveRefresh() {
             liveRefreshTimer = null;
             return;
         }
-        scheduleLoadGraph({ immediate: true, force: true, clearQuick: false });
-    }, periodMs);
+		// only do live refresh if page is visible and user is not applying custom x-y zoom
+		// beacuse loading new data will reset layout axis
+        if (currentGraphDiv.layout.yaxis.autorange && getPageVisibility()) scheduleLoadGraph({ immediate: true, force: true, clearQuick: false, override: false });
+    }, 1000);
 }
 
 function scheduleLoadGraph(options = {}) {
-    const { immediate = false, clearQuick = true, force = false } = options;
+    const { immediate = false, clearQuick = true, force = false, override = true } = options;
     if (clearQuick) clearQuickDateHighlight();
 
     if (loadGraphTimer) {
@@ -666,7 +674,7 @@ function scheduleLoadGraph(options = {}) {
         // Skip identical requests unless forced (e.g. explicit refresh button)
         if (!force && key === lastLoadGraphKey) return;
         lastLoadGraphKey = key;
-        loadGraph();
+        loadGraph({override: override});
     };
 
     if (immediate) {

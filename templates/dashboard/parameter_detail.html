@@ -541,7 +541,7 @@ async function loadGraph(extraParams = {override: true}) {
 
     // Cancel in-flight request so rapid picker steps keep only the latest range
     if (typeof loadGraphAbortController !== 'undefined' && loadGraphAbortController) {
-		console.log((!extraParams['override']));
+		// overrride is set to false for live updates in case the previous request is still loading we don't want to cancel it, but abort this one and wait for the previous one to finish.
 		if (!extraParams['override']) return;
         loadGraphAbortController.abort();
     }
@@ -561,6 +561,7 @@ async function loadGraph(extraParams = {override: true}) {
         const isUpdate = currentGraphDiv.data && currentGraphDiv.data.length > 0;
 
         if (isUpdate) {
+			// if override is false (live chart updates) only update chart if in autorange, if not user is zooming in to custom x-y axis, reloading data would reset his zoom. This has already been checked in setupLiveRefresh(), but we need to double check in case the user has zoomed in during request response time. In this case we discard the response, new one will be made as soon as the user goes back to autorange.
             if (currentGraphDiv.layout.yaxis.autorange || extraParams['override']) await Plotly.react(currentGraphDiv, figJson.data, figJson.layout, { responsive: true });
         } else {
             await Plotly.newPlot(currentGraphDiv, figJson.data, figJson.layout, { responsive: true });
@@ -712,9 +713,7 @@ function setupLiveRefresh() {
     const now = new Date();
     if (endDate.getTime() <= now.getTime()) return;
 
-    const intervalMin = Math.max(0.01, parseInt(document.getElementById('interval')?.value || '0', 10) || 0);
-    const periodMs = intervalMin * 60 * 1000;
-
+	// refresh interval is 1s, we chack if we are still waiting for previous response (for long date ranges it can take multiple seconds) in loadGraph() and skip new requests until we receive complete response data.
     liveRefreshTimer = setInterval(() => {
         // Stop automatically once the selected end is no longer in the future
         const endNow = parseDateTimeLocalValue(document.getElementById('end_date')?.value);
@@ -723,6 +722,8 @@ function setupLiveRefresh() {
             liveRefreshTimer = null;
             return;
         }
+		// only do live refresh if page is visible and user is not applying custom x-y zoom
+		// beacuse loading new data will reset layout axis
         if (currentGraphDiv.layout.yaxis.autorange && getPageVisibility()) scheduleLoadGraph({ immediate: true, force: true, clearQuick: false, override: false });
     }, 1000);
 }
