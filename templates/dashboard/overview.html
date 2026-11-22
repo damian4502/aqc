@@ -136,7 +136,7 @@
       });
 
       client.on('message', function (topic, message) {
-		if (!pageVisible) return true;
+		if (!getPageVisibility()) return true;
         const time = new Date().toLocaleTimeString('sl-SI', {hour:'2-digit', minute:'2-digit', second:'2-digit'});
         const payload = message.toString();
 		try { jdata = JSON.parse(payload); } catch (e) { return true;}
@@ -274,12 +274,15 @@
                 if (parseInt(p.dataset.id) === data.parameter_id) {
                     const valueContainer = p.nextElementSibling;
                     if (valueContainer) {
+						valueContainer.dataset.value = data.value;
                         const formattedValue = smartFormatValue(data.value, p.textContent);
                         
                         // Kratka animacija
-                        valueContainer.classList.add('!text-emerald-400');
+						if (getPageVisibility()) {
+							valueContainer.classList.add('!text-emerald-400');
+							setTimeout(() => valueContainer.classList.remove('!text-emerald-400'), 200);
+						}
 						valueContainer.classList.remove('opacity-25');
-                        setTimeout(() => valueContainer.classList.remove('!text-emerald-400'), 200);
 
                         valueContainer.innerHTML = `
                             ${formattedValue}
@@ -289,8 +292,8 @@
                     }
 
                     // Posodobi čas
-                    const timeEl = p.parentElement.querySelector('p.text-xs.text-emerald-400');
-                    if (timeEl) timeEl.textContent = data.time;
+                    //const timeEl = p.parentElement.querySelector('p.text-xs.text-emerald-400');
+                    //if (timeEl) timeEl.textContent = data.time;
                 }
             });
 
@@ -381,7 +384,7 @@ function updateAQIProgressBar(card) {
 // Inicializacija ob nalaganju strani
 document.addEventListener('DOMContentLoaded', function() {
       client.on('message', function (topic, message) {
-		if (!pageVisible) return;
+		//if (!getPageVisibility()) return;
 
 		//updateTopBar(topic, message);
 
@@ -417,8 +420,8 @@ document.addEventListener('DOMContentLoaded', function() {
       });
 
 document.addEventListener('visibilitychange', () => {
-pageVisible = document.visibilityState === 'visible';
-    if (pageVisible) {
+	pageVisible = document.visibilityState === 'visible';
+    if (getPageVisibility()) {
 		client.publish("vila/sentjane/asgard/cmd/all", "live_mode", { qos: 0 });
     }
 });
