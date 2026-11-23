@@ -188,7 +188,13 @@ def day_section_key(room_id, parameter_id, interval_minutes, day_start):
 
 
 def bin_label(bin_start):
-    return pd.Timestamp(bin_start).strftime("%Y%m%dT%H%M")
+    return _fast_label(bin_start)
+
+
+def _fast_label(timestamp):
+    """Same text as ``strftime('%Y%m%dT%H%M')`` without the strftime call."""
+    ts = timestamp if isinstance(timestamp, pd.Timestamp) else pd.Timestamp(timestamp)
+    return f"{ts.year:04d}{ts.month:02d}{ts.day:02d}T{ts.hour:02d}{ts.minute:02d}"
 
 
 def _parse_bin_label(label):
@@ -434,6 +440,42 @@ def _needed_bins(pack_start, first, last, interval):
     return list(_bins_between(lo, hi, interval))
 
 
+def _pack_slots(pack_start, interval):
+    """``(timestamp, cache label)`` for every bin in one pack."""
+    return [(cursor, _fast_label(cursor)) for cursor in _pack_bins(pack_start, interval)]
+
+
+def _slot_index(pack_starts, first, last, interval):
+    """Labels shared by every series. Built once per request, not once per pair."""
+    needed = {}
+    labels = {}
+    if not pack_starts or first is None or last is None:
+        return needed, labels
+    first_ts = pd.Timestamp(first)
+    last_ts = pd.Timestamp(last)
+    for pack in pack_starts:
+        pack = pd.Timestamp(pack)
+        slots = _pack_slots(pack, interval)
+        labels[pack] = [label for _ts, label in slots]
+        needed[pack] = [slot for slot in slots if first_ts <= slot[0] <= last_ts]
+    return needed, labels
+
+
+def _take_slots(totals, room_id, parameter_id, bins, slots):
+    """Copy stored sums into ``totals``. False when any slot label is absent."""
+    pending = []
+    for ts, label in slots:
+        try:
+            stored = bins[label]
+        except KeyError:
+            return False
+        if stored:
+            pending.append((ts, stored))
+    for ts, stored in pending:
+        totals[(room_id, parameter_id, ts)] = [float(stored[0]), int(stored[1])]
+    return True
+
+
 def _union_span(ranges):
     """Merge ``[start, end)`` ranges. None when they leave a gap."""
     ordered = sorted(
@@ -456,7 +498,7 @@ def _use_day_sections(interval, pack_starts):
     return int(interval) < 1440 and len(pack_starts) > DAY_SECTION_PACKS
 
 
-def _read_day_sections(backend, pairs, pack_starts, first, last, interval, clock):
+def _read_day_sections(backend, pairs, pack_starts, first, last, interval, clock, needed_by_pack):
     """Fill totals from day sections. Return hours those sections already cover."""
     packs = [pd.Timestamp(pack) for pack in pack_starts]
     by_day = {}
@@ -491,20 +533,14 @@ def _read_day_sections(backend, pairs, pack_starts, first, last, interval, clock
             payloads[(room_id, parameter_id, day)] = payload
             used = False
             for pack in by_day.get(day, []):
-                needed = _needed_bins(pack, first, last, interval)
-                if not needed:
+                slots = needed_by_pack.get(pack)
+                if not slots:
                     continue
-                if any(
-                    bin_start < cover_start or bin_start >= cover_until or bin_label(bin_start) not in bins
-                    for bin_start in needed
-                ):
+                if slots[0][0] < cover_start or slots[-1][0] >= cover_until:
                     continue
-                for bin_start in needed:
-                    stored = bins.get(bin_label(bin_start))
-                    if stored:
-                        totals[(room_id, parameter_id, pd.Timestamp(bin_start))] = [float(stored[0]), int(stored[1])]
-                covered.add((room_id, parameter_id, pd.Timestamp(pack)))
-                used = True
+                if _take_slots(totals, room_id, parameter_id, bins, slots):
+                    covered.add((room_id, parameter_id, pack))
+                    used = True
             if used:
                 hits += 1
     clock.meta["day_hits"] = hits
@@ -632,6 +668,8 @@ def load_binned_pairs(
         if first is not None:
             pack_starts = list(_iter_packs(first, last, interval))
     clock.meta["packs"] = len(pack_starts)
+    with clock.time("slots"):
+        needed_by_pack, labels_by_pack = _slot_index(pack_starts, first, last, interval)
 
     backend = cache_backend if cache_backend is not None else _django_cache()
     day_totals = {}
@@ -639,7 +677,7 @@ def load_binned_pairs(
     day_payloads = {}
     if _use_day_sections(interval, pack_starts):
         day_totals, covered, day_payloads = _read_day_sections(
-            backend, pairs, pack_starts, first, last, interval, clock
+            backend, pairs, pack_starts, first, last, interval, clock, needed_by_pack
         )
     totals = dict(day_totals)
     key_info = {}
@@ -662,15 +700,18 @@ def load_binned_pairs(
         for key, (room_id, parameter_id, pack_start) in key_info.items():
             payload = cached.get(key)
             bins = payload.get("bins") if isinstance(payload, dict) else None
-            labels = [bin_label(bin_start) for bin_start in _pack_bins(pack_start, interval)]
+            labels = labels_by_pack.get(pack_start)
+            if labels is None:
+                labels = [label for _ts, label in _pack_slots(pack_start, interval)]
             if not isinstance(bins, dict) or any(label not in bins for label in labels):
                 missing.append((room_id, parameter_id, pack_start))
                 continue
-            hour_bins[(int(room_id), int(parameter_id), pd.Timestamp(pack_start))] = bins
-            for bin_start in _needed_bins(pack_start, first, last, interval):
-                stored = bins.get(bin_label(bin_start))
+            hour_bins[(int(room_id), int(parameter_id), pack_start)] = bins
+            slots = needed_by_pack.get(pack_start) or ()
+            for ts, label in slots:
+                stored = bins.get(label)
                 if stored:
-                    totals[(room_id, parameter_id, pd.Timestamp(bin_start))] = [float(stored[0]), int(stored[1])]
+                    totals[(room_id, parameter_id, ts)] = [float(stored[0]), int(stored[1])]
     clock.meta["hour_hits"] = len(key_info) - len(missing)
     clock.meta["missing"] = len(missing)
 
