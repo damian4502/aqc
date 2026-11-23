@@ -16,9 +16,13 @@ now expires in 30 seconds, and a Measurement write drops the packs it touches.
 
 from __future__ import annotations
 
+import logging
 import math
+import time
 
 import pandas as pd
+
+_chart_log = logging.getLogger("aqc.chart")
 
 LOCAL_TZ = "Europe/Ljubljana"
 CLOSED_TTL = 7 * 24 * 60 * 60
@@ -27,6 +31,57 @@ KNOWN_INTERVALS = (1, 5, 15, 60, 1440)
 # More than one day of hour packs is read as day sections instead.
 DAY_SECTION_PACKS = 24
 _GET_CHUNK = 200
+
+
+class ChartSpan:
+    """Wall time of one chart stage, logged as a single line."""
+
+    def __init__(self, kind):
+        self.kind = kind
+        self.started = time.perf_counter()
+        self.parts = {}
+        self.meta = {}
+
+    def add(self, name, started):
+        elapsed = (time.perf_counter() - started) * 1000
+        self.parts[name] = self.parts.get(name, 0.0) + elapsed
+
+    def time(self, name):
+        return _ChartTick(self, name)
+
+    def emit(self):
+        if not self.parts:
+            return
+        total = (time.perf_counter() - self.started) * 1000
+        parts = dict(self.parts)
+        other = total - sum(parts.values())
+        if other >= 1:
+            parts["other"] = other
+        slowest = max(parts, key=parts.get)
+        body = " ".join(f"{name}={ms:.1f}ms" for name, ms in parts.items())
+        meta = " ".join(f"{key}={value}" for key, value in self.meta.items())
+        _chart_log.info(
+            "chart %s total=%.1fms slowest=%s %s | %s",
+            self.kind,
+            total,
+            slowest,
+            body,
+            meta,
+        )
+
+
+class _ChartTick:
+    def __init__(self, span, name):
+        self.span = span
+        self.name = name
+
+    def __enter__(self):
+        self.started = time.perf_counter()
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        self.span.add(self.name, self.started)
+        return False
 
 
 class _DictCache:
@@ -401,7 +456,7 @@ def _use_day_sections(interval, pack_starts):
     return int(interval) < 1440 and len(pack_starts) > DAY_SECTION_PACKS
 
 
-def _read_day_sections(backend, pairs, pack_starts, first, last, interval):
+def _read_day_sections(backend, pairs, pack_starts, first, last, interval, clock):
     """Fill totals from day sections. Return hours those sections already cover."""
     packs = [pd.Timestamp(pack) for pack in pack_starts]
     by_day = {}
@@ -415,32 +470,44 @@ def _read_day_sections(backend, pairs, pack_starts, first, last, interval):
                 int(parameter_id),
                 pd.Timestamp(day),
             )
-    cached = _get_many(backend, key_info) if key_info else {}
+    clock.meta["day_keys"] = len(key_info)
+    with clock.time("day_get"):
+        cached = _get_many(backend, key_info) if key_info else {}
     totals = {}
     covered = set()
     payloads = {}
-    for key, (room_id, parameter_id, day) in key_info.items():
-        payload = cached.get(key)
-        bins = payload.get("bins") if isinstance(payload, dict) else None
-        if not isinstance(bins, dict) or "start" not in payload or "until" not in payload:
-            continue
-        try:
-            cover_start = _parse_bin_label(payload["start"])
-            cover_until = _parse_bin_label(payload["until"])
-        except (TypeError, ValueError):
-            continue
-        payloads[(room_id, parameter_id, day)] = payload
-        for pack in by_day.get(day, []):
-            needed = _needed_bins(pack, first, last, interval)
-            if not needed:
+    hits = 0
+    with clock.time("day_decode"):
+        for key, (room_id, parameter_id, day) in key_info.items():
+            payload = cached.get(key)
+            bins = payload.get("bins") if isinstance(payload, dict) else None
+            if not isinstance(bins, dict) or "start" not in payload or "until" not in payload:
                 continue
-            if any(bin_start < cover_start or bin_start >= cover_until or bin_label(bin_start) not in bins for bin_start in needed):
+            try:
+                cover_start = _parse_bin_label(payload["start"])
+                cover_until = _parse_bin_label(payload["until"])
+            except (TypeError, ValueError):
                 continue
-            for bin_start in needed:
-                stored = bins.get(bin_label(bin_start))
-                if stored:
-                    totals[(room_id, parameter_id, pd.Timestamp(bin_start))] = [float(stored[0]), int(stored[1])]
-            covered.add((room_id, parameter_id, pd.Timestamp(pack)))
+            payloads[(room_id, parameter_id, day)] = payload
+            used = False
+            for pack in by_day.get(day, []):
+                needed = _needed_bins(pack, first, last, interval)
+                if not needed:
+                    continue
+                if any(
+                    bin_start < cover_start or bin_start >= cover_until or bin_label(bin_start) not in bins
+                    for bin_start in needed
+                ):
+                    continue
+                for bin_start in needed:
+                    stored = bins.get(bin_label(bin_start))
+                    if stored:
+                        totals[(room_id, parameter_id, pd.Timestamp(bin_start))] = [float(stored[0]), int(stored[1])]
+                covered.add((room_id, parameter_id, pd.Timestamp(pack)))
+                used = True
+            if used:
+                hits += 1
+    clock.meta["day_hits"] = hits
     return totals, covered, payloads
 
 
@@ -523,34 +590,48 @@ def load_binned_pairs(
     if end_local < start_local:
         return pd.DataFrame(), {}
     if interval <= 0:
-        rows = fetch(
-            pairs,
-            local_to_aware(start_local),
-            local_to_aware(end_local + pd.Timedelta(microseconds=1)),
-        )
-        return _raw_pivot(rows, pairs)
+        clock = ChartSpan("bins")
+        clock.meta["pairs"] = len(pairs)
+        clock.meta["interval"] = 0
+        with clock.time("db_fetch"):
+            rows = fetch(
+                pairs,
+                local_to_aware(start_local),
+                local_to_aware(end_local + pd.Timedelta(microseconds=1)),
+            )
+        clock.meta["rows"] = len(rows)
+        with clock.time("pivot"):
+            frame, means = _raw_pivot(rows, pairs)
+        clock.meta["bins"] = 0 if frame.empty else len(frame)
+        clock.emit()
+        return frame, means
 
-    now_local = to_local_naive(now if now is not None else pd.Timestamp.now(tz=LOCAL_TZ))
-    covered_end = end_local if end_local <= now_local else now_local
-    if covered_end < start_local:
-        covered_end = start_local
+    clock = ChartSpan("bins")
+    clock.meta["pairs"] = len(pairs)
+    clock.meta["interval"] = interval
+    with clock.time("plan"):
+        now_local = to_local_naive(now if now is not None else pd.Timestamp.now(tz=LOCAL_TZ))
+        covered_end = end_local if end_local <= now_local else now_local
+        if covered_end < start_local:
+            covered_end = start_local
 
-    first = _first_complete(start_local, covered_end, interval)
-    last = _last_complete(start_local, covered_end, interval)
-    if first is None or last is None or last < first:
-        first = last = None
+        first = _first_complete(start_local, covered_end, interval)
+        last = _last_complete(start_local, covered_end, interval)
+        if first is None or last is None or last < first:
+            first = last = None
 
-    start_bin = floor_bin(start_local, interval)
-    end_bin = floor_bin(covered_end, interval)
-    partial = []
-    if first is None or start_bin < first:
-        partial.append(pd.Timestamp(start_bin))
-    if end_bin != start_bin and (last is None or end_bin > last):
-        partial.append(pd.Timestamp(end_bin))
+        start_bin = floor_bin(start_local, interval)
+        end_bin = floor_bin(covered_end, interval)
+        partial = []
+        if first is None or start_bin < first:
+            partial.append(pd.Timestamp(start_bin))
+        if end_bin != start_bin and (last is None or end_bin > last):
+            partial.append(pd.Timestamp(end_bin))
 
-    pack_starts = []
-    if first is not None:
-        pack_starts = list(_iter_packs(first, last, interval))
+        pack_starts = []
+        if first is not None:
+            pack_starts = list(_iter_packs(first, last, interval))
+    clock.meta["packs"] = len(pack_starts)
 
     backend = cache_backend if cache_backend is not None else _django_cache()
     day_totals = {}
@@ -558,7 +639,7 @@ def load_binned_pairs(
     day_payloads = {}
     if _use_day_sections(interval, pack_starts):
         day_totals, covered, day_payloads = _read_day_sections(
-            backend, pairs, pack_starts, first, last, interval
+            backend, pairs, pack_starts, first, last, interval, clock
         )
     totals = dict(day_totals)
     key_info = {}
@@ -572,21 +653,26 @@ def load_binned_pairs(
                 parameter_id,
                 pd.Timestamp(pack_start),
             )
-    cached = _get_many(backend, key_info) if key_info else {}
+    clock.meta["hour_keys"] = len(key_info)
+    with clock.time("hour_get"):
+        cached = _get_many(backend, key_info) if key_info else {}
 
     missing = []
-    for key, (room_id, parameter_id, pack_start) in key_info.items():
-        payload = cached.get(key)
-        bins = payload.get("bins") if isinstance(payload, dict) else None
-        labels = [bin_label(bin_start) for bin_start in _pack_bins(pack_start, interval)]
-        if not isinstance(bins, dict) or any(label not in bins for label in labels):
-            missing.append((room_id, parameter_id, pack_start))
-            continue
-        hour_bins[(int(room_id), int(parameter_id), pd.Timestamp(pack_start))] = bins
-        for bin_start in _needed_bins(pack_start, first, last, interval):
-            stored = bins.get(bin_label(bin_start))
-            if stored:
-                totals[(room_id, parameter_id, pd.Timestamp(bin_start))] = [float(stored[0]), int(stored[1])]
+    with clock.time("hour_decode"):
+        for key, (room_id, parameter_id, pack_start) in key_info.items():
+            payload = cached.get(key)
+            bins = payload.get("bins") if isinstance(payload, dict) else None
+            labels = [bin_label(bin_start) for bin_start in _pack_bins(pack_start, interval)]
+            if not isinstance(bins, dict) or any(label not in bins for label in labels):
+                missing.append((room_id, parameter_id, pack_start))
+                continue
+            hour_bins[(int(room_id), int(parameter_id), pd.Timestamp(pack_start))] = bins
+            for bin_start in _needed_bins(pack_start, first, last, interval):
+                stored = bins.get(bin_label(bin_start))
+                if stored:
+                    totals[(room_id, parameter_id, pd.Timestamp(bin_start))] = [float(stored[0]), int(stored[1])]
+    clock.meta["hour_hits"] = len(key_info) - len(missing)
+    clock.meta["missing"] = len(missing)
 
     if missing:
         by_pack = {}
@@ -612,15 +698,22 @@ def load_binned_pairs(
                     "last": pack_start,
                 }
                 groups.append(current)
+        row_count = 0
         for group in groups:
             group_pairs = list(group["pairs"])
             fetch_end = pack_end_of(group["last"], interval)
+            started = time.perf_counter()
             rows = fetch(
                 group_pairs,
                 local_to_aware(group["first"]),
                 local_to_aware(fetch_end),
             )
+            clock.add("db_fetch", started)
+            row_count += len(rows)
+            started = time.perf_counter()
             fresh = _aggregate(rows, interval)
+            clock.add("aggregate", started)
+            started = time.perf_counter()
             for pack_start in group["packs"]:
                 open_pack = pack_end_of(pack_start, interval) > now_local
                 timeout = OPEN_TTL if open_pack else CLOSED_TTL
@@ -639,31 +732,41 @@ def load_binned_pairs(
                         found = fresh.get((room_id, parameter_id, pd.Timestamp(bin_start)))
                         if found:
                             totals[(room_id, parameter_id, pd.Timestamp(bin_start))] = found
+            clock.add("store", started)
+        clock.meta["rows"] = row_count
+        clock.meta["queries"] = len(groups)
 
-    _write_day_sections(backend, pairs, pack_starts, hour_bins, day_payloads, interval, now_local)
+    with clock.time("day_write"):
+        _write_day_sections(backend, pairs, pack_starts, hour_bins, day_payloads, interval, now_local)
 
     if partial:
         # A clipped edge must not use the full cached bin. Query only the
         # overlap, and do not write it back.
-        groups = {}
-        partial_set = set(partial)
-        for bin_start in partial:
-            span_start = max(pd.Timestamp(bin_start), start_local)
-            span_end = min(bin_end(bin_start, interval), covered_end + pd.Timedelta(microseconds=1))
-            if span_end <= span_start:
-                continue
-            groups.setdefault((span_start, span_end), []).append(pd.Timestamp(bin_start))
-        for (span_start, span_end), _bins in groups.items():
-            rows = fetch(
-                pairs,
-                local_to_aware(span_start),
-                local_to_aware(span_end),
-            )
-            for key, value in _aggregate(rows, interval).items():
-                if key[2] in partial_set and _overlaps_request(key[2], interval, start_local, covered_end):
-                    totals[key] = value
+        with clock.time("partial"):
+            groups = {}
+            partial_set = set(partial)
+            for bin_start in partial:
+                span_start = max(pd.Timestamp(bin_start), start_local)
+                span_end = min(bin_end(bin_start, interval), covered_end + pd.Timedelta(microseconds=1))
+                if span_end <= span_start:
+                    continue
+                groups.setdefault((span_start, span_end), []).append(pd.Timestamp(bin_start))
+            for (span_start, span_end), _bins in groups.items():
+                rows = fetch(
+                    pairs,
+                    local_to_aware(span_start),
+                    local_to_aware(span_end),
+                )
+                for key, value in _aggregate(rows, interval).items():
+                    if key[2] in partial_set and _overlaps_request(key[2], interval, start_local, covered_end):
+                        totals[key] = value
 
-    return _mean_frame(totals, pairs), _raw_means(totals, pairs)
+    with clock.time("frame"):
+        frame, means = _mean_frame(totals, pairs), _raw_means(totals, pairs)
+    clock.meta["bins"] = 0 if frame.empty else len(frame)
+    clock.meta["cols"] = 0 if frame.empty else int(frame.shape[1])
+    clock.emit()
+    return frame, means
 
 
 def _overlaps_request(bin_start, interval, start, end):
@@ -691,34 +794,47 @@ def load_resampled_pairs(
     same spike, ceiling, and fill rules as a chart that read the rows directly.
     One point per bin makes that second resample keep the mean and rebuild gaps.
     """
-    binned, raw_means = load_binned_pairs(
-        pairs,
-        start,
-        end,
-        interval_minutes,
-        now=now,
-        fetch_rows=fetch_rows,
-        cache_backend=cache_backend,
-    )
+    clock = ChartSpan("resample")
+    clock.meta["pairs"] = len(list(pairs))
+    clock.meta["interval"] = normalize_interval(interval_minutes)
+    with clock.time("bins"):
+        binned, raw_means = load_binned_pairs(
+            pairs,
+            start,
+            end,
+            interval_minutes,
+            now=now,
+            fetch_rows=fetch_rows,
+            cache_backend=cache_backend,
+        )
     if binned is None or binned.empty:
+        clock.meta["rows"] = 0
+        clock.emit()
         return pd.DataFrame(), raw_means
-    long = binned.reset_index()
-    index_name = long.columns[0]
-    long = long.melt(id_vars=[index_name], var_name="parameter", value_name="value")
-    long = long.dropna(subset=["value"])
-    long = long.rename(columns={index_name: "timestamp"})
+    with clock.time("melt"):
+        long = binned.reset_index()
+        index_name = long.columns[0]
+        long = long.melt(id_vars=[index_name], var_name="parameter", value_name="value")
+        long = long.dropna(subset=["value"])
+        long = long.rename(columns={index_name: "timestamp"})
+    clock.meta["rows"] = len(long)
     from dashboard.views import resample_measurements
 
-    resampled = resample_measurements(
-        long,
-        normalize_interval(interval_minutes),
-        fill_method,
-        spike_factor=spike_factor,
-        spike_ceiling=spike_ceiling,
-    )
+    with clock.time("resample"):
+        resampled = resample_measurements(
+            long,
+            normalize_interval(interval_minutes),
+            fill_method,
+            spike_factor=spike_factor,
+            spike_ceiling=spike_ceiling,
+        )
     if resampled is None or getattr(resampled, "empty", True):
+        clock.meta["out"] = 0
+        clock.emit()
         return pd.DataFrame(), raw_means
     resampled.index.name = "timestamp"
+    clock.meta["out"] = len(resampled)
+    clock.emit()
     return resampled, raw_means
 
 

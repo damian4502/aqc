@@ -161,3 +161,24 @@ CACHES = {
         },
     }
 }
+
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "aqc": {"format": "%(asctime)s %(message)s", "datefmt": "%H:%M:%S"},
+    },
+    "handlers": {
+        "aqc_console": {
+            "class": "logging.StreamHandler",
+            "formatter": "aqc",
+        },
+    },
+    "loggers": {
+        "aqc.chart": {
+            "handlers": ["aqc_console"],
+            "level": "INFO",
+            "propagate": False,
+        },
+    },
+}

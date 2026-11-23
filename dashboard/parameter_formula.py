@@ -343,7 +343,7 @@ def load_keyed_with_calculations(
     """
     import pandas as pd
 
-    from dashboard.bin_cache import load_resampled_pairs
+    from dashboard.bin_cache import ChartSpan, load_resampled_pairs
 
     rooms = list(rooms or [])
     parameters = list(parameters or [])
@@ -383,28 +383,35 @@ def load_keyed_with_calculations(
                 continue
             seen_load.add(pair)
             load_pairs.append(pair)
+    clock = ChartSpan("formula")
+    clock.meta["pairs"] = len(load_pairs)
+    clock.meta["calculated"] = len(list(calculated_ids or []))
     if not load_pairs:
         keyed, raw_means = pd.DataFrame(), {}
     else:
-        keyed, raw_means = load_resampled_pairs(
-            load_pairs,
-            start,
-            end,
-            interval_minutes,
-            fill_method=fill_method,
-            spike_factor=spike_factor,
-            spike_ceiling=spike_ceiling,
-            now=now,
+        with clock.time("load"):
+            keyed, raw_means = load_resampled_pairs(
+                load_pairs,
+                start,
+                end,
+                interval_minutes,
+                fill_method=fill_method,
+                spike_factor=spike_factor,
+                spike_ceiling=spike_ceiling,
+                now=now,
+            )
+    with clock.time("calc"):
+        keyed, calculated = apply_calculations(
+            keyed,
+            bound_pairs,
+            calculated_ids,
+            formulas,
+            rooms,
+            parameters,
+            tolerance=tolerance,
         )
-    keyed, calculated = apply_calculations(
-        keyed,
-        bound_pairs,
-        calculated_ids,
-        formulas,
-        rooms,
-        parameters,
-        tolerance=tolerance,
-    )
+    clock.meta["series"] = 0 if not calculated else len(calculated)
+    clock.emit()
     return keyed, raw_means, calculated
 
 

@@ -370,6 +370,29 @@ class DaySectionTests(unittest.TestCase):
         self.assertIn(day_section_key(1, 5, 60, "2026-01-01"), cache.data)
 
 
+class ChartTimingTests(unittest.TestCase):
+    def test_bins_log_names_the_slow_stages(self):
+        rows = _rows()
+        calls = []
+        cache = _DictCache()
+        fetch = _fetch_factory(rows, calls)
+        with self.assertLogs("aqc.chart", level="INFO") as caught:
+            load_binned_pairs(
+                [(1, 5)],
+                datetime(2026, 1, 1, 13, 0),
+                datetime(2026, 1, 1, 15, 0),
+                60,
+                now=datetime(2026, 1, 2),
+                fetch_rows=fetch,
+                cache_backend=cache,
+            )
+        line = "\n".join(caught.output)
+        self.assertIn("chart bins", line)
+        self.assertIn("slowest=", line)
+        for stage in ("plan=", "hour_get=", "hour_decode=", "db_fetch=", "aggregate=", "store=", "frame="):
+            self.assertIn(stage, line)
+
+
 class LabelFrameTests(unittest.TestCase):
     def test_duplicate_pairs_do_not_add_a_parenthetical_series(self):
         index = pd.to_datetime(["2026-01-01 13:00", "2026-01-01 14:00"])

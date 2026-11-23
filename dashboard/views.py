@@ -948,69 +948,84 @@ def chart_data(request):
     context['spike_ceiling'] = format_spike_ceiling(spike_ceiling)
     context['ignore_spikes'] = spike_factor > 0
 
-    resampled = _chart_resampled(
-        room,
-        parameter,
-        start,
-        end,
-        all_data,
-        interval_minutes,
-        fill_method,
-        spike_factor,
-        spike_ceiling,
-    )
+    from dashboard.bin_cache import ChartSpan
+
+    clock = ChartSpan("chart_data")
+    clock.meta["interval"] = interval_minutes
+    clock.meta["room"] = room.id if room is not None else "-"
+    clock.meta["parameter"] = parameter.id if parameter is not None else "-"
+    with clock.time("series"):
+        resampled = _chart_resampled(
+            room,
+            parameter,
+            start,
+            end,
+            all_data,
+            interval_minutes,
+            fill_method,
+            spike_factor,
+            spike_ceiling,
+        )
+    empty = resampled is None or getattr(resampled, "empty", True)
+    clock.meta["rows"] = 0 if empty else len(resampled)
+    clock.meta["cols"] = 0 if empty else int(resampled.shape[1])
     raw = is_raw_interval(interval_minutes)
-    fig = build_time_series_figure(
-        resampled,
-        title="Time trend — all recorded values" if raw else "Time trend",
-        height=700,
-        raw=raw,
-        color_by_name=_column_colors(getattr(resampled, "columns", []), room, parameter),
-    )
+    with clock.time("figure"):
+        fig = build_time_series_figure(
+            resampled,
+            title="Time trend — all recorded values" if raw else "Time trend",
+            height=700,
+            raw=raw,
+            color_by_name=_column_colors(getattr(resampled, "columns", []), room, parameter),
+        )
 
-    for trace in fig.data:
-        name = (trace.name or "")
-        if name.lower() not in show_params and '*' not in show_params:
-            trace.visible = 'legendonly'
+        for trace in fig.data:
+            name = (trace.name or "")
+            if name.lower() not in show_params and '*' not in show_params:
+                trace.visible = 'legendonly'
 
-    if want_chart_events(request):
-        events = Event.objects.filter(
-            timestamp__gte=start,
-            timestamp__lte=end
-        ).distinct()
+        if want_chart_events(request):
+            events = Event.objects.filter(
+                timestamp__gte=start,
+                timestamp__lte=end
+            ).distinct()
 
-        if room:
-            events = events.filter(rooms=room)
-        if parameter:
-            events = events.filter(parameters=parameter)
+            if room:
+                events = events.filter(rooms=room)
+            if parameter:
+                events = events.filter(parameters=parameter)
 
-        for event in events:
-            event_ts = timezone.localtime(event.timestamp).replace(tzinfo=None)
-            fig.add_vline(
-                x=event_ts,
-                line_width=2.5,
-                line_dash="dashdot",
-                line_color=event.color,
-            )
-            fig.add_annotation(
-                x=event_ts,
-                yref="paper",
-                y=1.06,
-                text=event.title,
-                showarrow=False,
-                xanchor="center",
-                yanchor="bottom",
-                font=dict(size=13, color=event.color),
-                bgcolor="rgba(15, 23, 42, 0.92)",
-                bordercolor=event.color,
-                borderwidth=1,
-                borderpad=4,
-            )
+            for event in events:
+                event_ts = timezone.localtime(event.timestamp).replace(tzinfo=None)
+                fig.add_vline(
+                    x=event_ts,
+                    line_width=2.5,
+                    line_dash="dashdot",
+                    line_color=event.color,
+                )
+                fig.add_annotation(
+                    x=event_ts,
+                    yref="paper",
+                    y=1.06,
+                    text=event.title,
+                    showarrow=False,
+                    xanchor="center",
+                    yanchor="bottom",
+                    font=dict(size=13, color=event.color),
+                    bgcolor="rgba(15, 23, 42, 0.92)",
+                    bordercolor=event.color,
+                    borderwidth=1,
+                    borderpad=4,
+                )
 
-    fig = apply_dark_theme(fig, animate=False)
+        fig = apply_dark_theme(fig, animate=False)
     import plotly.io as pio
+    with clock.time("json"):
+        payload = pio.to_json(fig, validate=False, engine='json')
+    clock.meta["bytes"] = len(payload)
+    clock.emit()
     return HttpResponse(
-            pio.to_json(fig, validate=False, engine='json'),
+            payload,
             content_type='application/json'
         )
 
@@ -1084,103 +1099,121 @@ def _load_formula_frame(pairs, calculated_ids, start, end, all_data, interval_mi
 
 def _chart_resampled(room, parameter, start, end, all_data, interval_minutes, fill_method, spike_factor, spike_ceiling):
     """Wide frame for one room (columns are parameters) or one parameter (columns are rooms)."""
-    from dashboard.bin_cache import distinct_measurement_pairs, label_frame, load_resampled_pairs
+    from dashboard.bin_cache import ChartSpan, distinct_measurement_pairs, label_frame, load_resampled_pairs
     from dashboard.parameter_formula import FormulaError, evaluate_saved_formula, formula_catalog
 
-    if parameter is not None and parameter.is_room_bound:
-        rooms = list(Room.objects.all())
-        parameters = list(Parameter.objects.all())
-        catalog_rooms, catalog_parameters, formulas = formula_catalog(rooms, parameters)
-        try:
-            room_ids = _bound_room_ids(
-                parameter, start, end, all_data, catalog_rooms, catalog_parameters, formulas
-            )
-        except FormulaError:
-            return pd.DataFrame()
-        if not room_ids:
-            return pd.DataFrame()
-        pairs = [(room_id, parameter.id) for room_id in room_ids]
-        keyed, _calculated, _rooms, _parameters, _formulas = _load_formula_frame(
-            pairs, [], start, end, all_data, interval_minutes, fill_method, spike_factor, spike_ceiling
-        )
-        names = {row_id: name for row_id, name in catalog_rooms}
-        return label_frame(
-            keyed, pairs, lambda room_id, _parameter_id, names=names: names.get(room_id, str(room_id))
-        )
-
-    if parameter is not None and parameter.is_calculated:
-        try:
-            series = evaluate_saved_formula(
-                parameter,
-                None if all_data else start,
-                None if all_data else end,
-                interval_minutes,
-                fill_method=fill_method,
-                spike_factor=spike_factor,
-                spike_ceiling=spike_ceiling,
-                tolerance="2min" if is_raw_interval(interval_minutes) else None,
-            )
-        except FormulaError:
-            series = pd.Series(dtype="float64")
-        if series is None or series.dropna().empty:
-            return pd.DataFrame()
-        frame = pd.DataFrame({parameter.name: series.dropna()})
-        frame.index.name = "timestamp"
-        return frame
-
-    pairs = distinct_measurement_pairs(
-        start,
-        end,
-        room_id=room.id if room is not None else None,
-        parameter_id=parameter.id if parameter is not None else None,
-        all_data=all_data,
-    )
+    clock = ChartSpan("series")
+    clock.meta["interval"] = interval_minutes
+    clock.meta["room"] = getattr(room, "id", "-")
+    clock.meta["parameter"] = getattr(parameter, "id", "-")
     frame = pd.DataFrame()
-    if pairs:
-        keyed, _means = load_resampled_pairs(
-            pairs,
-            None if all_data else start,
-            None if all_data else end,
-            interval_minutes,
-            fill_method=fill_method,
-            spike_factor=spike_factor,
-            spike_ceiling=spike_ceiling,
-        )
-        if parameter is not None:
-            names = {
-                row_id: name
-                for row_id, name in Room.objects.filter(id__in={room_id for room_id, _pid in pairs}).values_list("id", "name")
-            }
-            frame = label_frame(keyed, pairs, lambda room_id, _parameter_id, names=names: names.get(room_id, str(room_id)))
-        else:
-            names = {
-                row_id: name
-                for row_id, name in Parameter.objects.filter(id__in={parameter_id for _room_id, parameter_id in pairs}).values_list("id", "name")
-            }
-            frame = label_frame(keyed, pairs, lambda _room_id, parameter_id, names=names: names.get(parameter_id, str(parameter_id)))
+    try:
+        if parameter is not None and parameter.is_room_bound:
+            with clock.time("formula"):
+                rooms = list(Room.objects.all())
+                parameters = list(Parameter.objects.all())
+                catalog_rooms, catalog_parameters, formulas = formula_catalog(rooms, parameters)
+                try:
+                    room_ids = _bound_room_ids(
+                        parameter, start, end, all_data, catalog_rooms, catalog_parameters, formulas
+                    )
+                except FormulaError:
+                    return frame
+                if not room_ids:
+                    return frame
+                pairs = [(room_id, parameter.id) for room_id in room_ids]
+                keyed, _calculated, _rooms, _parameters, _formulas = _load_formula_frame(
+                    pairs, [], start, end, all_data, interval_minutes, fill_method, spike_factor, spike_ceiling
+                )
+                names = {row_id: name for row_id, name in catalog_rooms}
+                frame = label_frame(
+                    keyed, pairs, lambda room_id, _parameter_id, names=names: names.get(room_id, str(room_id))
+                )
+            return frame
 
-    if parameter is None and room is not None:
-        for item in Parameter.objects.all():
-            if not item.is_room_bound:
-                continue
-            keyed, _calculated, _rooms, _parameters, _formulas = _load_formula_frame(
-                [(room.id, item.id)],
-                [],
+        if parameter is not None and parameter.is_calculated:
+            with clock.time("formula"):
+                try:
+                    series = evaluate_saved_formula(
+                        parameter,
+                        None if all_data else start,
+                        None if all_data else end,
+                        interval_minutes,
+                        fill_method=fill_method,
+                        spike_factor=spike_factor,
+                        spike_ceiling=spike_ceiling,
+                        tolerance="2min" if is_raw_interval(interval_minutes) else None,
+                    )
+                except FormulaError:
+                    series = pd.Series(dtype="float64")
+                if series is None or series.dropna().empty:
+                    return frame
+                frame = pd.DataFrame({parameter.name: series.dropna()})
+                frame.index.name = "timestamp"
+            return frame
+
+        with clock.time("pairs"):
+            pairs = distinct_measurement_pairs(
                 start,
                 end,
-                all_data,
-                interval_minutes,
-                fill_method,
-                spike_factor,
-                spike_ceiling,
+                room_id=room.id if room is not None else None,
+                parameter_id=parameter.id if parameter is not None else None,
+                all_data=all_data,
             )
-            extra = label_frame(
-                keyed,
-                [(room.id, item.id)],
-                lambda _room_id, parameter_id, name=item.name: name,
-            )
-            frame = _merge_wide(frame, extra)
-    return frame
+        clock.meta["pairs"] = len(pairs)
+        if pairs:
+            with clock.time("cache"):
+                keyed, _means = load_resampled_pairs(
+                    pairs,
+                    None if all_data else start,
+                    None if all_data else end,
+                    interval_minutes,
+                    fill_method=fill_method,
+                    spike_factor=spike_factor,
+                    spike_ceiling=spike_ceiling,
+                )
+            with clock.time("label"):
+                if parameter is not None:
+                    names = {
+                        row_id: name
+                        for row_id, name in Room.objects.filter(id__in={room_id for room_id, _pid in pairs}).values_list("id", "name")
+                    }
+                    frame = label_frame(keyed, pairs, lambda room_id, _parameter_id, names=names: names.get(room_id, str(room_id)))
+                else:
+                    names = {
+                        row_id: name
+                        for row_id, name in Parameter.objects.filter(id__in={parameter_id for _room_id, parameter_id in pairs}).values_list("id", "name")
+                    }
+                    frame = label_frame(keyed, pairs, lambda _room_id, parameter_id, names=names: names.get(parameter_id, str(parameter_id)))
+
+        if parameter is None and room is not None:
+            with clock.time("formula"):
+                for item in Parameter.objects.all():
+                    if not item.is_room_bound:
+                        continue
+                    keyed, _calculated, _rooms, _parameters, _formulas = _load_formula_frame(
+                        [(room.id, item.id)],
+                        [],
+                        start,
+                        end,
+                        all_data,
+                        interval_minutes,
+                        fill_method,
+                        spike_factor,
+                        spike_ceiling,
+                    )
+                    extra = label_frame(
+                        keyed,
+                        [(room.id, item.id)],
+                        lambda _room_id, parameter_id, name=item.name: name,
+                    )
+                    frame = _merge_wide(frame, extra)
+        return frame
+    finally:
+        empty = frame is None or getattr(frame, "empty", True)
+        clock.meta["rows"] = 0 if empty else len(frame)
+        clock.meta["cols"] = 0 if empty else int(frame.shape[1])
+        clock.emit()
 
 
 def _pattern_source(room, parameter, rooms, parameters, start, end, all_data, interval_minutes, spike_factor, spike_ceiling):

@@ -7,6 +7,9 @@ from growing further; urls.py imports compare_view directly.
 
 from __future__ import annotations
 
+import json
+import time
+
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
@@ -677,6 +680,12 @@ def compare_view(request):
     sample_average_by_label = {}
     dash_labels = set()
 
+    from dashboard.bin_cache import ChartSpan
+
+    clock = ChartSpan("compare")
+    clock.meta["interval"] = interval_minutes
+    clock.meta["series"] = n_series_selected
+
     if should_compute:
         from dashboard.parameter_formula import (
             FormulaError,
@@ -694,6 +703,7 @@ def compare_view(request):
                 if param_id in calculated_ids and param_id not in needed_calculated:
                     needed_calculated.append(param_id)
         raw_mode = is_raw_interval(interval_minutes)
+        started = time.perf_counter()
         try:
             keyed, recorded_mean, calculated_map = load_keyed_with_calculations(
                 query_pairs,
@@ -711,7 +721,10 @@ def compare_view(request):
             )
         except FormulaError as exc:
             compute_error = str(exc)
+            clock.add("load", started)
         else:
+            clock.add("load", started)
+            started = time.perf_counter()
             if keyed is None:
                 keyed = pd.DataFrame()
             elif not keyed.empty:
@@ -826,6 +839,7 @@ def compare_view(request):
             sample_count = int(len(resampled))
             if series_count < 1 and compute_error is None:
                 compute_error = "No series have data in this period."
+            clock.add("assemble", started)
 
     if resampled is not None and not resampled.empty and compute_error is None:
         unique_units = []
@@ -855,6 +869,7 @@ def compare_view(request):
             export = resampled.copy()
             export.index.name = "timestamp"
             export.to_csv(response, float_format="%.4f")
+            clock.emit()
             return response
 
         events_payload = []
@@ -882,6 +897,7 @@ def compare_view(request):
             event_count = len(events_payload)
 
         raw_mode = is_raw_interval(interval_minutes)
+        started = time.perf_counter()
         if raw_mode:
             plotted = normalize_frame(resampled, normalize)
             raw_plot = resampled
@@ -946,6 +962,7 @@ def compare_view(request):
             full_html=False, include_plotlyjs="cdn", div_id="compare-plot"
         )
         compare_figure = fig
+        clock.add("figure", started)
 
     period_label = "all data" if all_data else None
     if load_chart_range_mode(request) == "live" and start_date and not all_data:
@@ -959,6 +976,7 @@ def compare_view(request):
     if response_format == "json":
         from django.http import JsonResponse
 
+        started = time.perf_counter()
         figure = {"data": [], "layout": {}}
         if compare_figure is not None:
             figure = json.loads(compare_figure.to_json())
@@ -974,6 +992,9 @@ def compare_view(request):
             "event_count": event_count,
             "stats": stats_rows,
         }
+        clock.add("json", started)
+        clock.meta["rows"] = sample_count
+        clock.emit()
         return JsonResponse(figure)
 
     groups_payload = [
@@ -1027,4 +1048,5 @@ def compare_view(request):
             start_date, end_date, all_data, live=load_chart_range_mode(request) == "live"
         ),
     }
+    clock.emit()
     return render(request, "dashboard/compare.html", context)
