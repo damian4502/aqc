@@ -7,7 +7,9 @@ import pandas as pd
 
 from dashboard.bin_cache import (
     _DictCache,
+    day_section_key,
     floor_bin,
+    invalidate_bins,
     label_frame,
     load_binned_pairs,
     local_to_aware,
@@ -207,6 +209,165 @@ class BinCacheTests(unittest.TestCase):
         self.assertAlmostEqual(float(frame.iloc[0, 0]), 10.0)
         self.assertAlmostEqual(means[pair_key(1, 5)], 10.0)
         self.assertEqual(len(cache.data), 0)
+
+
+def _hourly_rows(start, hours, room_id=1, parameter_id=5):
+    rows = []
+    origin = pd.Timestamp(start)
+    for hour in range(hours):
+        stamp = origin + pd.Timedelta(hours=hour, minutes=1)
+        rows.append((stamp, float(hour), room_id, parameter_id))
+    return rows
+
+
+def _cache_reads(cache, prefix):
+    return [key for batch in cache.reads for key in batch if str(key).startswith(prefix)]
+
+
+class DaySectionTests(unittest.TestCase):
+    def test_five_hours_reads_one_entry_per_hour(self):
+        rows = _hourly_rows("2026-01-01 10:00", 6)
+        calls = []
+        cache = _DictCache()
+        fetch = _fetch_factory(rows, calls)
+        now = datetime(2026, 1, 3)
+        start = datetime(2026, 1, 1, 10, 0)
+        end = datetime(2026, 1, 1, 15, 0)
+        first, _means = load_binned_pairs(
+            [(1, 5)], start, end, 60, now=now, fetch_rows=fetch, cache_backend=cache
+        )
+        self.assertEqual(len(first), 5)
+        self.assertFalse(any(key.startswith("aqc:day:") for key in cache.data))
+
+        calls.clear()
+        cache.reads.clear()
+        second, _means = load_binned_pairs(
+            [(1, 5)], start, end, 60, now=now, fetch_rows=fetch, cache_backend=cache
+        )
+        pd.testing.assert_frame_equal(first, second)
+        self.assertEqual(len(_cache_reads(cache, "aqc:bins:")), 5)
+        self.assertEqual(_cache_reads(cache, "aqc:day:"), [])
+        self.assertTrue(all((call[1] - call[0]).total_seconds() < 1 for call in calls))
+
+    def test_thirty_days_at_one_minute_reads_thirty_day_sections(self):
+        rows = _hourly_rows("2026-01-01", 30 * 24)
+        calls = []
+        cache = _DictCache()
+        fetch = _fetch_factory(rows, calls)
+        now = datetime(2026, 2, 2)
+        start = datetime(2026, 1, 1)
+        end = datetime(2026, 1, 31)
+        cold, _means = load_binned_pairs(
+            [(1, 5)], start, end, 1, now=now, fetch_rows=fetch, cache_backend=cache
+        )
+        self.assertEqual(
+            len([key for key in cache.data if key.startswith("aqc:day:v1:")]),
+            30,
+        )
+
+        calls.clear()
+        cache.reads.clear()
+        warm, _means = load_binned_pairs(
+            [(1, 5)], start, end, 1, now=now, fetch_rows=fetch, cache_backend=cache
+        )
+        pd.testing.assert_frame_equal(cold, warm)
+        self.assertEqual(len(_cache_reads(cache, "aqc:day:")), 30)
+        self.assertEqual(_cache_reads(cache, "aqc:bins:"), [])
+        self.assertTrue(all((call[1] - call[0]).total_seconds() < 1 for call in calls))
+
+        calls.clear()
+        cache.reads.clear()
+        load_binned_pairs(
+            [(1, 5)],
+            datetime(2026, 1, 10, 10, 0),
+            datetime(2026, 1, 10, 15, 0),
+            1,
+            now=now,
+            fetch_rows=fetch,
+            cache_backend=cache,
+        )
+        self.assertEqual(len(_cache_reads(cache, "aqc:bins:")), 5)
+        self.assertEqual(_cache_reads(cache, "aqc:day:"), [])
+
+    def test_open_day_is_still_one_section(self):
+        rows = _hourly_rows("2026-01-01", 31 * 24)
+        calls = []
+        cache = _DictCache()
+        fetch = _fetch_factory(rows, calls)
+        now = datetime(2026, 1, 31, 15, 20)
+        start = datetime(2026, 1, 1)
+        end = datetime(2026, 2, 15)
+        load_binned_pairs(
+            [(1, 5)], start, end, 1, now=now, fetch_rows=fetch, cache_backend=cache
+        )
+        calls.clear()
+        cache.reads.clear()
+        load_binned_pairs(
+            [(1, 5)], start, end, 1, now=now, fetch_rows=fetch, cache_backend=cache
+        )
+        self.assertEqual(len(_cache_reads(cache, "aqc:day:")), 31)
+        self.assertEqual(_cache_reads(cache, "aqc:bins:"), [])
+        self.assertTrue(all((call[1] - call[0]).total_seconds() < 1 for call in calls))
+
+    def test_partial_days_are_one_section_each(self):
+        rows = _hourly_rows("2026-01-01", 31 * 24)
+        calls = []
+        cache = _DictCache()
+        fetch = _fetch_factory(rows, calls)
+        now = datetime(2026, 2, 2)
+        start = datetime(2026, 1, 1, 10, 0)
+        end = datetime(2026, 1, 31, 10, 0)
+        load_binned_pairs(
+            [(1, 5)], start, end, 60, now=now, fetch_rows=fetch, cache_backend=cache
+        )
+        calls.clear()
+        cache.reads.clear()
+        load_binned_pairs(
+            [(1, 5)], start, end, 60, now=now, fetch_rows=fetch, cache_backend=cache
+        )
+        self.assertEqual(len(_cache_reads(cache, "aqc:day:")), 31)
+        self.assertEqual(_cache_reads(cache, "aqc:bins:"), [])
+        self.assertTrue(all((call[1] - call[0]).total_seconds() < 1 for call in calls))
+
+    def test_invalidate_drops_the_day_section_and_refetches_that_hour(self):
+        rows = _hourly_rows("2026-01-01", 48)
+        calls = []
+        cache = _DictCache()
+        fetch = _fetch_factory(rows, calls)
+        now = datetime(2026, 1, 5)
+        start = datetime(2026, 1, 1)
+        end = datetime(2026, 1, 3)
+        load_binned_pairs(
+            [(1, 5)], start, end, 60, now=now, fetch_rows=fetch, cache_backend=cache
+        )
+        self.assertIn(day_section_key(1, 5, 60, "2026-01-01"), cache.data)
+        self.assertIn(day_section_key(1, 5, 60, "2026-01-02"), cache.data)
+
+        invalidate_bins(1, 5, datetime(2026, 1, 1, 12, 0), cache_backend=cache)
+        self.assertNotIn(day_section_key(1, 5, 60, "2026-01-01"), cache.data)
+        self.assertIn(day_section_key(1, 5, 60, "2026-01-02"), cache.data)
+
+        calls.clear()
+        again, _means = load_binned_pairs(
+            [(1, 5)], start, end, 60, now=now, fetch_rows=fetch, cache_backend=cache
+        )
+        self.assertEqual(len(again), 48)
+        fetched = {(call[0], call[1]) for call in calls}
+        self.assertIn(
+            (
+                pd.Timestamp("2026-01-01 12:00", tz="Europe/Ljubljana"),
+                pd.Timestamp("2026-01-01 13:00", tz="Europe/Ljubljana"),
+            ),
+            fetched,
+        )
+        self.assertNotIn(
+            (
+                pd.Timestamp("2026-01-02 00:00", tz="Europe/Ljubljana"),
+                pd.Timestamp("2026-01-03 00:00", tz="Europe/Ljubljana"),
+            ),
+            fetched,
+        )
+        self.assertIn(day_section_key(1, 5, 60, "2026-01-01"), cache.data)
 
 
 class LabelFrameTests(unittest.TestCase):

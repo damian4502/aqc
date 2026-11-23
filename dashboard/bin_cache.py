@@ -1,11 +1,12 @@
-"""Per-bin means for chart resampling.
+"""Per-bin means for chart resampling, with hour and day sections above them.
 
 Ranges are minute-precise and almost never repeat, so a cache entry for a whole
 From/To window would miss every time. Closed resample bins are reused instead.
-Sub-hour bins are packed into the clock hour so memcached is not one key per
-minute. The value is the sum and count of recorded points. Spike removal,
-ceiling, and gap fill depend on the requested window, so they run after the
-bins are assembled.
+Sub-hour bins are packed into the clock hour. A request longer than a day of
+those hours is read back as one entry per calendar day: a 10:00–15:00 window
+is five hour entries, and 30 days at a 1-minute resample is 30 day entries.
+The value is the sum and count of recorded points. Spike removal, ceiling, and
+gap fill depend on the requested window, so they run after the bins are assembled.
 
 A bin clipped by the request, and the bin that contains "now", is not taken
 from that full-bin cache: it would include points outside the request or miss
@@ -23,6 +24,8 @@ LOCAL_TZ = "Europe/Ljubljana"
 CLOSED_TTL = 7 * 24 * 60 * 60
 OPEN_TTL = 30
 KNOWN_INTERVALS = (1, 5, 15, 60, 1440)
+# More than one day of hour packs is read as day sections instead.
+DAY_SECTION_PACKS = 24
 _GET_CHUNK = 200
 
 
@@ -31,8 +34,11 @@ class _DictCache:
 
     def __init__(self):
         self.data = {}
+        self.reads = []
 
     def get_many(self, keys):
+        keys = list(keys)
+        self.reads.append(keys)
         return {key: self.data[key] for key in keys if key in self.data}
 
     def set(self, key, value, timeout=None):
@@ -121,8 +127,17 @@ def pack_key(room_id, parameter_id, interval_minutes, pack_start):
     return f"aqc:bins:v1:{int(room_id)}:{int(parameter_id)}:{int(interval_minutes)}:{label}"
 
 
+def day_section_key(room_id, parameter_id, interval_minutes, day_start):
+    label = pd.Timestamp(day_start).strftime("%Y%m%d")
+    return f"aqc:day:v1:{int(room_id)}:{int(parameter_id)}:{int(interval_minutes)}:{label}"
+
+
 def bin_label(bin_start):
     return pd.Timestamp(bin_start).strftime("%Y%m%dT%H%M")
+
+
+def _parse_bin_label(label):
+    return pd.to_datetime(str(label), format="%Y%m%dT%H%M")
 
 
 def _pack_bins(pack_start, interval_minutes):
@@ -180,15 +195,18 @@ def _is_complete(bin_start, interval, start, end):
 
 
 def invalidate_bins(room_id, parameter_id, timestamp, cache_backend=None):
-    """Drop every pack that contains this sample, for each chart interval."""
+    """Drop every pack and day section that contains this sample."""
     if room_id is None or parameter_id is None or timestamp is None:
         return
     local = to_local_naive(timestamp)
     backend = cache_backend if cache_backend is not None else _django_cache()
     keys = []
+    day = pd.Timestamp(local).normalize()
     for interval in KNOWN_INTERVALS:
         pack = pack_start_of(floor_bin(local, interval), interval)
         keys.append(pack_key(room_id, parameter_id, interval, pack))
+        if interval < 1440:
+            keys.append(day_section_key(room_id, parameter_id, interval, day))
     try:
         backend.delete_many(keys)
     except Exception:
@@ -348,7 +366,126 @@ def _store_pack(backend, room_id, parameter_id, interval, pack_start, fresh, tim
             timeout,
         )
     except Exception:
+        return stored_bins
+    return stored_bins
+
+
+def _needed_bins(pack_start, first, last, interval):
+    pack_last = _pack_bins(pack_start, interval)[-1]
+    lo = max(pd.Timestamp(first), pd.Timestamp(pack_start))
+    hi = min(pd.Timestamp(last), pack_last)
+    if lo > hi:
+        return []
+    return list(_bins_between(lo, hi, interval))
+
+
+def _union_span(ranges):
+    """Merge ``[start, end)`` ranges. None when they leave a gap."""
+    ordered = sorted(
+        (pd.Timestamp(start), pd.Timestamp(end))
+        for start, end in ranges
+        if pd.Timestamp(end) > pd.Timestamp(start)
+    )
+    if not ordered:
+        return None
+    start, end = ordered[0]
+    for nxt, nxt_end in ordered[1:]:
+        if nxt > end:
+            return None
+        if nxt_end > end:
+            end = nxt_end
+    return start, end
+
+
+def _use_day_sections(interval, pack_starts):
+    return int(interval) < 1440 and len(pack_starts) > DAY_SECTION_PACKS
+
+
+def _read_day_sections(backend, pairs, pack_starts, first, last, interval):
+    """Fill totals from day sections. Return hours those sections already cover."""
+    packs = [pd.Timestamp(pack) for pack in pack_starts]
+    by_day = {}
+    for pack in packs:
+        by_day.setdefault(pack.normalize(), []).append(pack)
+    key_info = {}
+    for day in by_day:
+        for room_id, parameter_id in pairs:
+            key_info[day_section_key(room_id, parameter_id, interval, day)] = (
+                int(room_id),
+                int(parameter_id),
+                pd.Timestamp(day),
+            )
+    cached = _get_many(backend, key_info) if key_info else {}
+    totals = {}
+    covered = set()
+    payloads = {}
+    for key, (room_id, parameter_id, day) in key_info.items():
+        payload = cached.get(key)
+        bins = payload.get("bins") if isinstance(payload, dict) else None
+        if not isinstance(bins, dict) or "start" not in payload or "until" not in payload:
+            continue
+        try:
+            cover_start = _parse_bin_label(payload["start"])
+            cover_until = _parse_bin_label(payload["until"])
+        except (TypeError, ValueError):
+            continue
+        payloads[(room_id, parameter_id, day)] = payload
+        for pack in by_day.get(day, []):
+            needed = _needed_bins(pack, first, last, interval)
+            if not needed:
+                continue
+            if any(bin_start < cover_start or bin_start >= cover_until or bin_label(bin_start) not in bins for bin_start in needed):
+                continue
+            for bin_start in needed:
+                stored = bins.get(bin_label(bin_start))
+                if stored:
+                    totals[(room_id, parameter_id, pd.Timestamp(bin_start))] = [float(stored[0]), int(stored[1])]
+            covered.add((room_id, parameter_id, pd.Timestamp(pack)))
+    return totals, covered, payloads
+
+
+def _write_day_sections(backend, pairs, pack_starts, hour_bins, day_payloads, interval, now_local):
+    """Store one entry per day when this request held more than a day of hours."""
+    if not _use_day_sections(interval, pack_starts):
         return
+    by_day = {}
+    for pack in pack_starts:
+        stamp = pd.Timestamp(pack)
+        by_day.setdefault(stamp.normalize(), []).append(stamp)
+    for day, packs in by_day.items():
+        for room_id, parameter_id in pairs:
+            owned = []
+            for pack in packs:
+                bins = hour_bins.get((int(room_id), int(parameter_id), pd.Timestamp(pack)))
+                if isinstance(bins, dict):
+                    owned.append((pd.Timestamp(pack), bins))
+            old = day_payloads.get((int(room_id), int(parameter_id), pd.Timestamp(day)))
+            if not owned:
+                continue
+            merged = {}
+            ranges = []
+            if isinstance(old, dict) and old.get("bins") and "start" in old and "until" in old:
+                try:
+                    ranges.append((_parse_bin_label(old["start"]), _parse_bin_label(old["until"])))
+                    merged.update(old["bins"])
+                except (TypeError, ValueError):
+                    pass
+            for pack, bins in owned:
+                ranges.append((pack, pack + pd.Timedelta(hours=1)))
+                merged.update(bins)
+            span = _union_span(ranges)
+            if span is None:
+                continue
+            start, until = span
+            timeout = OPEN_TTL if until > pd.Timestamp(now_local) else CLOSED_TTL
+            try:
+                backend.set(
+                    day_section_key(room_id, parameter_id, interval, day),
+                    {"bins": merged, "start": bin_label(start), "until": bin_label(until)},
+                    timeout,
+                )
+            except Exception:
+                return
 
 
 def load_binned_pairs(
@@ -360,8 +497,10 @@ def load_binned_pairs(
     fetch_rows=None,
     cache_backend=None,
 ):
-    """Bin means for ``(room_id, parameter_id)`` pairs, reusing cached closed bins.
+    """Bin means for ``(room_id, parameter_id)`` pairs, reusing cached sections.
 
+    A window of up to a day is read as one hour pack per hour. A longer window
+    is read as one day section per calendar day, including a still-open day.
     Returns ``(frame, raw_means)``. ``frame`` is indexed by bin start with one
     column per pair key and holds means of the points inside the request.
     ``raw_means`` is the mean of those same points (not of filled bins).
@@ -414,9 +553,20 @@ def load_binned_pairs(
         pack_starts = list(_iter_packs(first, last, interval))
 
     backend = cache_backend if cache_backend is not None else _django_cache()
+    day_totals = {}
+    covered = set()
+    day_payloads = {}
+    if _use_day_sections(interval, pack_starts):
+        day_totals, covered, day_payloads = _read_day_sections(
+            backend, pairs, pack_starts, first, last, interval
+        )
+    totals = dict(day_totals)
     key_info = {}
+    hour_bins = {}
     for pack_start in pack_starts:
         for room_id, parameter_id in pairs:
+            if (int(room_id), int(parameter_id), pd.Timestamp(pack_start)) in covered:
+                continue
             key_info[pack_key(room_id, parameter_id, interval, pack_start)] = (
                 room_id,
                 parameter_id,
@@ -424,7 +574,6 @@ def load_binned_pairs(
             )
     cached = _get_many(backend, key_info) if key_info else {}
 
-    totals = {}
     missing = []
     for key, (room_id, parameter_id, pack_start) in key_info.items():
         payload = cached.get(key)
@@ -433,12 +582,8 @@ def load_binned_pairs(
         if not isinstance(bins, dict) or any(label not in bins for label in labels):
             missing.append((room_id, parameter_id, pack_start))
             continue
-        pack_last = _pack_bins(pack_start, interval)[-1]
-        lo = max(first, pack_start)
-        hi = min(last, pack_last)
-        if lo > hi:
-            continue
-        for bin_start in _bins_between(lo, hi, interval):
+        hour_bins[(int(room_id), int(parameter_id), pd.Timestamp(pack_start))] = bins
+        for bin_start in _needed_bins(pack_start, first, last, interval):
             stored = bins.get(bin_label(bin_start))
             if stored:
                 totals[(room_id, parameter_id, pd.Timestamp(bin_start))] = [float(stored[0]), int(stored[1])]
@@ -480,7 +625,7 @@ def load_binned_pairs(
                 open_pack = pack_end_of(pack_start, interval) > now_local
                 timeout = OPEN_TTL if open_pack else CLOSED_TTL
                 for room_id, parameter_id in group_pairs:
-                    _store_pack(
+                    stored_bins = _store_pack(
                         backend,
                         room_id,
                         parameter_id,
@@ -489,15 +634,13 @@ def load_binned_pairs(
                         fresh,
                         timeout,
                     )
-                    pack_last = _pack_bins(pack_start, interval)[-1]
-                    lo = max(first, pack_start)
-                    hi = min(last, pack_last)
-                    if lo > hi:
-                        continue
-                    for bin_start in _bins_between(lo, hi, interval):
+                    hour_bins[(int(room_id), int(parameter_id), pd.Timestamp(pack_start))] = stored_bins
+                    for bin_start in _needed_bins(pack_start, first, last, interval):
                         found = fresh.get((room_id, parameter_id, pd.Timestamp(bin_start)))
                         if found:
                             totals[(room_id, parameter_id, pd.Timestamp(bin_start))] = found
+
+    _write_day_sections(backend, pairs, pack_starts, hour_bins, day_payloads, interval, now_local)
 
     if partial:
         # A clipped edge must not use the full cached bin. Query only the
