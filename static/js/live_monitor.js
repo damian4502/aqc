@@ -254,9 +254,12 @@
     }
 
     function publishLive() {
-        if (typeof pageVisible !== "undefined" && !pageVisible) return;
+        if (!getPageVisibility()) return;
         if (typeof client === "undefined" || !client) return;
-        const names = measuredIdentifiers();
+		
+		client.publish("vila/sentjane/asgard/cmd/all", "live_mode", { qos: 0 });
+		
+/*         const names = measuredIdentifiers();
         if (!names.length) return;
         ownedTopics.forEach(function (topic) {
             const ident = sensorIdent(topic);
@@ -265,7 +268,7 @@
                 client.publish("vila/sentjane/asgard/cmd/" + ident, "live_mode", { qos: 0 });
             });
         });
-    }
+ */    }
 
     function paletteColor(index) {
         return PALETTE[index % PALETTE.length];
@@ -614,7 +617,8 @@
         const zscore = zscoreOn();
         updateScaleBadge(zscore);
         const time = new Date().toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
-        chart.data.labels.push(time);
+        //chart.data.labels.push(time);
+		chart.data.labels.push('');
         if (chart.data.labels.length > MAX_POINTS) chart.data.labels.shift();
         chart.data.datasets.forEach(function (dataset) {
             const series = seriesByKey.get(dataset.key);
