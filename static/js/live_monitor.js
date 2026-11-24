@@ -97,6 +97,17 @@
         return Number.isFinite(sample) ? sample : null;
     }
 
+    function psychrometric(name, tempC, rh) {
+        if (!Number.isFinite(tempC) || !Number.isFinite(rh) || rh < 0 || tempC <= -243.5) return null;
+        const esHpa = 6.112 * Math.exp((17.67 * tempC) / (tempC + 243.5));
+        if (name === "ah") {
+            const tk = tempC + 273.15;
+            if (tk <= 0) return null;
+            return (2.1674 * esHpa * rh) / tk;
+        }
+        return esHpa * rh;
+    }
+
     function evalNode(node, roomId, stack) {
         if (!node) return null;
         if (node.t === "n") return Number(node.v);
@@ -123,6 +134,10 @@
             if (node.n === "max") return Math.max.apply(null, args);
             if (node.n === "avg") return args.reduce(function (sum, value) { return sum + value; }, 0) / args.length;
             if (node.n === "range") return Math.max.apply(null, args) - Math.min.apply(null, args);
+            if (node.n === "ah" || node.n === "avp") {
+                if (args.length !== 2) return null;
+                return psychrometric(node.n, args[0], args[1]);
+            }
         }
         return null;
     }

@@ -24,7 +24,16 @@ OP_TOKENS = {
 }
 TOKEN_FOR_OP = {"+": "add", "-": "sub", "*": "mul", "/": "div"}
 OP_SYMBOLS = {"+": "+", "-": "−", "*": "×", "/": "÷"}
-FN_NAMES = ("min", "max", "avg", "range")
+FN_NAMES = ("min", "max", "avg", "range", "avp", "ah")
+# (minimum arguments, maximum arguments). None means MAX_FORMULA_TERMS.
+FN_ARITY = {
+    "min": (2, None),
+    "max": (2, None),
+    "avg": (2, None),
+    "range": (1, None),
+    "ah": (2, 2),
+    "avp": (2, 2),
+}
 MAX_FORMULA_TERMS = 24
 _PREC = {"+": 1, "-": 1, "*": 2, "/": 2}
 _FX_WORD = {"+": "add", "-": "sub", "*": "mul", "/": "div"}
@@ -294,7 +303,8 @@ def _parse_fx(body, valid_room_ids, valid_parameter_ids):
                 break
             if pos >= len(body) or body[pos] != ")" or not args:
                 return None
-            if name != "range" and len(args) < 2:
+            low, high = _fn_arity(name)
+            if len(args) < low or len(args) > high:
                 return None
             pos += 1
             return ("fn", name, tuple(args))
@@ -328,7 +338,8 @@ def parse_difference_specs(values, valid_room_ids, valid_parameter_ids):
 
     A leaf is ``(room, parameter)`` or ``("n", value)``. An operation is
     ``("op", "+", left, right)``. ``min``, ``max``, ``avg``, and ``range`` are
-    ``("fn", name, args)``. ``range`` is max minus min. ``*`` and ``/`` bind tighter than ``+``
+    ``("fn", name, args)``. ``range`` is max minus min. ``ah`` is absolute
+    humidity in g/m³ and ``avp`` is actual vapor pressure in Pa. ``*`` and ``/`` bind tighter than ``+``
     and ``-`` when the formula was typed. A saved ``a|b`` token is still
     left-associative A − B, and ``a|add|b|mul|c`` is still ``(a + b) * c``.
     """
@@ -487,6 +498,10 @@ def formula_unit_of(node, unit_of_series):
     if _is_series(node) or _is_x_series(node):
         return unit_of_series(node[0], node[1]) or ""
     if _is_fn(node):
+        if node[1] == "ah":
+            return "g/m³"
+        if node[1] == "avp":
+            return "Pa"
         units = [formula_unit_of(arg, unit_of_series) for arg in node[2]]
         if all(unit is None for unit in units):
             return None
@@ -673,7 +688,7 @@ def parse_formula_text(text, rooms, parameters):
 
 
 def _match_call(text, index):
-    """``min``/``max``/``avg``/``range`` when the next non-space character is ``(``."""
+    """A function name when the next non-space character is ``(``."""
     for name in FN_NAMES:
         end = index + len(name)
         if end > len(text) or text[index:end].casefold() != name:
@@ -758,13 +773,9 @@ def _parse_expression_tokens(tokens):
             if peek() != "(":
                 raise FormulaError(f"Expected '(' after {name}.")
             nonlocal_advance()
-            need = 1 if name == "range" else 2
+            low, high = _fn_arity(name)
             if peek() in (None, ",", ")"):
-                raise FormulaError(
-                    f"{name} needs at least one value."
-                    if need == 1
-                    else f"{name} needs at least two values."
-                )
+                raise FormulaError(_fn_count_message(name, low, high))
             args = [parse_expr()]
             while peek() == ",":
                 nonlocal_advance()
@@ -774,14 +785,8 @@ def _parse_expression_tokens(tokens):
             if peek() != ")":
                 raise FormulaError("Close the parenthesis.")
             nonlocal_advance()
-            if len(args) < need:
-                raise FormulaError(
-                    f"{name} needs at least one value."
-                    if need == 1
-                    else f"{name} needs at least two values."
-                )
-            if len(args) > MAX_FORMULA_TERMS:
-                raise FormulaError(f"{name} can use at most {MAX_FORMULA_TERMS} values.")
+            if len(args) < low or len(args) > high:
+                raise FormulaError(_fn_count_message(name, low, high))
             return ("fn", name, tuple(args))
         if is_constant(current) or _is_series(current) or _is_x_series(current):
             nonlocal_advance()
@@ -899,10 +904,57 @@ def _apply_op(left, right, op):
     return value
 
 
-def _apply_fn(name, values):
-    """Pointwise ``min``, ``max``, ``avg``, or ``range``. A missing value stays missing.
+def _fn_arity(name):
+    low, high = FN_ARITY[name]
+    return low, MAX_FORMULA_TERMS if high is None else high
 
-    ``range`` is the highest value minus the lowest at that timestamp.
+
+def _fn_count_message(name, low, high):
+    if name in ("ah", "avp"):
+        return f"{name} takes temperature in °C and relative humidity in %."
+    if low == high:
+        return f"{name} takes exactly {low} values."
+    if low == 1:
+        return f"{name} needs at least one value."
+    return f"{name} needs at least two values."
+
+
+# Bolton 1980. es (hPa) = 6.112 * exp(17.67 * T / (T + 243.5)), T in °C.
+# Actual vapor pressure (Pa) = es * RH, with RH in percent.
+# Absolute humidity (g/m³) = 2.1674 * es * RH / (T + 273.15).
+_ES_HPA = 6.112
+_BOLTON_A = 17.67
+_BOLTON_B = 243.5
+_AH_FACTOR = 2.1674
+
+
+def _psychrometric(name, temp_c, rh_percent):
+    """``avp`` in Pa or ``ah`` in g/m³. Invalid inputs become NaN."""
+    import numpy as np
+
+    temp = np.asarray(temp_c, dtype="float64")
+    rh = np.asarray(rh_percent, dtype="float64")
+    with np.errstate(invalid="ignore", divide="ignore", over="ignore"):
+        es_hpa = _ES_HPA * np.exp(_BOLTON_A * temp / (temp + _BOLTON_B))
+        if name == "ah":
+            out = _AH_FACTOR * es_hpa * rh / (temp + 273.15)
+        else:
+            out = es_hpa * rh
+    bad = (
+        ~np.isfinite(temp)
+        | ~np.isfinite(rh)
+        | (temp <= -_BOLTON_B)
+        | (temp <= -273.15)
+        | (rh < 0)
+    )
+    return np.where(bad, np.nan, out)
+
+
+def _apply_fn(name, values):
+    """Pointwise ``min``, ``max``, ``avg``, ``range``, ``ah``, or ``avp``.
+
+    A missing value stays missing. ``range`` is the highest minus the lowest.
+    ``ah`` and ``avp`` take temperature in °C, then relative humidity in percent.
     """
     import pandas as pd
 
@@ -917,6 +969,13 @@ def _apply_fn(name, values):
             if not math.isfinite(number):
                 return float("nan")
             numbers.append(number)
+        if name in ("ah", "avp"):
+            if len(numbers) != 2:
+                return float("nan")
+            import numpy as np
+
+            value = float(np.asarray(_psychrometric(name, numbers[0], numbers[1])).reshape(-1)[0])
+            return value if math.isfinite(value) else float("nan")
         if name == "min":
             return min(numbers)
         if name == "max":
@@ -941,6 +1000,13 @@ def _apply_fn(name, values):
                 number = float("nan")
             columns.append(pd.Series(number, index=index, dtype="float64"))
     frame = pd.concat(columns, axis=1)
+    if name in ("ah", "avp"):
+        import numpy as np
+
+        if frame.shape[1] != 2:
+            return pd.Series(np.nan, index=index, dtype="float64")
+        computed = _psychrometric(name, frame.iloc[:, 0].to_numpy(), frame.iloc[:, 1].to_numpy())
+        return pd.Series(np.asarray(computed, dtype="float64"), index=index)
     if name == "min":
         result = frame.min(axis=1, skipna=False)
     elif name == "max":

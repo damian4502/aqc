@@ -90,6 +90,8 @@
                 <option value="max(">max(</option>
                 <option value="avg(">avg(</option>
                 <option value="range(">range(</option>
+                <option value="ah(">ah(</option>
+                <option value="avp(">avp(</option>
                 <option value="(">(</option>
                 <option value=")">)</option>
             </select>
@@ -97,7 +99,7 @@
                 Save formula
             </button>
         </div>
-        <p class="text-[11px] text-slate-500">Same syntax as Compare, including range() for the highest minus the lowest. The unit stays the one set on this parameter. Use x/Parameter for this room, for example (x/PM10 / Zunanji zrak/PM10) * 100 — one line per room. A formula that names every room is one series.</p>
+        <p class="text-[11px] text-slate-500">Same syntax as Compare, including range() for the highest minus the lowest. ah(temperature, humidity) is absolute humidity in g/m³. avp(temperature, humidity) is actual vapor pressure in Pa. Temperature is °C and humidity is relative humidity in percent. The unit stays the one set on this parameter. Use x/Parameter for this room, for example ah(x/Temperatura, x/Vlaga) — one line per room. A formula that names every room is one series.</p>
         {% if formula_error %}
         <p class="text-sm text-rose-300">{{ formula_error }}</p>
         {% endif %}
