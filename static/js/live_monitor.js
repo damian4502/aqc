@@ -118,6 +118,24 @@
         return 9.80665 * height * density * (e1 / tk1 - e2 / tk2);
     }
 
+    function dewPoint(tempC, rh) {
+        if (!Number.isFinite(tempC) || !Number.isFinite(rh) || rh <= 0 || tempC <= -243.5) return null;
+        const esHpa = 6.112 * Math.exp((17.67 * tempC) / (tempC + 243.5));
+        const gamma = Math.log(esHpa * rh / 100 / 6.112);
+        const denom = 17.67 - gamma;
+        if (!Number.isFinite(gamma) || denom === 0) return null;
+        return (243.5 * gamma) / denom;
+    }
+
+    function mixingRatio(tempC, rh, pressure) {
+        const vapor = psychrometric("avp", tempC, rh);
+        if (!Number.isFinite(vapor) || !Number.isFinite(pressure) || pressure < 200 || pressure > 2000000) return null;
+        if (pressure >= 2000 && pressure < 20000) return null;
+        const total = pressure < 2000 ? pressure * 100 : pressure;
+        if (total <= vapor) return null;
+        return 1000 * 0.62198 * vapor / (total - vapor);
+    }
+
     function evalNode(node, roomId, stack) {
         if (!node) return null;
         if (node.t === "n") return Number(node.v);
@@ -151,6 +169,14 @@
             if (node.n === "hdp") {
                 if (args.length !== 5) return null;
                 return humidityDeltaPa(args[0], args[1], args[2], args[3], args[4]);
+            }
+            if (node.n === "dew") {
+                if (args.length !== 2) return null;
+                return dewPoint(args[0], args[1]);
+            }
+            if (node.n === "mr") {
+                if (args.length !== 3) return null;
+                return mixingRatio(args[0], args[1], args[2]);
             }
         }
         return null;

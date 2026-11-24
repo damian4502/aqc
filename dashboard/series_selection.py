@@ -24,7 +24,7 @@ OP_TOKENS = {
 }
 TOKEN_FOR_OP = {"+": "add", "-": "sub", "*": "mul", "/": "div"}
 OP_SYMBOLS = {"+": "+", "-": "−", "*": "×", "/": "÷"}
-FN_NAMES = ("min", "max", "avg", "range", "avp", "ah", "hdp")
+FN_NAMES = ("min", "max", "avg", "range", "avp", "ah", "hdp", "dew", "mr")
 # (minimum arguments, maximum arguments). None means MAX_FORMULA_TERMS.
 FN_ARITY = {
     "min": (2, None),
@@ -34,6 +34,8 @@ FN_ARITY = {
     "ah": (2, 2),
     "avp": (2, 2),
     "hdp": (5, 5),
+    "dew": (2, 2),
+    "mr": (3, 3),
 }
 MAX_FORMULA_TERMS = 24
 _PREC = {"+": 1, "-": 1, "*": 2, "/": 2}
@@ -501,6 +503,10 @@ def formula_unit_of(node, unit_of_series):
     if _is_fn(node):
         if node[1] == "ah":
             return "g/m³"
+        if node[1] == "dew":
+            return "°C"
+        if node[1] == "mr":
+            return "g/kg"
         if node[1] in ("avp", "hdp"):
             return "Pa"
         units = [formula_unit_of(arg, unit_of_series) for arg in node[2]]
@@ -915,6 +921,10 @@ def _fn_count_message(name, low, high):
         return f"{name} takes temperature in °C and relative humidity in %."
     if name == "hdp":
         return "hdp takes both rooms as temperature in °C and humidity in %, then height in meters."
+    if name == "dew":
+        return "dew takes temperature in °C and relative humidity in %."
+    if name == "mr":
+        return "mr takes temperature in °C, relative humidity in %, and pressure in Pa or hPa."
     if low == high:
         return f"{name} takes exactly {low} values."
     if low == 1:
@@ -934,6 +944,54 @@ _RV = 461.495  # J/(kg·K), water vapor
 _G = 9.80665
 # Moisture lowers density by this much per Pa of vapor pressure, times 1/T.
 _HUMID_DENSITY = (1.0 / _RD) - (1.0 / _RV)
+_EPSILON = 0.62198  # mass ratio of water vapor to dry air
+
+
+def _as_pressure_pa(pressure):
+    """Total pressure to Pa. Values below 2000 are hPa, larger ones are Pa."""
+    import numpy as np
+
+    raw = np.asarray(pressure, dtype="float64")
+    pa = np.where(raw < 2000.0, raw * 100.0, raw)
+    bad = (
+        ~np.isfinite(raw)
+        | (raw < 200.0)
+        | ((raw >= 2000.0) & (raw < 20000.0))
+        | (raw > 2_000_000.0)
+    )
+    return pa, bad
+
+
+def _dew_point(temp_c, rh_percent):
+    """Dew point in °C. Inverse of the Bolton saturation curve."""
+    import numpy as np
+
+    temp = np.asarray(temp_c, dtype="float64")
+    rh = np.asarray(rh_percent, dtype="float64")
+    with np.errstate(invalid="ignore", divide="ignore", over="ignore"):
+        es_hpa = _ES_HPA * np.exp(_BOLTON_A * temp / (temp + _BOLTON_B))
+        gamma = np.log(es_hpa * rh / 100.0 / _ES_HPA)
+        out = _BOLTON_B * gamma / (_BOLTON_A - gamma)
+    bad = (
+        ~np.isfinite(out)
+        | ~np.isfinite(temp)
+        | ~np.isfinite(rh)
+        | (temp <= -_BOLTON_B)
+        | (rh <= 0)
+    )
+    return np.where(bad, np.nan, out)
+
+
+def _mixing_ratio(temp_c, rh_percent, pressure):
+    """Mixing ratio in g of water per kg of dry air."""
+    import numpy as np
+
+    vapor = _psychrometric("avp", temp_c, rh_percent)
+    total, bad_pressure = _as_pressure_pa(pressure)
+    with np.errstate(invalid="ignore", divide="ignore", over="ignore"):
+        out = 1000.0 * _EPSILON * vapor / (total - vapor)
+    bad = bad_pressure | ~np.isfinite(out) | (total <= vapor)
+    return np.where(bad, np.nan, out)
 
 
 def _humidity_delta_pa(temp1, rh1, temp2, rh2, height_m):
@@ -979,11 +1037,12 @@ def _psychrometric(name, temp_c, rh_percent):
 
 
 def _apply_fn(name, values):
-    """Pointwise ``min``, ``max``, ``avg``, ``range``, ``ah``, ``avp``, or ``hdp``.
+    """Pointwise ``min``, ``max``, ``avg``, ``range``, ``ah``, ``avp``, ``dew``, ``mr``, or ``hdp``.
 
     A missing value stays missing. ``range`` is the highest minus the lowest.
     ``ah`` and ``avp`` take temperature in °C, then relative humidity in percent.
-    ``hdp`` takes both rooms and a height in meters.
+    ``dew`` uses the same two arguments and returns °C. ``mr`` also takes
+    pressure in Pa or hPa and returns g/kg. ``hdp`` takes both rooms and a height in meters.
     """
     import pandas as pd
 
@@ -1004,6 +1063,20 @@ def _apply_fn(name, values):
             import numpy as np
 
             value = float(np.asarray(_humidity_delta_pa(*numbers)).reshape(-1)[0])
+            return value if math.isfinite(value) else float("nan")
+        if name == "dew":
+            if len(numbers) != 2:
+                return float("nan")
+            import numpy as np
+
+            value = float(np.asarray(_dew_point(*numbers)).reshape(-1)[0])
+            return value if math.isfinite(value) else float("nan")
+        if name == "mr":
+            if len(numbers) != 3:
+                return float("nan")
+            import numpy as np
+
+            value = float(np.asarray(_mixing_ratio(*numbers)).reshape(-1)[0])
             return value if math.isfinite(value) else float("nan")
         if name in ("ah", "avp"):
             if len(numbers) != 2:
@@ -1036,14 +1109,21 @@ def _apply_fn(name, values):
                 number = float("nan")
             columns.append(pd.Series(number, index=index, dtype="float64"))
     frame = pd.concat(columns, axis=1)
-    if name in ("ah", "avp", "hdp"):
+    if name in ("ah", "avp", "dew", "mr", "hdp"):
         import numpy as np
 
-        needed = 5 if name == "hdp" else 2
+        needed = {"hdp": 5, "mr": 3}.get(name, 2)
         if frame.shape[1] != needed:
             return pd.Series(np.nan, index=index, dtype="float64")
         cols = [frame.iloc[:, i].to_numpy() for i in range(needed)]
-        computed = _humidity_delta_pa(*cols) if name == "hdp" else _psychrometric(name, cols[0], cols[1])
+        if name == "hdp":
+            computed = _humidity_delta_pa(*cols)
+        elif name == "dew":
+            computed = _dew_point(*cols)
+        elif name == "mr":
+            computed = _mixing_ratio(*cols)
+        else:
+            computed = _psychrometric(name, cols[0], cols[1])
         return pd.Series(np.asarray(computed, dtype="float64"), index=index)
     if name == "min":
         result = frame.min(axis=1, skipna=False)

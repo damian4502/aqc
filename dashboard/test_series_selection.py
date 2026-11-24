@@ -426,3 +426,42 @@ class FormulaTextTests(SimpleTestCase):
         self.assertTrue(pd.isna(values.iloc[1]))
         with self.assertRaises(FormulaError):
             parse_formula_text("hdp(Kuhinja/Temp, Kuhinja/RH)", rooms, params)
+
+    def test_dew_point_and_mixing_ratio(self):
+        rooms = ROOMS
+        params = PARAMS + [(7, "Temp"), (8, "RH"), (9, "Tlak")]
+        dew = parse_formula_text("dew(Kuhinja/Temp, Kuhinja/RH)", rooms, params)
+        ratio = parse_formula_text("mr(Kuhinja/Temp, Kuhinja/RH, Kuhinja/Tlak)", rooms, params)
+        self.assertEqual(formula_unit_of(dew, lambda *_args: ""), "°C")
+        self.assertEqual(formula_unit_of(ratio, lambda *_args: ""), "g/kg")
+        self.assertEqual(
+            parse_difference_specs([encode_diff_entry(ratio)], {1}, {7, 8, 9})[0],
+            ratio,
+        )
+
+        index = pd.date_range("2026-01-01", periods=2, freq="h")
+        temp = pd.Series([20.0, 20.0], index=index)
+        rh = pd.Series([50.0, None], index=index)
+        pressure = pd.Series([101325.0, 101325.0], index=index)
+
+        def lookup(room, param):
+            return {7: temp, 8: rh, 9: pressure}[param]
+
+        dew_values = evaluate_formula(dew, lookup)
+        ratio_values = evaluate_formula(ratio, lookup)
+        self.assertAlmostEqual(float(dew_values.iloc[0]), 9.27, places=2)
+        self.assertAlmostEqual(float(ratio_values.iloc[0]), 7.256, places=2)
+        self.assertTrue(pd.isna(dew_values.iloc[1]))
+        self.assertTrue(pd.isna(ratio_values.iloc[1]))
+        saturated = evaluate_formula(
+            parse_formula_text("dew(Kuhinja/Temp, 100)", rooms, params),
+            lookup,
+        )
+        self.assertAlmostEqual(float(saturated.iloc[0]), 20.0, places=6)
+        from_hpa = evaluate_formula(
+            parse_formula_text("mr(20, 50, Kuhinja/Tlak)", rooms, params),
+            lambda room, param: pd.Series([1013.25, 1013.25], index=index),
+        )
+        self.assertAlmostEqual(float(from_hpa.iloc[0]), 7.256, places=2)
+        with self.assertRaises(FormulaError):
+            parse_formula_text("mr(Kuhinja/Temp, Kuhinja/RH)", rooms, params)
