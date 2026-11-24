@@ -357,3 +357,46 @@ class FormulaTextTests(SimpleTestCase):
         self.assertEqual(float(single.iloc[0]), 0.0)
         with self.assertRaises(FormulaError):
             parse_formula_text("range()", ROOMS, PARAMS)
+
+    def test_absolute_humidity_and_vapor_pressure(self):
+        rooms = ROOMS
+        params = PARAMS + [(7, "Temp"), (8, "RH")]
+        text = "ah(Kuhinja/Temp, Kuhinja/RH)"
+        node = parse_formula_text(text, rooms, params)
+        self.assertEqual(node, ("fn", "ah", ((1, 7), (1, 8))))
+        self.assertEqual(
+            formula_source(node, lambda room, param: f"{dict(rooms)[room]}/{dict(params)[param]}"),
+            text,
+        )
+        self.assertEqual(formula_unit_of(node, lambda *_args: "°C"), "g/m³")
+        vapor = parse_formula_text("avp(Kuhinja/Temp, 50)", rooms, params)
+        self.assertEqual(formula_unit_of(vapor, lambda *_args: "%"), "Pa")
+        encoded = encode_diff_entry(node)
+        self.assertEqual(encoded, "fx:ah(1:7,1:8)")
+        self.assertEqual(parse_difference_specs([encoded], {1}, {7, 8})[0], node)
+
+        index = pd.date_range("2026-01-01", periods=2, freq="h")
+        temp = pd.Series([20.0, None], index=index)
+        rh = pd.Series([50.0, 40.0], index=index)
+
+        def lookup(room, param):
+            return {7: temp, 8: rh}[param]
+
+        humidity = evaluate_formula(node, lookup)
+        pressure = evaluate_formula(
+            parse_formula_text("avp(Kuhinja/Temp, Kuhinja/RH)", rooms, params),
+            lookup,
+        )
+        self.assertAlmostEqual(float(humidity.iloc[0]), 8.639, places=2)
+        self.assertAlmostEqual(float(pressure.iloc[0]), 1168.45, places=1)
+        self.assertTrue(pd.isna(humidity.iloc[1]))
+        self.assertTrue(pd.isna(pressure.iloc[1]))
+        fixed = evaluate_formula(
+            parse_formula_text("ah(20, Kuhinja/RH)", rooms, params),
+            lookup,
+        )
+        self.assertAlmostEqual(float(fixed.iloc[0]), 8.639, places=2)
+        with self.assertRaises(FormulaError):
+            parse_formula_text("ah(Kuhinja/Temp)", rooms, params)
+        with self.assertRaises(FormulaError):
+            parse_formula_text("avp(Kuhinja/Temp, Kuhinja/RH, 1)", rooms, params)
