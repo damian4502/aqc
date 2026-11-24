@@ -1368,14 +1368,14 @@ async function exportCompareCsv() {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
-/* 	window.setInterval(function() {
+ 	window.setInterval(function() {
 		if (getPageVisibility()) {
 			if (chartRangeMode == 'live') try { client.publish("vila/sentjane/asgard/cmd/all", "live_mode", { qos: 0 }); } catch {}
 		}
 	
 	}, 7000);
 	if (chartRangeMode == 'live') try { client.publish("vila/sentjane/asgard/cmd/all", "live_mode", { qos: 0 }); } catch {}
- */
+
     const modeEl = document.getElementById('range-mode');
     chartRangeMode = modeEl && modeEl.dataset.initial === 'live' ? 'live' : 'fixed';
     paintRangeMode();
