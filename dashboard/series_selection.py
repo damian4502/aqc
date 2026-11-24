@@ -24,7 +24,7 @@ OP_TOKENS = {
 }
 TOKEN_FOR_OP = {"+": "add", "-": "sub", "*": "mul", "/": "div"}
 OP_SYMBOLS = {"+": "+", "-": "−", "*": "×", "/": "÷"}
-FN_NAMES = ("min", "max", "avg", "range", "avp", "ah")
+FN_NAMES = ("min", "max", "avg", "range", "avp", "ah", "hdp", "dew", "mr")
 # (minimum arguments, maximum arguments). None means MAX_FORMULA_TERMS.
 FN_ARITY = {
     "min": (2, None),
@@ -33,6 +33,9 @@ FN_ARITY = {
     "range": (1, None),
     "ah": (2, 2),
     "avp": (2, 2),
+    "hdp": (5, 5),
+    "dew": (2, 2),
+    "mr": (3, 3),
 }
 MAX_FORMULA_TERMS = 24
 _PREC = {"+": 1, "-": 1, "*": 2, "/": 2}
@@ -500,7 +503,11 @@ def formula_unit_of(node, unit_of_series):
     if _is_fn(node):
         if node[1] == "ah":
             return "g/m³"
-        if node[1] == "avp":
+        if node[1] == "dew":
+            return "°C"
+        if node[1] == "mr":
+            return "g/kg"
+        if node[1] in ("avp", "hdp"):
             return "Pa"
         units = [formula_unit_of(arg, unit_of_series) for arg in node[2]]
         if all(unit is None for unit in units):
@@ -912,6 +919,12 @@ def _fn_arity(name):
 def _fn_count_message(name, low, high):
     if name in ("ah", "avp"):
         return f"{name} takes temperature in °C and relative humidity in %."
+    if name == "hdp":
+        return "hdp takes both rooms as temperature in °C and humidity in %, then height in meters."
+    if name == "dew":
+        return "dew takes temperature in °C and relative humidity in %."
+    if name == "mr":
+        return "mr takes temperature in °C, relative humidity in %, and pressure in Pa or hPa."
     if low == high:
         return f"{name} takes exactly {low} values."
     if low == 1:
@@ -926,6 +939,79 @@ _ES_HPA = 6.112
 _BOLTON_A = 17.67
 _BOLTON_B = 243.5
 _AH_FACTOR = 2.1674
+_RD = 287.058  # J/(kg·K), dry air
+_RV = 461.495  # J/(kg·K), water vapor
+_G = 9.80665
+# Moisture lowers density by this much per Pa of vapor pressure, times 1/T.
+_HUMID_DENSITY = (1.0 / _RD) - (1.0 / _RV)
+_EPSILON = 0.62198  # mass ratio of water vapor to dry air
+
+
+def _as_pressure_pa(pressure):
+    """Total pressure to Pa. Values below 2000 are hPa, larger ones are Pa."""
+    import numpy as np
+
+    raw = np.asarray(pressure, dtype="float64")
+    pa = np.where(raw < 2000.0, raw * 100.0, raw)
+    bad = (
+        ~np.isfinite(raw)
+        | (raw < 200.0)
+        | ((raw >= 2000.0) & (raw < 20000.0))
+        | (raw > 2_000_000.0)
+    )
+    return pa, bad
+
+
+def _dew_point(temp_c, rh_percent):
+    """Dew point in °C. Inverse of the Bolton saturation curve."""
+    import numpy as np
+
+    temp = np.asarray(temp_c, dtype="float64")
+    rh = np.asarray(rh_percent, dtype="float64")
+    with np.errstate(invalid="ignore", divide="ignore", over="ignore"):
+        es_hpa = _ES_HPA * np.exp(_BOLTON_A * temp / (temp + _BOLTON_B))
+        gamma = np.log(es_hpa * rh / 100.0 / _ES_HPA)
+        out = _BOLTON_B * gamma / (_BOLTON_A - gamma)
+    bad = (
+        ~np.isfinite(out)
+        | ~np.isfinite(temp)
+        | ~np.isfinite(rh)
+        | (temp <= -_BOLTON_B)
+        | (rh <= 0)
+    )
+    return np.where(bad, np.nan, out)
+
+
+def _mixing_ratio(temp_c, rh_percent, pressure):
+    """Mixing ratio in g of water per kg of dry air."""
+    import numpy as np
+
+    vapor = _psychrometric("avp", temp_c, rh_percent)
+    total, bad_pressure = _as_pressure_pa(pressure)
+    with np.errstate(invalid="ignore", divide="ignore", over="ignore"):
+        out = 1000.0 * _EPSILON * vapor / (total - vapor)
+    bad = bad_pressure | ~np.isfinite(out) | (total <= vapor)
+    return np.where(bad, np.nan, out)
+
+
+def _humidity_delta_pa(temp1, rh1, temp2, rh2, height_m):
+    """Stack-pressure difference caused by humidity, in Pa.
+
+    ``hdp(t1, rh1, t2, rh2, height)``. Temperatures are °C, humidities are
+    percent, height is meters above the level where the pressures are equal.
+    Positive means room 1 is at higher pressure at that height.
+    """
+    import numpy as np
+
+    e1 = _psychrometric("avp", temp1, rh1)
+    e2 = _psychrometric("avp", temp2, rh2)
+    tk1 = np.asarray(temp1, dtype="float64") + 273.15
+    tk2 = np.asarray(temp2, dtype="float64") + 273.15
+    height = np.asarray(height_m, dtype="float64")
+    with np.errstate(invalid="ignore", divide="ignore", over="ignore"):
+        out = _G * height * _HUMID_DENSITY * (e1 / tk1 - e2 / tk2)
+    bad = ~np.isfinite(out) | (tk1 <= 0) | (tk2 <= 0)
+    return np.where(bad, np.nan, out)
 
 
 def _psychrometric(name, temp_c, rh_percent):
@@ -951,10 +1037,12 @@ def _psychrometric(name, temp_c, rh_percent):
 
 
 def _apply_fn(name, values):
-    """Pointwise ``min``, ``max``, ``avg``, ``range``, ``ah``, or ``avp``.
+    """Pointwise ``min``, ``max``, ``avg``, ``range``, ``ah``, ``avp``, ``dew``, ``mr``, or ``hdp``.
 
     A missing value stays missing. ``range`` is the highest minus the lowest.
     ``ah`` and ``avp`` take temperature in °C, then relative humidity in percent.
+    ``dew`` uses the same two arguments and returns °C. ``mr`` also takes
+    pressure in Pa or hPa and returns g/kg. ``hdp`` takes both rooms and a height in meters.
     """
     import pandas as pd
 
@@ -969,6 +1057,27 @@ def _apply_fn(name, values):
             if not math.isfinite(number):
                 return float("nan")
             numbers.append(number)
+        if name == "hdp":
+            if len(numbers) != 5:
+                return float("nan")
+            import numpy as np
+
+            value = float(np.asarray(_humidity_delta_pa(*numbers)).reshape(-1)[0])
+            return value if math.isfinite(value) else float("nan")
+        if name == "dew":
+            if len(numbers) != 2:
+                return float("nan")
+            import numpy as np
+
+            value = float(np.asarray(_dew_point(*numbers)).reshape(-1)[0])
+            return value if math.isfinite(value) else float("nan")
+        if name == "mr":
+            if len(numbers) != 3:
+                return float("nan")
+            import numpy as np
+
+            value = float(np.asarray(_mixing_ratio(*numbers)).reshape(-1)[0])
+            return value if math.isfinite(value) else float("nan")
         if name in ("ah", "avp"):
             if len(numbers) != 2:
                 return float("nan")
@@ -1000,12 +1109,21 @@ def _apply_fn(name, values):
                 number = float("nan")
             columns.append(pd.Series(number, index=index, dtype="float64"))
     frame = pd.concat(columns, axis=1)
-    if name in ("ah", "avp"):
+    if name in ("ah", "avp", "dew", "mr", "hdp"):
         import numpy as np
 
-        if frame.shape[1] != 2:
+        needed = {"hdp": 5, "mr": 3}.get(name, 2)
+        if frame.shape[1] != needed:
             return pd.Series(np.nan, index=index, dtype="float64")
-        computed = _psychrometric(name, frame.iloc[:, 0].to_numpy(), frame.iloc[:, 1].to_numpy())
+        cols = [frame.iloc[:, i].to_numpy() for i in range(needed)]
+        if name == "hdp":
+            computed = _humidity_delta_pa(*cols)
+        elif name == "dew":
+            computed = _dew_point(*cols)
+        elif name == "mr":
+            computed = _mixing_ratio(*cols)
+        else:
+            computed = _psychrometric(name, cols[0], cols[1])
         return pd.Series(np.asarray(computed, dtype="float64"), index=index)
     if name == "min":
         result = frame.min(axis=1, skipna=False)

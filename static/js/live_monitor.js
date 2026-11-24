@@ -108,6 +108,34 @@
         return esHpa * rh;
     }
 
+    function humidityDeltaPa(temp1, rh1, temp2, rh2, height) {
+        const e1 = psychrometric("avp", temp1, rh1);
+        const e2 = psychrometric("avp", temp2, rh2);
+        const tk1 = temp1 + 273.15;
+        const tk2 = temp2 + 273.15;
+        if (!Number.isFinite(e1) || !Number.isFinite(e2) || !Number.isFinite(height) || tk1 <= 0 || tk2 <= 0) return null;
+        const density = (1 / 287.058) - (1 / 461.495);
+        return 9.80665 * height * density * (e1 / tk1 - e2 / tk2);
+    }
+
+    function dewPoint(tempC, rh) {
+        if (!Number.isFinite(tempC) || !Number.isFinite(rh) || rh <= 0 || tempC <= -243.5) return null;
+        const esHpa = 6.112 * Math.exp((17.67 * tempC) / (tempC + 243.5));
+        const gamma = Math.log(esHpa * rh / 100 / 6.112);
+        const denom = 17.67 - gamma;
+        if (!Number.isFinite(gamma) || denom === 0) return null;
+        return (243.5 * gamma) / denom;
+    }
+
+    function mixingRatio(tempC, rh, pressure) {
+        const vapor = psychrometric("avp", tempC, rh);
+        if (!Number.isFinite(vapor) || !Number.isFinite(pressure) || pressure < 200 || pressure > 2000000) return null;
+        if (pressure >= 2000 && pressure < 20000) return null;
+        const total = pressure < 2000 ? pressure * 100 : pressure;
+        if (total <= vapor) return null;
+        return 1000 * 0.62198 * vapor / (total - vapor);
+    }
+
     function evalNode(node, roomId, stack) {
         if (!node) return null;
         if (node.t === "n") return Number(node.v);
@@ -137,6 +165,18 @@
             if (node.n === "ah" || node.n === "avp") {
                 if (args.length !== 2) return null;
                 return psychrometric(node.n, args[0], args[1]);
+            }
+            if (node.n === "hdp") {
+                if (args.length !== 5) return null;
+                return humidityDeltaPa(args[0], args[1], args[2], args[3], args[4]);
+            }
+            if (node.n === "dew") {
+                if (args.length !== 2) return null;
+                return dewPoint(args[0], args[1]);
+            }
+            if (node.n === "mr") {
+                if (args.length !== 3) return null;
+                return mixingRatio(args[0], args[1], args[2]);
             }
         }
         return null;

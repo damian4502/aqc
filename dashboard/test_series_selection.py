@@ -400,3 +400,68 @@ class FormulaTextTests(SimpleTestCase):
             parse_formula_text("ah(Kuhinja/Temp)", rooms, params)
         with self.assertRaises(FormulaError):
             parse_formula_text("avp(Kuhinja/Temp, Kuhinja/RH, 1)", rooms, params)
+
+    def test_humidity_stack_pressure(self):
+        rooms = ROOMS
+        params = PARAMS + [(7, "Temp"), (8, "RH")]
+        text = "hdp(Kuhinja/Temp, Kuhinja/RH, Kopalnica/Temp, Kopalnica/RH, 3)"
+        node = parse_formula_text(text, rooms, params)
+        self.assertEqual(node[0], "fn")
+        self.assertEqual(node[1], "hdp")
+        self.assertEqual(formula_unit_of(node, lambda *_args: ""), "Pa")
+        encoded = encode_diff_entry(node)
+        self.assertEqual(parse_difference_specs([encoded], {1, 2}, {7, 8})[0], node)
+
+        index = pd.date_range("2026-01-01", periods=2, freq="h")
+        kitchen_t = pd.Series([20.0, 20.0], index=index)
+        kitchen_rh = pd.Series([60.0, None], index=index)
+        bath_t = pd.Series([20.0, 20.0], index=index)
+        bath_rh = pd.Series([40.0, 40.0], index=index)
+
+        def lookup(room, param):
+            return {(1, 7): kitchen_t, (1, 8): kitchen_rh, (2, 7): bath_t, (2, 8): bath_rh}[(room, param)]
+
+        values = evaluate_formula(node, lookup)
+        self.assertAlmostEqual(float(values.iloc[0]), 0.0617, places=3)
+        self.assertTrue(pd.isna(values.iloc[1]))
+        with self.assertRaises(FormulaError):
+            parse_formula_text("hdp(Kuhinja/Temp, Kuhinja/RH)", rooms, params)
+
+    def test_dew_point_and_mixing_ratio(self):
+        rooms = ROOMS
+        params = PARAMS + [(7, "Temp"), (8, "RH"), (9, "Tlak")]
+        dew = parse_formula_text("dew(Kuhinja/Temp, Kuhinja/RH)", rooms, params)
+        ratio = parse_formula_text("mr(Kuhinja/Temp, Kuhinja/RH, Kuhinja/Tlak)", rooms, params)
+        self.assertEqual(formula_unit_of(dew, lambda *_args: ""), "°C")
+        self.assertEqual(formula_unit_of(ratio, lambda *_args: ""), "g/kg")
+        self.assertEqual(
+            parse_difference_specs([encode_diff_entry(ratio)], {1}, {7, 8, 9})[0],
+            ratio,
+        )
+
+        index = pd.date_range("2026-01-01", periods=2, freq="h")
+        temp = pd.Series([20.0, 20.0], index=index)
+        rh = pd.Series([50.0, None], index=index)
+        pressure = pd.Series([101325.0, 101325.0], index=index)
+
+        def lookup(room, param):
+            return {7: temp, 8: rh, 9: pressure}[param]
+
+        dew_values = evaluate_formula(dew, lookup)
+        ratio_values = evaluate_formula(ratio, lookup)
+        self.assertAlmostEqual(float(dew_values.iloc[0]), 9.27, places=2)
+        self.assertAlmostEqual(float(ratio_values.iloc[0]), 7.256, places=2)
+        self.assertTrue(pd.isna(dew_values.iloc[1]))
+        self.assertTrue(pd.isna(ratio_values.iloc[1]))
+        saturated = evaluate_formula(
+            parse_formula_text("dew(Kuhinja/Temp, 100)", rooms, params),
+            lookup,
+        )
+        self.assertAlmostEqual(float(saturated.iloc[0]), 20.0, places=6)
+        from_hpa = evaluate_formula(
+            parse_formula_text("mr(20, 50, Kuhinja/Tlak)", rooms, params),
+            lambda room, param: pd.Series([1013.25, 1013.25], index=index),
+        )
+        self.assertAlmostEqual(float(from_hpa.iloc[0]), 7.256, places=2)
+        with self.assertRaises(FormulaError):
+            parse_formula_text("mr(Kuhinja/Temp, Kuhinja/RH)", rooms, params)
