@@ -743,7 +743,7 @@ function setupLiveRefresh() {
 		// only do live refresh if page is visible and user is not applying custom x-y zoom
 		// beacuse loading new data will reset layout axis
         if (currentGraphDiv.layout.yaxis.autorange && getPageVisibility()) scheduleLoadGraph({ immediate: true, force: true, clearQuick: false, override: false });
-    }, 1000);
+    }, 5000);
 }
 
 function scheduleLoadGraph(options = {}) {
@@ -960,7 +960,17 @@ document.addEventListener('DOMContentLoaded', () => {
             return false;
         });
     }
+
+	window.setInterval(function() {
+		if (getPageVisibility()) {
+			if (getRangeMode() == 'live') try { client.publish("vila/sentjane/asgard/cmd/all", "live_mode", { qos: 0 }); } catch {}
+		}
+	
+	}, 9000);
+	if (getRangeMode() == 'live') try { client.publish("vila/sentjane/asgard/cmd/all", "live_mode", { qos: 0 }); } catch {}
+
 });
+
 
 </script>
 </div>
