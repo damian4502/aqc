@@ -24,7 +24,7 @@ OP_TOKENS = {
 }
 TOKEN_FOR_OP = {"+": "add", "-": "sub", "*": "mul", "/": "div"}
 OP_SYMBOLS = {"+": "+", "-": "−", "*": "×", "/": "÷"}
-FN_NAMES = ("min", "max", "avg", "range", "avp", "ah")
+FN_NAMES = ("min", "max", "avg", "range", "avp", "ah", "hdp")
 # (minimum arguments, maximum arguments). None means MAX_FORMULA_TERMS.
 FN_ARITY = {
     "min": (2, None),
@@ -33,6 +33,7 @@ FN_ARITY = {
     "range": (1, None),
     "ah": (2, 2),
     "avp": (2, 2),
+    "hdp": (5, 5),
 }
 MAX_FORMULA_TERMS = 24
 _PREC = {"+": 1, "-": 1, "*": 2, "/": 2}
@@ -500,7 +501,7 @@ def formula_unit_of(node, unit_of_series):
     if _is_fn(node):
         if node[1] == "ah":
             return "g/m³"
-        if node[1] == "avp":
+        if node[1] in ("avp", "hdp"):
             return "Pa"
         units = [formula_unit_of(arg, unit_of_series) for arg in node[2]]
         if all(unit is None for unit in units):
@@ -912,6 +913,8 @@ def _fn_arity(name):
 def _fn_count_message(name, low, high):
     if name in ("ah", "avp"):
         return f"{name} takes temperature in °C and relative humidity in %."
+    if name == "hdp":
+        return "hdp takes both rooms as temperature in °C and humidity in %, then height in meters."
     if low == high:
         return f"{name} takes exactly {low} values."
     if low == 1:
@@ -926,6 +929,31 @@ _ES_HPA = 6.112
 _BOLTON_A = 17.67
 _BOLTON_B = 243.5
 _AH_FACTOR = 2.1674
+_RD = 287.058  # J/(kg·K), dry air
+_RV = 461.495  # J/(kg·K), water vapor
+_G = 9.80665
+# Moisture lowers density by this much per Pa of vapor pressure, times 1/T.
+_HUMID_DENSITY = (1.0 / _RD) - (1.0 / _RV)
+
+
+def _humidity_delta_pa(temp1, rh1, temp2, rh2, height_m):
+    """Stack-pressure difference caused by humidity, in Pa.
+
+    ``hdp(t1, rh1, t2, rh2, height)``. Temperatures are °C, humidities are
+    percent, height is meters above the level where the pressures are equal.
+    Positive means room 1 is at higher pressure at that height.
+    """
+    import numpy as np
+
+    e1 = _psychrometric("avp", temp1, rh1)
+    e2 = _psychrometric("avp", temp2, rh2)
+    tk1 = np.asarray(temp1, dtype="float64") + 273.15
+    tk2 = np.asarray(temp2, dtype="float64") + 273.15
+    height = np.asarray(height_m, dtype="float64")
+    with np.errstate(invalid="ignore", divide="ignore", over="ignore"):
+        out = _G * height * _HUMID_DENSITY * (e1 / tk1 - e2 / tk2)
+    bad = ~np.isfinite(out) | (tk1 <= 0) | (tk2 <= 0)
+    return np.where(bad, np.nan, out)
 
 
 def _psychrometric(name, temp_c, rh_percent):
@@ -951,10 +979,11 @@ def _psychrometric(name, temp_c, rh_percent):
 
 
 def _apply_fn(name, values):
-    """Pointwise ``min``, ``max``, ``avg``, ``range``, ``ah``, or ``avp``.
+    """Pointwise ``min``, ``max``, ``avg``, ``range``, ``ah``, ``avp``, or ``hdp``.
 
     A missing value stays missing. ``range`` is the highest minus the lowest.
     ``ah`` and ``avp`` take temperature in °C, then relative humidity in percent.
+    ``hdp`` takes both rooms and a height in meters.
     """
     import pandas as pd
 
@@ -969,6 +998,13 @@ def _apply_fn(name, values):
             if not math.isfinite(number):
                 return float("nan")
             numbers.append(number)
+        if name == "hdp":
+            if len(numbers) != 5:
+                return float("nan")
+            import numpy as np
+
+            value = float(np.asarray(_humidity_delta_pa(*numbers)).reshape(-1)[0])
+            return value if math.isfinite(value) else float("nan")
         if name in ("ah", "avp"):
             if len(numbers) != 2:
                 return float("nan")
@@ -1000,12 +1036,14 @@ def _apply_fn(name, values):
                 number = float("nan")
             columns.append(pd.Series(number, index=index, dtype="float64"))
     frame = pd.concat(columns, axis=1)
-    if name in ("ah", "avp"):
+    if name in ("ah", "avp", "hdp"):
         import numpy as np
 
-        if frame.shape[1] != 2:
+        needed = 5 if name == "hdp" else 2
+        if frame.shape[1] != needed:
             return pd.Series(np.nan, index=index, dtype="float64")
-        computed = _psychrometric(name, frame.iloc[:, 0].to_numpy(), frame.iloc[:, 1].to_numpy())
+        cols = [frame.iloc[:, i].to_numpy() for i in range(needed)]
+        computed = _humidity_delta_pa(*cols) if name == "hdp" else _psychrometric(name, cols[0], cols[1])
         return pd.Series(np.asarray(computed, dtype="float64"), index=index)
     if name == "min":
         result = frame.min(axis=1, skipna=False)

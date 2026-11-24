@@ -108,6 +108,16 @@
         return esHpa * rh;
     }
 
+    function humidityDeltaPa(temp1, rh1, temp2, rh2, height) {
+        const e1 = psychrometric("avp", temp1, rh1);
+        const e2 = psychrometric("avp", temp2, rh2);
+        const tk1 = temp1 + 273.15;
+        const tk2 = temp2 + 273.15;
+        if (!Number.isFinite(e1) || !Number.isFinite(e2) || !Number.isFinite(height) || tk1 <= 0 || tk2 <= 0) return null;
+        const density = (1 / 287.058) - (1 / 461.495);
+        return 9.80665 * height * density * (e1 / tk1 - e2 / tk2);
+    }
+
     function evalNode(node, roomId, stack) {
         if (!node) return null;
         if (node.t === "n") return Number(node.v);
@@ -137,6 +147,10 @@
             if (node.n === "ah" || node.n === "avp") {
                 if (args.length !== 2) return null;
                 return psychrometric(node.n, args[0], args[1]);
+            }
+            if (node.n === "hdp") {
+                if (args.length !== 5) return null;
+                return humidityDeltaPa(args[0], args[1], args[2], args[3], args[4]);
             }
         }
         return null;

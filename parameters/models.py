@@ -34,6 +34,8 @@ class Parameter(models.Model):
             "min(), max(), avg(), and range(). range() is the highest minus the lowest. "
             "ah(temperature, humidity) is absolute humidity in g/m³. "
             "avp(temperature, humidity) is actual vapor pressure in Pa. "
+            "hdp(temp1, rh1, temp2, rh2, height) is the pressure difference in Pa "
+            "caused by humidity over that height in meters. "
             "Temperature is °C and humidity is relative humidity in percent. "
             "Use x/Parameter for the current room, for example "
             "(x/PM10 / Outdoor/PM10) * 100 — that is one line per room. A formula that "
