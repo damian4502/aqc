@@ -334,7 +334,6 @@
     }
 
     function removeAllRooms() {
-        if (!window.confirm("Remove every series from the table and the chart?")) return;
         state.entries = [];
         clearChart();
         commit();
@@ -664,7 +663,7 @@
 
     function openPane(pane) {
         const url = window.location.pathname + "?pane=" + pane;
-        window.open(url, "aqc-monitor-" + pane, "popup=yes,width=1200,height=800,resizable=yes");
+        window.open(url, "aqc-monitor-" + pane, "popup=yes,width=480,height=640,resizable=yes");
     }
 
     function onMessage(topic, message) {
@@ -745,7 +744,7 @@
         applyStored(localStorage.getItem(KEY) || "");
         if (typeof client !== "undefined" && client) client.on("message", onMessage);
         window.setInterval(tick, 41);
-        window.setInterval(publishLive, 9000);
+        window.setInterval(publishLive, 5000);
         publishLive();
 		document.addEventListener('visibilitychange', publishLive);
     });
