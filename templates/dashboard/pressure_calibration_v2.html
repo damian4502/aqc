@@ -267,8 +267,23 @@ client.on('message', function (topic, message) {
             if (!identifier) identifier = "sensor_" + calibrateSensorId;
 
             const cmdTopic = `vila/sentjane/asgard/cmd/${identifier}`;
+			console.log(cmdTopic);
 
-        client.publish(cmdTopic, "pressure", { qos: 0 });
+        client.publish(cmdTopic, "live_mode", { qos: 0 });
+
+
+            identifier = null;
+            const refTopic = sensor_to_mqtt_topic[referenceSensorId];
+            if (refTopic) {
+                const parts = refTopic.split('/');
+                if (parts.length >= 3) identifier = parts[2];
+            }
+            if (!identifier) identifier = "sensor_" + referenceSensorId;
+
+            const cmdTopic2 = `vila/sentjane/asgard/cmd/${identifier}`;
+
+        client.publish(cmdTopic2, "live_mode", { qos: 0 });
+			console.log(cmdTopic2);
     }
 
 // ======================== HEIGHT ========================
@@ -661,7 +676,7 @@ function initChart() {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
-    initChart();
+    //initChart();
 
     // Load saved height
     const savedHeight = localStorage.getItem('calib_refHeightCm');
@@ -682,9 +697,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Start MQTT pressure requests
     //client.publish("vila/sentjane/asgard/cmd/all", "pressure", { qos: 0 });
-    setInterval(publishLiveDataMode, 8000);
+    setInterval(publishLiveDataMode, 5000);
 });
 
-window.forcePublishPressure = () => client.publish("vila/sentjane/asgard/cmd/all", "pressure", { qos: 0 });
+//window.forcePublishPressure = () => client.publish("vila/sentjane/asgard/cmd/all", "pressure", { qos: 0 });
 </script>
 {% endblock %}

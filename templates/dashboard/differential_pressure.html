@@ -47,8 +47,7 @@
     <div class="flex justify-between items-center mb-4">
         <h2 class="text-lg font-semibold">Graf diferencialnega tlaka</h2>
         <div class="flex gap-2">
-            <button onclick="zeroOffset()" class="px-4 py-2 bg-slate-700 hover:bg-slate-600 rounded-2xl text-sm">Zero Offset</button>
-            <button onclick="resetOffset()" class="px-4 py-2 bg-slate-700 hover:bg-slate-600 rounded-2xl text-sm">Reset Offset</button>
+            <button onclick="resetDeltas()" class="px-4 py-2 bg-slate-700 hover:bg-slate-600 rounded-2xl text-sm">Reset measurements</button>
             <button onclick="exportCSV()" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 rounded-2xl text-sm flex items-center gap-2">
                 <i class="fas fa-download"></i> CSV
             </button>
@@ -56,11 +55,14 @@
         </div>
     </div>
     
+{% comment %}
     <!-- Pomembno: fiksna višina + omejitev Y-osi -->
     <div style="height: 460px;">
         <canvas id="deltaChart"></canvas>
     </div>
+{% endcomment %}
 </div>
+
     </div>
 </div>
 
@@ -122,9 +124,13 @@
 	
 	
 	function publishLiveDataMode() {
-		document.getElementById('delta-table').querySelectorAll('tr').forEach(e => {
-			client.publish("vila/sentjane/asgard/cmd/" + e.dataset.sensorIdentifier, "pressure", { qos: 0 });
-		});
+		if (client.connected) {
+			document.getElementById('delta-table').querySelectorAll('tr').forEach(e => {
+				client.publish("vila/sentjane/asgard/cmd/" + e.dataset.sensorIdentifier, "live_mode", { qos: 0 });
+			});
+		} else {
+			client.connect();
+		}
 	}
 
     let chart;
@@ -162,6 +168,13 @@
         document.getElementById('delta-table').innerHTML = '';
         alert('Vsi prostori so ponovno prikazani.');
     }
+	
+	function resetDeltas() {
+		sensorValues = {};
+		sensorValuesIndex = {};
+		
+		updateDeltaTable
+	}
 
 
     function updateLiveData(data) {
@@ -175,6 +188,16 @@
         if (referenceSensorId && referenceSensorId.toString() === data.sensor_id.toString()) {
             referenceValue = latestValues[data.sensor_id];
         }
+		
+		const sensorId = data.sensor_id.toString();
+
+		if (!sensorValues[sensorId]) {
+			sensorValues[sensorId] = parseFloat(data.value) -base_offset;
+			sensorValuesIndex[sensorId] = 1;
+		} else {
+			sensorValues[sensorId] += parseFloat(data.value) -base_offset;
+			sensorValuesIndex[sensorId] += 1;
+		}
 
         updateDeltaTable(data);
 
@@ -212,13 +235,6 @@
 
 		if (base_offset == 0) base_offset = parseFloat(data.value);
 
-		if (!sensorValues[sensorId]) {
-			sensorValues[sensorId] = parseFloat(data.value) -base_offset;
-			sensorValuesIndex[sensorId] = 1;
-		} else {
-			sensorValues[sensorId] += parseFloat(data.value) -base_offset;
-			sensorValuesIndex[sensorId] += 1;
-		}
 
         if (referenceSensorId) {
             const refVal = latestValues[referenceSensorId] || referenceValue;
@@ -264,7 +280,7 @@
 				<td class="text-right py-4 px-4 font-mono text-slate-300 current" id="${sensorId}_current">${currentPressure} Pa</td>
 				<td class="text-right py-4 px-4 font-bold delta">${delta} Pa</td>
 				<td class="text-right py-4 px-4 font-medium avg" id="${sensorId}_avg">${avgDeltaDisplay} Pa</td>
-				<td class="text-right py-4 px-4 text-xs text-slate-400 data_time">${data.time || ''}</td>
+				<td class="text-right py-4 px-4 text-xs text-slate-400 data_time">0</td>
 				<td class="py-4 px-2 text-center">
 					<button onclick="removeSensor('${sensorId}')" class="text-slate-400 hover:text-red-400 text-3xl leading-none" title="Odstrani iz spremljanja">×</button>
 				</td>
@@ -274,17 +290,21 @@
 		row.querySelector('.current').innerHTML = currentPressure;
 		row.querySelector('.avg').innerHTML = avgDeltaDisplay;
 		row.querySelector('.delta').innerHTML = delta;
-		row.querySelector('.data_time').innerHTML = data.time;
+		row.querySelector('.data_time').innerHTML = sensorValuesIndex[sensorId];
 		if (avgDeltaDisplay < 0) {
 			row.querySelector('.avg').classList.add( 'text-red-400');
+			row.querySelector('.avg').classList.remove( 'text-emerald-400');
 		} else {
 			row.querySelector('.avg').classList.add( 'text-emerald-400');
+			row.querySelector('.avg').classList.remove( 'text-red-400');
 		}
 
 		if (delta < 0) {
 			row.querySelector('.delta').classList.add( 'text-red-400');
+			row.querySelector('.delta').classList.remove( 'text-emerald-400');
 		} else {
 			row.querySelector('.delta').classList.add( 'text-emerald-400');
+			row.querySelector('.delta').classList.remove( 'text-red-400');
 		}
 
     }
@@ -355,9 +375,10 @@
     }
 
     document.addEventListener('DOMContentLoaded', () => {
+		document.removeEventListener('visibilitychange', disconnectBackground);
         loadHiddenSensors();
-        initChart();
-		client.publish("vila/sentjane/asgard/cmd/all", "pressure", { qos: 0 });
+        //initChart();
+		client.publish("vila/sentjane/asgard/cmd/all", "live_mode", { qos: 0 });
 		setInterval(publishLiveDataMode, 10000);
     });
 </script>
