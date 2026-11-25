@@ -415,15 +415,33 @@
             <table class="w-full text-sm">
                 <thead>
                     <tr class="text-left text-slate-400 border-b border-slate-700">
-                        <th class="py-2 pr-4 font-medium">Series</th>
-                        <th class="py-2 pr-4 font-medium">Unit</th>
-                        <th class="py-2 pr-4 font-medium text-right">n</th>
-                        <th class="py-2 pr-4 font-medium text-right" title="Mean of recorded measurements. Filled gaps are not included.">Average</th>
-                        <th class="py-2 pr-4 font-medium text-right">Min</th>
-                        <th class="py-2 pr-4 font-medium text-right">Max</th>
-                        <th class="py-2 pr-4 font-medium text-right" title="Mean of the plotted series, including filled gaps">Mean</th>
-                        <th class="py-2 pr-4 font-medium text-right" title="Sample standard deviation">Std</th>
-                        <th class="py-2 font-medium text-right">Last</th>
+                        <th class="py-2 pr-4 font-medium" aria-sort="none">
+                            <button type="button" class="stats-sort flex items-center gap-1 hover:text-slate-200" data-sort="label" data-type="text" title="Sort by series">Series <span class="stats-sort-mark w-3 text-[10px]"></span></button>
+                        </th>
+                        <th class="py-2 pr-4 font-medium" aria-sort="none">
+                            <button type="button" class="stats-sort flex items-center gap-1 hover:text-slate-200" data-sort="unit" data-type="text" title="Sort by unit">Unit <span class="stats-sort-mark w-3 text-[10px]"></span></button>
+                        </th>
+                        <th class="py-2 pr-4 font-medium" aria-sort="none">
+                            <button type="button" class="stats-sort flex w-full items-center justify-end gap-1 hover:text-slate-200" data-sort="n" data-type="number" title="Sort by count">n <span class="stats-sort-mark w-3 text-[10px]"></span></button>
+                        </th>
+                        <th class="py-2 pr-4 font-medium" aria-sort="none">
+                            <button type="button" class="stats-sort flex w-full items-center justify-end gap-1 hover:text-slate-200" data-sort="average" data-type="number" title="Sort by average of recorded measurements. Filled gaps are not included.">Average <span class="stats-sort-mark w-3 text-[10px]"></span></button>
+                        </th>
+                        <th class="py-2 pr-4 font-medium" aria-sort="none">
+                            <button type="button" class="stats-sort flex w-full items-center justify-end gap-1 hover:text-slate-200" data-sort="min" data-type="number" title="Sort by minimum">Min <span class="stats-sort-mark w-3 text-[10px]"></span></button>
+                        </th>
+                        <th class="py-2 pr-4 font-medium" aria-sort="none">
+                            <button type="button" class="stats-sort flex w-full items-center justify-end gap-1 hover:text-slate-200" data-sort="max" data-type="number" title="Sort by maximum">Max <span class="stats-sort-mark w-3 text-[10px]"></span></button>
+                        </th>
+                        <th class="py-2 pr-4 font-medium" aria-sort="none">
+                            <button type="button" class="stats-sort flex w-full items-center justify-end gap-1 hover:text-slate-200" data-sort="mean" data-type="number" title="Sort by mean of the plotted series, including filled gaps">Mean <span class="stats-sort-mark w-3 text-[10px]"></span></button>
+                        </th>
+                        <th class="py-2 pr-4 font-medium" aria-sort="none">
+                            <button type="button" class="stats-sort flex w-full items-center justify-end gap-1 hover:text-slate-200" data-sort="std" data-type="number" title="Sort by sample standard deviation">Std <span class="stats-sort-mark w-3 text-[10px]"></span></button>
+                        </th>
+                        <th class="py-2 font-medium" aria-sort="none">
+                            <button type="button" class="stats-sort flex w-full items-center justify-end gap-1 hover:text-slate-200" data-sort="last" data-type="number" title="Sort by last value">Last <span class="stats-sort-mark w-3 text-[10px]"></span></button>
+                        </th>
                     </tr>
                 </thead>
                 <tbody id="compare-stats-body"></tbody>
@@ -1240,8 +1258,10 @@ function paintStats(rows, hasChart) {
     const body = document.getElementById('compare-stats-body');
     if (!wrap || !body) return;
     body.replaceChildren();
-    if (!hasChart || !rows || !rows.length) {
+    statsRows = Array.isArray(rows) ? rows.slice() : [];
+    if (!hasChart || !statsRows.length) {
         wrap.classList.add('hidden');
+        paintSortMarks();
         return;
     }
     const classes = [
@@ -1255,7 +1275,7 @@ function paintStats(rows, hasChart) {
         'py-2.5 pr-4 text-right text-slate-300 tabular-nums',
         'py-2.5 text-right text-slate-300 tabular-nums',
     ];
-    rows.forEach((row) => {
+    sortedStats(statsRows).forEach((row) => {
         const tr = document.createElement('tr');
         tr.className = 'border-b border-slate-800/80';
         [
@@ -1276,7 +1296,42 @@ function paintStats(rows, hasChart) {
         });
         body.appendChild(tr);
     });
+    paintSortMarks();
     wrap.classList.remove('hidden');
+}
+
+let statsRows = [];
+let statsSort = { key: '', dir: 1 };
+
+function sortedStats(rows) {
+    if (!statsSort.key) return rows.slice();
+    const numeric = document.querySelector('.stats-sort[data-sort="' + statsSort.key + '"]')?.dataset.type === 'number';
+    const dir = statsSort.dir;
+    return rows.map((row, index) => ({ row, index })).sort((a, b) => {
+        const av = a.row[statsSort.key];
+        const bv = b.row[statsSort.key];
+        const aMissing = av === null || av === undefined || av === '';
+        const bMissing = bv === null || bv === undefined || bv === '';
+        if (aMissing || bMissing) {
+            if (aMissing && bMissing) return a.index - b.index;
+            return aMissing ? 1 : -1;
+        }
+        let cmp = numeric
+            ? Number(av) - Number(bv)
+            : String(av).localeCompare(String(bv), undefined, { numeric: true, sensitivity: 'base' });
+        if (!Number.isFinite(cmp)) cmp = 0;
+        return cmp === 0 ? a.index - b.index : cmp * dir;
+    }).map((item) => item.row);
+}
+
+function paintSortMarks() {
+    document.querySelectorAll('.stats-sort').forEach((btn) => {
+        const on = btn.dataset.sort === statsSort.key;
+        const mark = btn.querySelector('.stats-sort-mark');
+        if (mark) mark.textContent = on ? (statsSort.dir < 0 ? '▼' : '▲') : '';
+        const th = btn.closest('th');
+        if (th) th.setAttribute('aria-sort', on ? (statsSort.dir < 0 ? 'descending' : 'ascending') : 'none');
+    });
 }
 
 async function paintCompareResult(fig) {
@@ -1458,6 +1513,15 @@ document.addEventListener('DOMContentLoaded', () => {
     if (refreshBtn) refreshBtn.addEventListener('click', () => scheduleCompareLoad({ immediate: true }));
     const exportBtn = document.getElementById('export-csv-btn');
     if (exportBtn) exportBtn.addEventListener('click', exportCompareCsv);
+    document.querySelectorAll('.stats-sort').forEach((btn) => {
+        btn.addEventListener('click', () => {
+            const key = btn.dataset.sort;
+            if (statsSort.key === key) statsSort.dir = -statsSort.dir;
+            else statsSort = { key, dir: btn.dataset.type === 'number' ? -1 : 1 };
+            if (statsRows.length) paintStats(statsRows, true);
+            else paintSortMarks();
+        });
+    });
     const form = document.getElementById('compare-form');
     if (form) {
         form.addEventListener('submit', (e) => {
