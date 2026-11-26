@@ -200,6 +200,12 @@
 				       {% if show_events %}checked{% endif %}>
 				Events
 			</label>
+			<label class="inline-flex items-center gap-2 h-[46px] px-4 rounded-2xl bg-slate-900 border border-slate-700 text-sm text-slate-200 cursor-pointer self-end"
+			       title="Show every event in this time range, including events with no room or parameter. Applies only while Events is on.">
+				<input type="checkbox" id="show-all-events" class="accent-emerald-500 w-4 h-4"
+				       {% if show_all_events %}checked{% endif %}>
+				All
+			</label>
 
         </div>
     </form>
@@ -467,6 +473,7 @@ async function loadGraph(extraParams = {override: true}) {
     );
     params.set('spike_ceiling', document.getElementById('spike_ceiling')?.value || '');
     params.set('events', document.getElementById('show-events')?.checked ? '1' : '0');
+    params.set('events_all', document.getElementById('show-all-events')?.checked ? '1' : '0');
 
     // Cancel in-flight request so rapid picker steps keep only the latest range
     if (typeof loadGraphAbortController !== 'undefined' && loadGraphAbortController) {
@@ -566,6 +573,7 @@ function getFilterKey() {
         document.getElementById('spike_factor')?.value || '0',
         document.getElementById('spike_ceiling')?.value || '',
         document.getElementById('show-events')?.checked ? '1' : '0',
+        document.getElementById('show-all-events')?.checked ? '1' : '0',
         getRangeMode(),
     ].join('|');
 }
@@ -834,11 +842,15 @@ document.addEventListener('DOMContentLoaded', () => {
     syncRawIntervalUi();
 
     // Selects (including spike aggressiveness)
-    ['interval', 'fill_method', 'spike_factor', 'spike_ceiling', 'show-events'].forEach(id => {
+    ['interval', 'fill_method', 'spike_factor', 'spike_ceiling', 'show-events', 'show-all-events'].forEach(id => {
         const el = document.getElementById(id);
         if (!el) return;
         el.addEventListener('change', () => {
             if (id === 'interval') syncRawIntervalUi();
+            if (id === 'show-all-events' && el.checked) {
+                const events = document.getElementById('show-events');
+                if (events) events.checked = true;
+            }
             lastLoadGraphKey = '';
             scheduleLoadGraph({ immediate: true, force: true });
         });

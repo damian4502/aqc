@@ -323,6 +323,7 @@ def room_detail(request, room_id):
             start_date, end_date, all_data, live=load_chart_range_mode(request) == 'live'
         ),
         'show_events': want_chart_events(request),
+        'show_all_events': want_all_chart_events(request),
     }
 
     interval_minutes = int(request.GET.get('interval', request.session.get('resample_interval', DEFAULT_RESAMPLE_MINUTES)))
@@ -815,6 +816,44 @@ def want_chart_events(request, default=True) -> bool:
     return default
 
 
+def want_all_chart_events(request, default=False) -> bool:
+    """Draw every event in the window, not only those linked to the chart.
+
+    ``events_all`` in the query wins and is stored on the session.
+    """
+    if request.GET.get("events_all") not in (None, ""):
+        enabled = parse_bool_flag(request.GET.get("events_all"), default=default)
+        request.session["show_all_events"] = enabled
+        return enabled
+    if "show_all_events" in request.session:
+        return bool(request.session.get("show_all_events"))
+    return default
+
+
+def chart_event_queryset(request, start, end, *, room=None, parameter=None, room_ids=None):
+    """Events to draw. Empty when the events checkbox is off.
+
+    Without ``events_all``, a room chart keeps events linked to that room and
+    a parameter chart keeps events linked to that parameter. Compare passes
+    the rooms on the chart. ``events_all`` drops both links, including events
+    that have no room and no parameter.
+    """
+    show_all = want_all_chart_events(request)
+    if not want_chart_events(request) or start is None or end is None:
+        return Event.objects.none()
+    qs = Event.objects.filter(timestamp__gte=start, timestamp__lte=end)
+    if not show_all:
+        if room is not None:
+            qs = qs.filter(rooms=room)
+        elif room_ids is not None:
+            if not room_ids:
+                return Event.objects.none()
+            qs = qs.filter(rooms__in=list(room_ids))
+        if parameter is not None:
+            qs = qs.filter(parameters=parameter)
+    return qs.distinct().order_by("timestamp")
+
+
 def parse_spike_factor(value, default=0.0):
     """Parse spike_factor from query/session. Returns IQR multiplier (0 = off).
 
@@ -984,17 +1023,8 @@ def chart_data(request):
             if name.lower() not in show_params and '*' not in show_params:
                 trace.visible = 'legendonly'
 
-        if want_chart_events(request):
-            events = Event.objects.filter(
-                timestamp__gte=start,
-                timestamp__lte=end
-            ).distinct()
-
-            if room:
-                events = events.filter(rooms=room)
-            if parameter:
-                events = events.filter(parameters=parameter)
-
+        events = chart_event_queryset(request, start, end, room=room, parameter=parameter)
+        if events:
             for event in events:
                 event_ts = timezone.localtime(event.timestamp).replace(tzinfo=None)
                 fig.add_vline(
@@ -1639,6 +1669,7 @@ def parameter_detail(request, parameter_id):
             start_date, end_date, all_data, live=load_chart_range_mode(request) == 'live'
         ),
         'show_events': want_chart_events(request),
+        'show_all_events': want_all_chart_events(request),
     }
 
     # === Save / read resampling settings from session ===

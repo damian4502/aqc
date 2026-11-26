@@ -426,10 +426,12 @@ def compare_view(request):
         format_spike_ceiling,
         resample_measurements,
         want_chart_events,
+        want_all_chart_events,
+        chart_event_queryset,
     )
     from measurements.models import Measurement
     from parameters.models import Parameter
-    from rooms.models import Event, Room, RoomGroup
+    from rooms.models import Room, RoomGroup
 
     rooms = list(Room.objects.all().order_by("order", "name"))
     parameters = list(Parameter.objects.all().order_by("order", "name"))
@@ -455,6 +457,7 @@ def compare_view(request):
         "spike_ceiling",
         "normalize",
         "events",
+        "events_all",
     )
 
     def template_settings():
@@ -558,6 +561,7 @@ def compare_view(request):
         normalize = parse_normalize(request.session.get("compare_normalize"))
 
     show_events = want_chart_events(request)
+    show_all_events = want_all_chart_events(request)
     start_date, end_date, all_data = resolve_chart_range(request, default_hours=168)
     if start_date and end_date:
         save_chart_range_to_session(request, start_date, end_date)
@@ -873,28 +877,21 @@ def compare_view(request):
             return response
 
         events_payload = []
-        if show_events and event_room_ids and start_date and end_date:
-            event_qs = (
-                Event.objects.filter(
-                    rooms__in=event_room_ids,
-                    timestamp__gte=start_date,
-                    timestamp__lte=end_date,
-                )
-                .distinct()
-                .order_by("timestamp")
+        event_qs = chart_event_queryset(
+            request, start_date, end_date, room_ids=event_room_ids
+        )
+        for event in event_qs[:MAX_EVENTS]:
+            event_ts = event.timestamp
+            if timezone.is_aware(event_ts):
+                event_ts = timezone.localtime(event_ts).replace(tzinfo=None)
+            events_payload.append(
+                {
+                    "timestamp": event_ts,
+                    "title": event.title,
+                    "color": event.color or "#10b981",
+                }
             )
-            for event in event_qs[:MAX_EVENTS]:
-                event_ts = event.timestamp
-                if timezone.is_aware(event_ts):
-                    event_ts = timezone.localtime(event_ts).replace(tzinfo=None)
-                events_payload.append(
-                    {
-                        "timestamp": event_ts,
-                        "title": event.title,
-                        "color": event.color or "#10b981",
-                    }
-                )
-            event_count = len(events_payload)
+        event_count = len(events_payload)
 
         raw_mode = is_raw_interval(interval_minutes)
         started = time.perf_counter()
@@ -1039,6 +1036,7 @@ def compare_view(request):
         "templates": list_templates(request.session, TEMPLATE_KEY),
         "active_template": active_template_name(request, ACTIVE_TEMPLATE_KEY),
         "show_events": show_events,
+        "show_all_events": show_all_events,
         "chart_range_mode": load_chart_range_mode(request),
         "formula_catalog": {
             "rooms": [{"id": room.id, "name": room.name} for room in rooms],

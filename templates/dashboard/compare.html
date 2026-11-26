@@ -325,12 +325,21 @@
 
                 <div>
                     <label class="block text-xs text-slate-400 mb-1.5">Events</label>
+                    <div class="flex gap-2">
                     <label class="inline-flex items-center gap-2 h-[46px] px-4 rounded-2xl bg-slate-900 border border-slate-700 text-sm text-slate-200 cursor-pointer">
                         <input type="hidden" name="events" value="0">
                         <input type="checkbox" name="events" value="1" class="accent-emerald-500 w-4 h-4"
                                {% if show_events %}checked{% endif %}>
                         Show
                     </label>
+                    <label class="inline-flex items-center gap-2 h-[46px] px-4 rounded-2xl bg-slate-900 border border-slate-700 text-sm text-slate-200 cursor-pointer"
+                           title="Show every event in this time range, including events with no room or parameter. Applies only while Show is on.">
+                        <input type="hidden" name="events_all" value="0">
+                        <input type="checkbox" name="events_all" value="1" class="accent-emerald-500 w-4 h-4"
+                               {% if show_all_events %}checked{% endif %}>
+                        All
+                    </label>
+                    </div>
                 </div>
             </div>
 
@@ -1459,6 +1468,11 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     const eventsBox = document.querySelector('input[name="events"][type="checkbox"]');
     if (eventsBox) eventsBox.addEventListener('change', () => scheduleCompareLoad({ immediate: true }));
+    const allEventsBox = document.querySelector('input[name="events_all"][type="checkbox"]');
+    if (allEventsBox) allEventsBox.addEventListener('change', () => {
+        if (allEventsBox.checked && eventsBox) eventsBox.checked = true;
+        scheduleCompareLoad({ immediate: true });
+    });
     updateCounts();
     document.querySelectorAll('.room-cb, .param-cb').forEach(cb => {
         cb.addEventListener('change', updateCounts);
