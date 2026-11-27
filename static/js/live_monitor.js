@@ -178,6 +178,10 @@
                 if (args.length !== 3) return null;
                 return mixingRatio(args[0], args[1], args[2]);
             }
+            if (node.n === "lt") {
+                if (args.length !== 2) return null;
+                return args[1] > args[0] ? 1 : 0;
+            }
         }
         return null;
     }
@@ -694,25 +698,58 @@
     }
 
     function updateStats() {
-        const minEl = document.getElementById("stat-min");
-        const maxEl = document.getElementById("stat-max");
-        const rangeEl = document.getElementById("stat-range");
-        if (!minEl || !maxEl || !rangeEl) return;
-        const values = [];
+        const host = document.getElementById("stat-groups");
+        if (!host) return;
+        const byUnit = new Map();
         seriesByKey.forEach(function (series) {
-            if (Number.isFinite(series.latest)) values.push(series.latest);
+            if (!Number.isFinite(series.latest)) return;
+            const unit = ((series.unit || "") + "").trim();
+            if (!byUnit.has(unit)) byUnit.set(unit, []);
+            byUnit.get(unit).push(series.latest);
         });
-        if (!values.length) {
-            minEl.textContent = "--";
-            maxEl.textContent = "--";
-            rangeEl.textContent = "--";
+        host.replaceChildren();
+        if (!byUnit.size) {
+            host.appendChild(statGroup("", null, null, false));
             return;
         }
-        const minVal = Math.min.apply(null, values);
-        const maxVal = Math.max.apply(null, values);
-        minEl.textContent = minVal.toFixed(2);
-        maxEl.textContent = maxVal.toFixed(2);
-        rangeEl.textContent = (maxVal - minVal).toFixed(2);
+        const units = Array.from(byUnit.keys()).sort(function (a, b) {
+            if (!a) return 1;
+            if (!b) return -1;
+            return a.localeCompare(b);
+        });
+        const split = units.length > 1;
+        units.forEach(function (unit) {
+            const values = byUnit.get(unit);
+            host.appendChild(statGroup(unit, Math.min.apply(null, values), Math.max.apply(null, values), split));
+        });
+    }
+
+    function statGroup(unit, minVal, maxVal, showUnit) {
+        const row = document.createElement("div");
+        row.className = "flex flex-wrap items-baseline gap-x-6 gap-y-1";
+        if (showUnit) {
+            const name = document.createElement("span");
+            name.className = "text-[11px] uppercase tracking-wide text-slate-500";
+            name.textContent = unit || "no unit";
+            row.appendChild(name);
+        }
+        [
+            ["Lowest", minVal, "text-emerald-400"],
+            ["Highest", maxVal, "text-red-400"],
+            ["Range", Number.isFinite(minVal) && Number.isFinite(maxVal) ? maxVal - minVal : null, "text-amber-400"],
+        ].forEach(function (item) {
+            const pair = document.createElement("span");
+            pair.className = "inline-flex items-baseline gap-2";
+            const label = document.createElement("span");
+            label.className = "text-slate-400";
+            label.textContent = item[0] + ":";
+            const value = document.createElement("span");
+            value.className = "font-mono font-semibold text-base tabular-nums " + item[2];
+            value.textContent = Number.isFinite(item[1]) ? item[1].toFixed(2) : "--";
+            pair.append(label, value);
+            row.appendChild(pair);
+        });
+        return row;
     }
 
     function toggleFullscreen() {

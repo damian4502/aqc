@@ -465,3 +465,20 @@ class FormulaTextTests(SimpleTestCase):
         self.assertAlmostEqual(float(from_hpa.iloc[0]), 7.256, places=2)
         with self.assertRaises(FormulaError):
             parse_formula_text("mr(Kuhinja/Temp, Kuhinja/RH)", rooms, params)
+
+    def test_second_greater_is_one(self):
+        rooms = ROOMS
+        params = PARAMS + [(7, "CO2")]
+        node = parse_formula_text("lt(Kuhinja/CO2, Kopalnica/CO2)", rooms, params)
+        self.assertEqual(formula_unit_of(node, lambda *_args: "ppm"), "")
+        index = pd.date_range("2026-01-01", periods=4, freq="h")
+        kitchen = pd.Series([400.0, 500.0, 500.0, None], index=index)
+        bath = pd.Series([450.0, 450.0, 500.0, 500.0], index=index)
+
+        def lookup(room, param):
+            return {1: kitchen, 2: bath}[room]
+
+        values = evaluate_formula(node, lookup)
+        self.assertEqual([float(v) if pd.notna(v) else None for v in values], [1.0, 0.0, 0.0, None])
+        with self.assertRaises(FormulaError):
+            parse_formula_text("lt(Kuhinja/CO2)", rooms, params)

@@ -95,6 +95,7 @@
                 <option value="hdp(">hdp(</option>
                 <option value="dew(">dew(</option>
                 <option value="mr(">mr(</option>
+                <option value="lt(">lt(</option>
                 <option value="(">(</option>
                 <option value=")">)</option>
             </select>
@@ -102,7 +103,7 @@
                 Save formula
             </button>
         </div>
-        <p class="text-[11px] text-slate-500">Same syntax as Compare. ah(temperature, humidity) is absolute humidity in g/m³. avp(temperature, humidity) is actual vapor pressure in Pa. dew(temperature, humidity) is the dew point in °C. mr(temperature, humidity, pressure) is the mixing ratio in g/kg; pressure may be Pa or hPa. hdp(temp1, rh1, temp2, rh2, height) is the extra pressure in Pa from the humidity difference over that height in meters. Temperature is °C, humidity is percent, height is meters. The unit stays the one set on this parameter. Use x/Parameter for this room, for example dew(x/Temperatura, x/Vlaga).</p>
+        <p class="text-[11px] text-slate-500">Same syntax as Compare. ah(temperature, humidity) is absolute humidity in g/m³. avp(temperature, humidity) is actual vapor pressure in Pa. dew(temperature, humidity) is the dew point in °C. mr(temperature, humidity, pressure) is the mixing ratio in g/kg; pressure may be Pa or hPa. hdp(temp1, rh1, temp2, rh2, height) is the extra pressure in Pa from the humidity difference over that height in meters. lt(a, b) is 1 when b is greater than a, and 0 when a is greater or they are equal. Temperature is °C, humidity is percent, height is meters. The unit stays the one set on this parameter. Use x/Parameter for this room, for example lt(x/CO2, Outdoor/CO2).</p>
         {% if formula_error %}
         <p class="text-sm text-rose-300">{{ formula_error }}</p>
         {% endif %}
@@ -877,7 +878,10 @@ document.querySelectorAll('.quick-date-btn').forEach(btn => {
         }
 
         document.getElementById('start_date').value = formatForDateTimeLocal(startDate);
-        setRangeMode('live', { reload: false, adjustEnd: true });
+        document.getElementById('end_date').value = formatForDateTimeLocal(
+            getRangeMode() === 'live' ? liveEndDate() : now
+        );
+        paintRangeMode();
 
         clearQuickDateHighlight();
         btn.classList.add('!bg-blue-600', 'text-white');

@@ -794,7 +794,10 @@ document.querySelectorAll('.quick-date-btn').forEach(btn => {
         }
 
         document.getElementById('start_date').value = formatForDateTimeLocal(startDate);
-        setRangeMode('live', { reload: false, adjustEnd: true });
+        document.getElementById('end_date').value = formatForDateTimeLocal(
+            getRangeMode() === 'live' ? liveEndDate() : now
+        );
+        paintRangeMode();
 
         clearQuickDateHighlight();
         btn.classList.add('!bg-blue-600', 'text-white');

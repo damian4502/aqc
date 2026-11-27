@@ -24,7 +24,7 @@ OP_TOKENS = {
 }
 TOKEN_FOR_OP = {"+": "add", "-": "sub", "*": "mul", "/": "div"}
 OP_SYMBOLS = {"+": "+", "-": "−", "*": "×", "/": "÷"}
-FN_NAMES = ("min", "max", "avg", "range", "avp", "ah", "hdp", "dew", "mr")
+FN_NAMES = ("min", "max", "avg", "range", "avp", "ah", "hdp", "dew", "mr", "lt")
 # (minimum arguments, maximum arguments). None means MAX_FORMULA_TERMS.
 FN_ARITY = {
     "min": (2, None),
@@ -36,6 +36,7 @@ FN_ARITY = {
     "hdp": (5, 5),
     "dew": (2, 2),
     "mr": (3, 3),
+    "lt": (2, 2),
 }
 MAX_FORMULA_TERMS = 24
 _PREC = {"+": 1, "-": 1, "*": 2, "/": 2}
@@ -509,6 +510,8 @@ def formula_unit_of(node, unit_of_series):
             return "g/kg"
         if node[1] in ("avp", "hdp"):
             return "Pa"
+        if node[1] == "lt":
+            return ""
         units = [formula_unit_of(arg, unit_of_series) for arg in node[2]]
         if all(unit is None for unit in units):
             return None
@@ -925,6 +928,8 @@ def _fn_count_message(name, low, high):
         return "dew takes temperature in °C and relative humidity in %."
     if name == "mr":
         return "mr takes temperature in °C, relative humidity in %, and pressure in Pa or hPa."
+    if name == "lt":
+        return "lt takes two values and is 1 only when the second is greater."
     if low == high:
         return f"{name} takes exactly {low} values."
     if low == 1:
@@ -1037,9 +1042,10 @@ def _psychrometric(name, temp_c, rh_percent):
 
 
 def _apply_fn(name, values):
-    """Pointwise ``min``, ``max``, ``avg``, ``range``, ``ah``, ``avp``, ``dew``, ``mr``, or ``hdp``.
+    """Pointwise ``min``, ``max``, ``avg``, ``range``, ``ah``, ``avp``, ``dew``, ``mr``, ``lt``, or ``hdp``.
 
     A missing value stays missing. ``range`` is the highest minus the lowest.
+    ``lt(a, b)`` is 1 when ``b`` is strictly greater than ``a``, otherwise 0.
     ``ah`` and ``avp`` take temperature in °C, then relative humidity in percent.
     ``dew`` uses the same two arguments and returns °C. ``mr`` also takes
     pressure in Pa or hPa and returns g/kg. ``hdp`` takes both rooms and a height in meters.
@@ -1085,6 +1091,10 @@ def _apply_fn(name, values):
 
             value = float(np.asarray(_psychrometric(name, numbers[0], numbers[1])).reshape(-1)[0])
             return value if math.isfinite(value) else float("nan")
+        if name == "lt":
+            if len(numbers) != 2:
+                return float("nan")
+            return 1.0 if numbers[1] > numbers[0] else 0.0
         if name == "min":
             return min(numbers)
         if name == "max":
@@ -1125,6 +1135,16 @@ def _apply_fn(name, values):
         else:
             computed = _psychrometric(name, cols[0], cols[1])
         return pd.Series(np.asarray(computed, dtype="float64"), index=index)
+    if name == "lt":
+        import numpy as np
+
+        if frame.shape[1] != 2:
+            return pd.Series(np.nan, index=index, dtype="float64")
+        left = frame.iloc[:, 0].to_numpy(dtype="float64")
+        right = frame.iloc[:, 1].to_numpy(dtype="float64")
+        out = np.where(right > left, 1.0, 0.0)
+        bad = ~np.isfinite(left) | ~np.isfinite(right)
+        return pd.Series(np.where(bad, np.nan, out), index=index)
     if name == "min":
         result = frame.min(axis=1, skipna=False)
     elif name == "max":

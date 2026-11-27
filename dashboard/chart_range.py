@@ -117,14 +117,20 @@ def resolve_chart_range(request, default_hours=24):
     end_str = get.get("end")
     quick_days = get.get("quick")
     quick_hours = get.get("quickh")
+    mode = (get.get("range_mode") or "").strip().lower()
+    fixed = mode == "fixed"
 
     start = end = None
 
     if all_data:
-        end = live_horizon_end()
         start = parse_chart_datetime(ALL_DATA_START)
+        if fixed:
+            end = parse_chart_datetime(end_str) or timezone.now()
+            save_chart_range_mode(request, "fixed")
+        else:
+            end = live_horizon_end()
+            save_chart_range_mode(request, "live")
         save_chart_range_to_session(request, start, end)
-        save_chart_range_mode(request, "live")
         return start, end, True
 
     elif start_str and end_str:
@@ -140,16 +146,16 @@ def resolve_chart_range(request, default_hours=24):
                 start = parse_chart_datetime(ALL_DATA_START)
             else:
                 start = timezone.now() - timedelta(days=days)
-            end = live_horizon_end()
-            save_chart_range_mode(request, "live")
+            end = timezone.now() if fixed else live_horizon_end()
+            save_chart_range_mode(request, "fixed" if fixed else "live")
         except (TypeError, ValueError):
             start = end = None
     elif quick_hours not in (None, ""):
         try:
             hours = int(quick_hours)
             start = timezone.now() - timedelta(hours=hours)
-            end = live_horizon_end()
-            save_chart_range_mode(request, "live")
+            end = timezone.now() if fixed else live_horizon_end()
+            save_chart_range_mode(request, "fixed" if fixed else "live")
         except (TypeError, ValueError):
             start = end = None
 

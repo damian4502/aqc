@@ -122,19 +122,8 @@
                     <button type="button" id="exit-full" class="bg-slate-800 hover:bg-slate-700 text-sm px-4 py-2 rounded-2xl items-center">Close</button>
                 </div>
             </div>
-            <div id="chart-stats" class="mb-4 px-1 flex flex-wrap items-center gap-x-8 gap-y-1 text-sm text-slate-300">
-                <div class="flex items-baseline gap-2">
-                    <span class="text-slate-400">Lowest:</span>
-                    <span id="stat-min" class="font-mono text-emerald-400 font-semibold text-base tabular-nums">--</span>
-                </div>
-                <div class="flex items-baseline gap-2">
-                    <span class="text-slate-400">Highest:</span>
-                    <span id="stat-max" class="font-mono text-red-400 font-semibold text-base tabular-nums">--</span>
-                </div>
-                <div class="flex items-baseline gap-2">
-                    <span class="text-slate-400">Range:</span>
-                    <span id="stat-range" class="font-mono text-amber-400 font-semibold text-base tabular-nums">--</span>
-                </div>
+            <div id="chart-stats" class="mb-4 px-1 flex flex-wrap items-center gap-x-8 gap-y-2 text-sm text-slate-300">
+                <div id="stat-groups" class="flex flex-wrap items-center gap-x-8 gap-y-2"></div>
                 <div id="stat-source" class="text-[10px] text-slate-500 ml-auto">from current values</div>
             </div>
             <div id="delta-chart-box" style="height: 460px;">

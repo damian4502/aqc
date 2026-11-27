@@ -39,6 +39,7 @@ class Parameter(models.Model):
             "dew(temperature, humidity) is the dew point in °C. "
             "mr(temperature, humidity, pressure) is the mixing ratio in g/kg. "
             "Pressure may be Pa or hPa. "
+            "lt(a, b) is 1 when b is greater than a, otherwise 0. "
             "Temperature is °C and humidity is relative humidity in percent. "
             "Use x/Parameter for the current room, for example "
             "(x/PM10 / Outdoor/PM10) * 100 — that is one line per room. A formula that "

@@ -198,6 +198,7 @@
                     <option value="hdp(">hdp(</option>
                     <option value="dew(">dew(</option>
                     <option value="mr(">mr(</option>
+                    <option value="lt(">lt(</option>
                     <option value="(">(</option>
                     <option value=")">)</option>
                 </select>
@@ -214,7 +215,7 @@
                 {% endfor %}
             </div>
             <p id="diff-empty" class="text-[11px] text-slate-500 mt-3 {% if selected_diffs %}hidden{% endif %}">No calculations yet. The series do not have to be checked above. Click a calculation to load it into the field. Uncheck to leave it off the next chart.</p>
-            <p class="text-[11px] text-slate-500 mt-1">Write Room/Parameter, numbers, + − * /, and min(), max(), avg(), range(), ah(), avp(), hdp(), dew(), mr(). min, max, and avg take two or more values. range takes one or more and is the highest minus the lowest. ah(temperature, humidity) is absolute humidity in g/m³. avp(temperature, humidity) is actual vapor pressure in Pa. dew(temperature, humidity) is the dew point in °C. mr(temperature, humidity, pressure) is the mixing ratio in g/kg; pressure may be Pa or hPa. hdp(temp1, rh1, temp2, rh2, height) is the extra pressure in Pa from the humidity difference over that height in meters. Temperature is °C and humidity is relative humidity in percent. Values are separated by commas and computed at each time. Parentheses group. * and / happen before + and −, so A − B * C is A − (B * C). The dropdowns insert at the cursor: a room inserts its name and a slash. Up to 24 series. Raw values show the result. With all recorded values, other series are paired to the first within 2 minutes. x/Parameter is for a saved parameter, not this box: it means the current room.</p>
+            <p class="text-[11px] text-slate-500 mt-1">Write Room/Parameter, numbers, + − * /, and min(), max(), avg(), range(), ah(), avp(), hdp(), dew(), mr(), lt(). min, max, and avg take two or more values. range takes one or more and is the highest minus the lowest. ah, avp, dew, and mr take temperature in °C and relative humidity in %. mr also takes pressure in Pa or hPa. hdp takes both rooms and a height in meters. lt(a, b) is 1 when b is greater than a, otherwise 0. Values are separated by commas and computed at each time. Parentheses group. * and / happen before + and −, so A − B * C is A − (B * C). The dropdowns insert at the cursor: a room inserts its name and a slash. Up to 24 series. Raw values show the result. With all recorded values, other series are paired to the first within 2 minutes. x/Parameter is for a saved parameter, not this box: it means the current room.</p>
         </div>
 
         <div class="glass rounded-3xl p-6">
@@ -650,6 +651,10 @@ const FORMULA_MAX_SERIES = 24;
 const FORMULA_CATALOG = JSON.parse(document.getElementById('formula-catalog').textContent);
 const OP_TOKEN = { '+': 'add', '-': 'sub', '*': 'mul', '/': 'div' };
 const TOKEN_OP = { add: '+', sub: '-', mul: '*', div: '/' };
+const FORMULA_FNS = {
+    min: [2, null], max: [2, null], avg: [2, null], range: [1, null],
+    ah: [2, 2], avp: [2, 2], dew: [2, 2], mr: [3, 3], hdp: [5, 5], lt: [2, 2],
+};
 
 function formulaNames(kind) {
     return (FORMULA_CATALOG[kind] || [])
@@ -664,12 +669,18 @@ function nameBoundary(text, index) {
 }
 
 function matchCall(text, index) {
-    const found = /^(range|min|max|avg)/i.exec(text.slice(index));
-    if (!found || !nameBoundary(text, index + found[0].length)) return null;
-    let cursor = index + found[0].length;
-    while (cursor < text.length && /\s/.test(text[cursor])) cursor += 1;
-    if (text[cursor] !== '(') return null;
-    return { name: found[0].toLowerCase(), next: cursor };
+    const names = Object.keys(FORMULA_FNS).sort((a, b) => b.length - a.length);
+    const slice = text.slice(index);
+    for (let n = 0; n < names.length; n += 1) {
+        const name = names[n];
+        if (slice.slice(0, name.length).toLowerCase() !== name) continue;
+        if (!nameBoundary(text, index + name.length)) continue;
+        let cursor = index + name.length;
+        while (cursor < text.length && /\s/.test(text[cursor])) cursor += 1;
+        if (text[cursor] !== '(') continue;
+        return { name: name, next: cursor };
+    }
+    return null;
 }
 
 function parseConstant(raw) {
@@ -787,12 +798,14 @@ function parseFormulaText(raw) {
         }
         if (Array.isArray(current) && current[0] === 'fn' && current.length === 2) {
             const name = current[1];
-            const need = name === 'range' ? 1 : 2;
+            const bounds = FORMULA_FNS[name] || [2, null];
+            const low = bounds[0];
+            const high = bounds[1] == null ? FORMULA_MAX_SERIES : bounds[1];
             take();
             if (peek() !== '(') throw new Error("Expected '(' after " + name + ".");
             take();
             if (peek() == null || peek() === ',' || peek() === ')') {
-                throw new Error(name + (need === 1 ? ' needs at least one value.' : ' needs at least two values.'));
+                throw new Error(name + (low === 1 ? ' needs at least one value.' : ' needs ' + (low === high ? 'exactly ' + low : 'at least ' + low) + ' values.'));
             }
             const args = [parseExpr()];
             while (peek() === ',') {
@@ -804,11 +817,10 @@ function parseFormulaText(raw) {
             }
             if (peek() !== ')') throw new Error('Close the parenthesis.');
             take();
-            if (args.length < need) {
-                throw new Error(name + (need === 1 ? ' needs at least one value.' : ' needs at least two values.'));
-            }
-            if (args.length > FORMULA_MAX_SERIES) {
-                throw new Error(name + ' can use at most ' + FORMULA_MAX_SERIES + ' values.');
+            if (args.length < low || args.length > high) {
+                throw new Error(name + (low === high
+                    ? ' takes exactly ' + low + ' values.'
+                    : (low === 1 ? ' needs at least one value.' : ' needs at least ' + low + ' values.')));
             }
             return ['fn', name, args];
         }
@@ -1002,9 +1014,8 @@ function applyQuickRange(btn) {
     const days = btn.dataset.days;
     const hours = btn.dataset.hours;
     const now = new Date();
+    const live = chartRangeMode === 'live';
     clearPeriodFlags();
-    chartRangeMode = 'live';
-    paintRangeMode();
     if (days === '0') {
         setHidden('all_data', 'true');
         startInput.value = '2020-01-01T00:00';
@@ -1014,7 +1025,8 @@ function applyQuickRange(btn) {
         else start.setTime(now.getTime() - parseInt(days || '7', 10) * 24 * 60 * 60 * 1000);
         startInput.value = toLocalInput(start);
     }
-    endInput.value = toLocalInput(liveEndDate());
+    endInput.value = toLocalInput(live ? liveEndDate() : now);
+    paintRangeMode();
     document.querySelectorAll('.quick-date-btn, #apply-zoom-btn').forEach((b) => {
         b.classList.remove('bg-blue-600', 'text-white');
         if (!b.classList.contains('bg-slate-800')) b.classList.add('bg-slate-800');

@@ -84,6 +84,23 @@ class ChartRangeTests(SimpleTestCase):
         self.assertEqual(format_chart_datetime(start2), format_chart_datetime(start))
         self.assertEqual(format_chart_datetime(end2), format_chart_datetime(end))
 
+    def test_quick_keeps_fixed_mode(self):
+        request = SimpleNamespace(session={}, GET={"quick": "7", "range_mode": "fixed"})
+        start, end, all_data = resolve_chart_range(request)
+        self.assertFalse(all_data)
+        self.assertEqual(request.session["chart_range_mode"], "fixed")
+        self.assertAlmostEqual((end - start).total_seconds(), 7 * 24 * 3600, delta=5)
+
+        everything = SimpleNamespace(
+            session={},
+            GET={"all_data": "true", "range_mode": "fixed", "end": "2026-09-21T13:00"},
+        )
+        start, end, all_data = resolve_chart_range(everything)
+        self.assertTrue(all_data)
+        self.assertEqual(everything.session["chart_range_mode"], "fixed")
+        self.assertEqual(format_chart_datetime(start), "2020-01-01T00:00")
+        self.assertEqual(format_chart_datetime(end), "2026-09-21T13:00")
+
     def test_explicit_range_mode_is_shared(self):
         request = SimpleNamespace(
             session={},
