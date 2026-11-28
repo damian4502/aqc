@@ -2,7 +2,7 @@
 
 import unittest
 
-from dashboard.chart_colors import normalize_color, pick_series_color
+from dashboard.chart_colors import distinct_line_colors, normalize_color, pick_series_color
 from dashboard.series_selection import formula_ast_json, parse_formula_text
 
 
@@ -21,7 +21,13 @@ class ColorTests(unittest.TestCase):
         self.assertEqual(pick_series_color("#112233", "#abcdef", prefer="parameter"), "#abcdef")
         self.assertEqual(pick_series_color("#112233", "", prefer="parameter"), "#112233")
 
-    def test_formula_tree_for_the_live_monitor(self):
+    def test_shared_parameter_color_is_not_repeated(self):
+        colors = distinct_line_colors(["#abcdef", "#abcdef", "#112233", ""])
+        self.assertEqual(colors[0], "#abcdef")
+        self.assertEqual(colors[2], "#112233")
+        self.assertNotEqual(colors[1], colors[0])
+        self.assertEqual(len(set(colors)), 4)
+        self.assertEqual(distinct_line_colors(["", ""]), ["", ""])
         rooms = [(1, "Kitchen"), (9, "x"), (3, "Outdoor")]
         params = [(2, "PM10")]
         node = parse_formula_text("(x/PM10 / Outdoor/PM10) * 100", rooms, params)

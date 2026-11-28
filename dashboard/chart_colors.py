@@ -27,6 +27,62 @@ def normalize_color(value) -> str:
     return text.lower()
 
 
+# Distinct colours that stay readable on the dark dashboard theme.
+PALETTE = (
+    "#38bdf8",
+    "#34d399",
+    "#f59e0b",
+    "#f472b6",
+    "#a78bfa",
+    "#f87171",
+    "#22d3ee",
+    "#84cc16",
+    "#fb7185",
+    "#818cf8",
+    "#2dd4bf",
+    "#fbbf24",
+    "#e879f9",
+    "#60a5fa",
+    "#4ade80",
+)
+
+
+def distinct_line_colors(preferred, fallback=None) -> list:
+    """One color per series, with no duplicates.
+
+    A saved room or parameter color is kept when no earlier series already
+    uses it. A repeat, which happens when several rooms share one parameter
+    color, takes the next free palette color. All-blank input stays blank so
+    a chart can keep its own automatic colors.
+    """
+    palette = [normalize_color(color) for color in (fallback or PALETTE)]
+    palette = [color for color in palette if color] or ["#38bdf8"]
+    wanted = [normalize_color(color) for color in preferred]
+    if not any(wanted):
+        return [""] * len(wanted)
+    used = set()
+    chosen = []
+    cursor = 0
+
+    def next_free():
+        nonlocal cursor
+        for _ in range(len(palette)):
+            candidate = palette[cursor % len(palette)]
+            cursor += 1
+            if candidate not in used:
+                return candidate
+        return palette[len(chosen) % len(palette)]
+
+    for color in wanted:
+        if color and color not in used:
+            pick = color
+        else:
+            pick = next_free()
+        used.add(pick)
+        chosen.append(pick)
+    return chosen
+
+
 def pick_series_color(room_color, parameter_color, *, prefer="room") -> str:
     """Color for one room/parameter trace. Empty means keep the chart default."""
     room = normalize_color(room_color)

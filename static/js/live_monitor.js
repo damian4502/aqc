@@ -318,6 +318,38 @@
         return PALETTE[index % PALETTE.length];
     }
 
+    function claimColor(preferred, used, cursor) {
+        const color = String(preferred || "").trim().toLowerCase();
+        if (color && !used[color]) {
+            used[color] = true;
+            return color;
+        }
+        for (let step = 0; step < PALETTE.length; step += 1) {
+            const candidate = PALETTE[cursor.i % PALETTE.length].toLowerCase();
+            cursor.i += 1;
+            if (!used[candidate]) {
+                used[candidate] = true;
+                return candidate;
+            }
+        }
+        const fallback = PALETTE[cursor.i % PALETTE.length];
+        cursor.i += 1;
+        return fallback;
+    }
+
+    function assignDistinctColors() {
+        const used = {};
+        const cursor = { i: 0 };
+        let index = 0;
+        seriesByKey.forEach(function (series) {
+            const entry = series.entry;
+            const param = paramById.get(entry.paramId);
+            const room = entry.roomId == null ? null : roomById.get(entry.roomId);
+            series.color = claimColor(seriesColor(room, param) || paletteColor(index), used, cursor);
+            index += 1;
+        });
+    }
+
     function paramLabel(param) {
         let text = param.name;
         if (param.global) text += " (calculated)";
@@ -457,10 +489,9 @@
         const keep = new Map(seriesByKey);
         seriesByKey.clear();
         const zscore = zscoreOn();
-        state.entries.forEach(function (entry, index) {
+        state.entries.forEach(function (entry) {
             const key = entryKey(entry);
             const param = paramById.get(entry.paramId);
-            const room = entry.roomId == null ? null : roomById.get(entry.roomId);
             const previous = keep.get(key);
             const series = previous || {
                 key: key,
@@ -475,11 +506,11 @@
             };
             series.entry = entry;
             series.label = labelFor(entry);
-            series.color = seriesColor(room, param) || paletteColor(index);
             series.unit = (param && param.unit) || "";
             series.decimals = param ? param.decimals : 2;
             seriesByKey.set(key, series);
         });
+        assignDistinctColors();
         if (table) {
             table.innerHTML = "";
             seriesByKey.forEach(function (series) { table.appendChild(renderRow(series)); });

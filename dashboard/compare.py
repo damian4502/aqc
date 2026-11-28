@@ -287,6 +287,12 @@ def build_compare_figure(
 
     fig = go.Figure()
     custom_colors = color_by_label or {}
+    from dashboard.chart_colors import distinct_line_colors
+
+    resolved_colors = distinct_line_colors(
+        [custom_colors.get(str(col), "") for col in plotted.columns],
+        fallback=SERIES_COLORS,
+    )
     for index, col in enumerate(plotted.columns):
         label = str(col)
         raw_col = raw_frame[col] if col in getattr(raw_frame, "columns", []) else plotted[col]
@@ -299,7 +305,7 @@ def build_compare_figure(
         else:
             x_values = list(plotted.index)
         unit = units_by_label.get(label, "") or ""
-        color = custom_colors.get(label) or SERIES_COLORS[index % len(SERIES_COLORS)]
+        color = resolved_colors[index] or SERIES_COLORS[index % len(SERIES_COLORS)]
         custom = [[_fmt_hover_raw(value), unit] for value in raw_col]
         fig.add_trace(
             go.Scattergl(

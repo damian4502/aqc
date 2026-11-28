@@ -759,12 +759,17 @@ def build_time_series_figure(frame, title, height=700, raw=False, color_by_name=
 
 
 def _column_colors(columns, room, parameter):
-    """Automatic colors stay when neither the room nor the parameter has one."""
-    from dashboard.chart_colors import pick_series_color
+    """Automatic colors stay when neither the room nor the parameter has one.
+
+    A color is not reused. Several rooms of one parameter would otherwise
+    all inherit that parameter color.
+    """
+    from dashboard.chart_colors import distinct_line_colors, pick_series_color
 
     rooms = {item.name: item for item in Room.objects.all()}
     parameters = {item.name: item for item in Parameter.objects.all()}
-    colors = {}
+    labels = []
+    preferred = []
     if columns is None:
         columns = []
     for col in columns:
@@ -787,9 +792,13 @@ def _column_colors(columns, room, parameter):
             getattr(param_obj, "color", "") if param_obj is not None else "",
             prefer=prefer,
         )
-        if color:
-            colors[text] = color
-    return colors
+        labels.append(text)
+        preferred.append(color)
+    return {
+        label: color
+        for label, color in zip(labels, distinct_line_colors(preferred))
+        if color
+    }
 
 import plotly.graph_objects as go
 
@@ -2470,14 +2479,16 @@ def patterns_view(request):
                 title_base = f"{selected_parameter.name} — {selected_room.name}"
                 if selected_parameter.is_calculated and not selected_parameter.is_room_bound:
                     title_base = f"{selected_parameter.name} (calculated)"
-                from dashboard.chart_colors import pick_series_color
+                from dashboard.chart_colors import distinct_line_colors, pick_series_color
 
                 series_color = pick_series_color(
                     selected_room.color,
                     selected_parameter.color,
                     prefer="parameter",
                 )
-                all_days_color = series_color or "#38bdf8"
+                all_days_color, weekday_color, weekend_color = distinct_line_colors(
+                    [series_color or "#38bdf8", "#34d399", "#f59e0b"]
+                )
                 weekly_color = series_color or "#818cf8"
 
                 hourly_plot = hourly.copy()
@@ -2500,7 +2511,7 @@ def patterns_view(request):
                     y=hourly_plot["weekdays"],
                     name="Mon–Fri",
                     mode="lines+markers",
-                    line=dict(color="#34d399", width=3),
+                    line=dict(color=weekday_color, width=3),
                     hovertemplate="Hour %{x}:00<br>Weekdays: %{y:.2f} "
                     + unit
                     + "<extra></extra>",
@@ -2510,7 +2521,7 @@ def patterns_view(request):
                     y=hourly_plot["weekend"],
                     name="Sat–Sun",
                     mode="lines+markers",
-                    line=dict(color="#f59e0b", width=3),
+                    line=dict(color=weekend_color, width=3),
                     hovertemplate="Hour %{x}:00<br>Weekend: %{y:.2f} "
                     + unit
                     + "<extra></extra>",
@@ -2529,8 +2540,8 @@ def patterns_view(request):
                 )
                 fig_h = apply_dark_theme(fig_h, animate=False)
                 fig_h.update_traces(line_color=all_days_color, selector=dict(name="All days"))
-                fig_h.update_traces(line_color="#34d399", selector=dict(name="Mon–Fri"))
-                fig_h.update_traces(line_color="#f59e0b", selector=dict(name="Sat–Sun"))
+                fig_h.update_traces(line_color=weekday_color, selector=dict(name="Mon–Fri"))
+                fig_h.update_traces(line_color=weekend_color, selector=dict(name="Sat–Sun"))
                 fig_hourly = fig_h.to_html(full_html=False, include_plotlyjs="cdn")
 
                 fig_w = go.Figure()

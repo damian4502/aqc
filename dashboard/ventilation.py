@@ -686,7 +686,7 @@ def build_summary_figure(summary: list[dict], color_by_label=None):
     """Horizontal bars of median ACH. Empty when nothing was accepted."""
     import plotly.graph_objects as go
 
-    from dashboard.chart_colors import normalize_color
+    from dashboard.chart_colors import distinct_line_colors
 
     rows = [row for row in summary if row["n"] and row["median_ach"] is not None]
     if not rows:
@@ -694,10 +694,11 @@ def build_summary_figure(summary: list[dict], color_by_label=None):
     # Plotly draws the first category at the bottom; reverse so the fastest
     # clearance (already sorted first) sits at the top.
     rows = list(reversed(rows))
-    colors = []
-    for index, row in enumerate(rows):
-        custom = normalize_color((color_by_label or {}).get(row["label"]))
-        colors.append(custom or _PALETTE[index % len(_PALETTE)])
+    colors = distinct_line_colors(
+        [(color_by_label or {}).get(row["label"], "") for row in rows],
+        fallback=_PALETTE,
+    )
+    colors = [color or _PALETTE[index % len(_PALETTE)] for index, color in enumerate(colors)]
     fig = go.Figure(
         go.Bar(
             y=[row["label"] for row in rows],
