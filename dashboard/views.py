@@ -242,7 +242,7 @@ def monitor(request):
     from dashboard.series_selection import FormulaError, formula_ast_json, parse_formula_text
     from sensors.models import MqttSubscription
 
-    parameters = list(Parameter.objects.all().order_by("order", "name"))
+    parameters = list(Parameter.objects.all())
     rooms = list(Room.objects.all().order_by("order", "name"))
     catalog_rooms = [(room.id, room.name) for room in rooms]
     catalog_parameters = [(param.id, param.name) for param in parameters]
@@ -1646,6 +1646,13 @@ def dashboard(request):
 def parameter_detail(request, parameter_id):
     from django.utils.dateparse import parse_datetime
     parameter = get_object_or_404(Parameter, id=parameter_id)
+    if request.method == "GET":
+        from django.core.cache import cache
+        from django.db.models import F
+
+        Parameter.objects.filter(pk=parameter.pk).update(view_count=F("view_count") + 1)
+        cache.delete("all_parameters")
+        cache.delete("all_parameters_v2")
     
     view_type = request.GET.get('view', 'trend')
     start_date, end_date, all_data = resolve_chart_range(request)
@@ -1728,7 +1735,7 @@ def parameter_detail(request, parameter_id):
     context["formula_error"] = formula_error
     context["formula_value"] = request.POST.get("formula", parameter.formula) if formula_error else parameter.formula
     context["formula_rooms"] = Room.objects.all().order_by("order", "name")
-    context["formula_parameters"] = Parameter.objects.all().order_by("order", "name")
+    context["formula_parameters"] = Parameter.objects.all()
 
     if parameter.is_calculated:
         context["show_chart"] = True
@@ -1824,7 +1831,7 @@ import numpy as np
 from scipy.stats import linregress
 
 def trends_view(request):
-    parameters = Parameter.objects.all().order_by('name')
+    parameters = Parameter.objects.all()
     trends_data = []
     
     for param in parameters:
@@ -1931,7 +1938,7 @@ def correlations_view(request):
     from django.shortcuts import redirect
 
     rooms = list(Room.objects.all().order_by("order", "name"))
-    parameters = list(Parameter.objects.all().order_by("order", "name"))
+    parameters = list(Parameter.objects.all())
     groups = list(RoomGroup.objects.prefetch_related("rooms").order_by("name"))
     valid_room_ids = {room.id for room in rooms}
     valid_parameter_ids = {param.id for param in parameters}
@@ -2315,7 +2322,7 @@ def patterns_view(request):
     )
 
     rooms = list(Room.objects.all().order_by("order", "name"))
-    parameters = list(Parameter.objects.all().order_by("order", "name"))
+    parameters = list(Parameter.objects.all())
 
     selected_room_id = None
     selected_parameter_id = None
@@ -2833,7 +2840,7 @@ def event_create(request):
     import json
 
     rooms = list(Room.objects.all().order_by('order', 'name'))
-    parameters = list(Parameter.objects.all().order_by('order', 'name'))
+    parameters = list(Parameter.objects.all().order_by('-view_count', 'order', 'name'))
     recent_events = Event.objects.prefetch_related('rooms', 'parameters').order_by('-timestamp')[:15]
 
     # Default timestamp: now in local timezone, formatted for datetime-local input

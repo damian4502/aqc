@@ -56,7 +56,8 @@ class ParameterAdminForm(forms.ModelForm):
 @admin.register(Parameter)
 class ParameterAdmin(admin.ModelAdmin):
     form = ParameterAdminForm
-    list_display = ["name", "unit", "kind", "color", "description"]
+    list_display = ["name", "unit", "view_count", "kind", "color", "description"]
+    readonly_fields = ["view_count"]
     search_fields = ["name", "formula"]
     list_filter = ["name"]
 

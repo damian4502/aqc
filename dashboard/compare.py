@@ -434,7 +434,7 @@ def compare_view(request):
     from rooms.models import Room, RoomGroup
 
     rooms = list(Room.objects.all().order_by("order", "name"))
-    parameters = list(Parameter.objects.all().order_by("order", "name"))
+    parameters = list(Parameter.objects.all())
     groups = list(RoomGroup.objects.prefetch_related("rooms").order_by("name"))
     valid_room_ids = {room.id for room in rooms}
     valid_parameter_ids = {param.id for param in parameters}

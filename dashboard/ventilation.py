@@ -885,7 +885,7 @@ def ventilation_view(request):
     from rooms.models import Room, RoomGroup
 
     rooms = list(Room.objects.all().order_by("order", "name"))
-    parameters = list(Parameter.objects.all().order_by("order", "name"))
+    parameters = list(Parameter.objects.all())
     groups = list(RoomGroup.objects.prefetch_related("rooms").order_by("name"))
     room_by_id = {room.id: room for room in rooms}
     parameter_by_id = {param.id: param for param in parameters}

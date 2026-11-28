@@ -54,6 +54,11 @@ class Parameter(models.Model):
         verbose_name="Chart color",
         help_text="Hex color such as #38bdf8. Leave empty to keep the automatic chart color.",
     )
+    view_count = models.PositiveIntegerField(
+        default=0,
+        verbose_name="Views",
+        help_text="How many times the parameter page was opened. Lists use this, highest first.",
+    )
 
     def __str__(self):
         return f"{self.name} ({self.unit})" if self.unit else self.name
@@ -78,4 +83,4 @@ class Parameter(models.Model):
         return rooms
 
     class Meta:
-        ordering = ['name']
+        ordering = ["-view_count", "order", "name"]
