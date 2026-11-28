@@ -27,23 +27,19 @@ def normalize_color(value) -> str:
     return text.lower()
 
 
-# Distinct colours that stay readable on the dark dashboard theme.
+# One palette for every chart, including the live monitor.
+# Order is farthest-first: each next color is the most different remaining
+# one that is still easy to separate on the dark background. Past that,
+# extra hues start to collide, so the list stops.
 PALETTE = (
-    "#38bdf8",
-    "#34d399",
-    "#f59e0b",
-    "#f472b6",
-    "#a78bfa",
-    "#f87171",
-    "#22d3ee",
-    "#84cc16",
-    "#fb7185",
-    "#818cf8",
-    "#2dd4bf",
-    "#fbbf24",
-    "#e879f9",
-    "#60a5fa",
-    "#4ade80",
+    "#1ec63e",  # green
+    "#f056fc",  # magenta
+    "#f48218",  # orange
+    "#1db1f3",  # cyan
+    "#fa1a46",  # red
+    "#b3a919",  # yellow
+    "#6b78fb",  # blue
+    "#00e6c8",  # teal
 )
 
 

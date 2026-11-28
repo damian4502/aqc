@@ -2,7 +2,7 @@
 
 import unittest
 
-from dashboard.chart_colors import distinct_line_colors, normalize_color, pick_series_color
+from dashboard.chart_colors import PALETTE, distinct_line_colors, normalize_color, pick_series_color
 from dashboard.series_selection import formula_ast_json, parse_formula_text
 
 
@@ -12,6 +12,12 @@ class ColorTests(unittest.TestCase):
         self.assertEqual(normalize_color("nope"), "")
         self.assertEqual(normalize_color("#39c"), "#3399cc")
         self.assertEqual(normalize_color("38BDF8"), "#38bdf8")
+
+    def test_palette_stops_while_colors_still_separate(self):
+        self.assertEqual(
+            list(PALETTE),
+            ["#1ec63e", "#f056fc", "#f48218", "#1db1f3", "#fa1a46", "#b3a919", "#6b78fb", "#00e6c8"],
+        )
 
     def test_room_color_wins_when_comparing_rooms(self):
         self.assertEqual(pick_series_color("#112233", "#abcdef", prefer="room"), "#112233")

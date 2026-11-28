@@ -7,12 +7,14 @@
 (function () {
     const KEY = "aqc-live-monitor-v1";
     const MAX_POINTS = 720;
-    const PALETTE = ["#38bdf8", "#34d399", "#f59e0b", "#f472b6", "#a78bfa", "#f87171", "#22d3ee", "#84cc16", "#fb7185", "#818cf8"];
 
     const catalogEl = document.getElementById("monitor-catalog");
     if (!catalogEl || typeof Chart === "undefined") return;
 
     const catalog = JSON.parse(catalogEl.textContent || "{}");
+    const PALETTE = Array.isArray(catalog.palette) && catalog.palette.length
+        ? catalog.palette
+        : ["#1ec63e", "#f056fc", "#f48218", "#1db1f3", "#fa1a46", "#b3a919", "#6b78fb", "#00e6c8"];
     const paramById = new Map((catalog.parameters || []).map(function (param) { return [param.id, param]; }));
     const roomById = new Map((catalog.rooms || []).map(function (room) { return [room.id, room]; }));
     const identToId = {};

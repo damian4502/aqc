@@ -34,21 +34,6 @@ DEFAULT_MAX_ACH = 30.0
 # from the lowest reading has to allow a small gap under that reading.
 PERIOD_MIN_SLACK = 0.005
 
-_PALETTE = (
-    "#38bdf8",
-    "#34d399",
-    "#fbbf24",
-    "#f472b6",
-    "#a78bfa",
-    "#fb7185",
-    "#22d3ee",
-    "#a3e635",
-    "#fdba74",
-    "#818cf8",
-    "#2dd4bf",
-    "#e879f9",
-)
-
 
 def ach_band(ach: float) -> str:
     """Rough clearance-speed label. Not an air-quality grade."""
@@ -686,7 +671,7 @@ def build_summary_figure(summary: list[dict], color_by_label=None):
     """Horizontal bars of median ACH. Empty when nothing was accepted."""
     import plotly.graph_objects as go
 
-    from dashboard.chart_colors import distinct_line_colors
+    from dashboard.chart_colors import PALETTE, distinct_line_colors
 
     rows = [row for row in summary if row["n"] and row["median_ach"] is not None]
     if not rows:
@@ -696,9 +681,9 @@ def build_summary_figure(summary: list[dict], color_by_label=None):
     rows = list(reversed(rows))
     colors = distinct_line_colors(
         [(color_by_label or {}).get(row["label"], "") for row in rows],
-        fallback=_PALETTE,
+        fallback=PALETTE,
     )
-    colors = [color or _PALETTE[index % len(_PALETTE)] for index, color in enumerate(colors)]
+    colors = [color or PALETTE[index % len(PALETTE)] for index, color in enumerate(colors)]
     fig = go.Figure(
         go.Bar(
             y=[row["label"] for row in rows],
@@ -754,9 +739,9 @@ def build_fit_figure(segments: list[dict], limit: int = 12, color_by_label=None)
     fig = make_subplots(rows=rows, cols=cols, subplot_titles=titles, vertical_spacing=0.12)
     for i, item in enumerate(chosen):
         r, c = divmod(i, cols)
-        from dashboard.chart_colors import normalize_color
+        from dashboard.chart_colors import PALETTE, normalize_color
 
-        color = normalize_color((color_by_label or {}).get(item["label"])) or _PALETTE[i % len(_PALETTE)]
+        color = normalize_color((color_by_label or {}).get(item["label"])) or PALETTE[i % len(PALETTE)]
         fig.add_trace(
             go.Scatter(
                 x=item["t_hours"],

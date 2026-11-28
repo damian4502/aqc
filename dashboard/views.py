@@ -238,7 +238,7 @@ def custom_dashboard(request, dashboard_id):
     
 #@cache_page(60)
 def monitor(request):
-    from dashboard.chart_colors import normalize_color
+    from dashboard.chart_colors import PALETTE, normalize_color
     from dashboard.series_selection import FormulaError, formula_ast_json, parse_formula_text
     from sensors.models import MqttSubscription
 
@@ -293,6 +293,7 @@ def monitor(request):
             "rooms": payload_rooms,
             "parameters": payload_parameters,
             "topics": payload_topics,
+            "palette": list(PALETTE),
         },
         "pane": pane,
     }
@@ -2479,7 +2480,7 @@ def patterns_view(request):
                 title_base = f"{selected_parameter.name} — {selected_room.name}"
                 if selected_parameter.is_calculated and not selected_parameter.is_room_bound:
                     title_base = f"{selected_parameter.name} (calculated)"
-                from dashboard.chart_colors import distinct_line_colors, pick_series_color
+                from dashboard.chart_colors import PALETTE, distinct_line_colors, pick_series_color
 
                 series_color = pick_series_color(
                     selected_room.color,
@@ -2487,9 +2488,9 @@ def patterns_view(request):
                     prefer="parameter",
                 )
                 all_days_color, weekday_color, weekend_color = distinct_line_colors(
-                    [series_color or "#38bdf8", "#34d399", "#f59e0b"]
+                    [series_color or PALETTE[0], PALETTE[2], PALETTE[4]]
                 )
-                weekly_color = series_color or "#818cf8"
+                weekly_color = series_color or PALETTE[3]
 
                 hourly_plot = hourly.copy()
                 hourly_plot["weekdays"] = hourly_wd["mean"]

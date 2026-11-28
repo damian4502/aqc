@@ -17,6 +17,7 @@ from django.http import HttpResponse
 from django.shortcuts import redirect, render
 from django.utils import timezone
 
+from dashboard.chart_colors import PALETTE as SERIES_COLORS
 from dashboard.correlations import make_series_label
 
 
@@ -24,35 +25,6 @@ MAX_SERIES = 24
 MAX_EVENTS = 30
 VALID_NORMALIZE = ("off", "minmax", "zscore")
 DEFAULT_NORMALIZE = "minmax"
-
-# Distinct colours that stay readable on the dark dashboard theme.
-SERIES_COLORS = [
-    "#38bdf8",
-    "#34d399",
-    "#f59e0b",
-    "#f472b6",
-    "#a78bfa",
-    "#f87171",
-    "#22d3ee",
-    "#84cc16",
-    "#fb7185",
-    "#818cf8",
-    "#2dd4bf",
-    "#fbbf24",
-    "#e879f9",
-    "#60a5fa",
-    "#4ade80",
-    "#fb923c",
-    "#c084fc",
-    "#67e8f9",
-    "#facc15",
-    "#f43f5e",
-    "#93c5fd",
-    "#86efac",
-    "#fdba74",
-    "#d8b4fe",
-]
-
 
 def parse_normalize(value, default=DEFAULT_NORMALIZE) -> str:
     """Return a valid normalize mode."""
