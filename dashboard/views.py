@@ -37,7 +37,7 @@ from django.http import JsonResponse
 
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404
-from rooms.models import Room, Event
+from rooms.models import Room, Event, RoomGroup
 from dashboard.chart_range import (
     active_quick_key,
     load_chart_range_from_session,
@@ -239,20 +239,23 @@ def custom_dashboard(request, dashboard_id):
 #@cache_page(60)
 def monitor(request):
     from dashboard.chart_colors import PALETTE, normalize_color
-    from dashboard.series_selection import FormulaError, formula_ast_json, parse_formula_text
+    from dashboard.series_selection import FormulaError, formula_ast_json, normalize_group_rows, parse_formula_text
     from sensors.models import MqttSubscription
 
     parameters = list(Parameter.objects.all())
     rooms = list(Room.objects.all().order_by("order", "name"))
     catalog_rooms = [(room.id, room.name) for room in rooms]
     catalog_parameters = [(param.id, param.name) for param in parameters]
+    catalog_groups = normalize_group_rows(
+        RoomGroup.objects.prefetch_related("rooms").order_by("name")
+    )
     payload_parameters = []
     for param in parameters:
         ast = None
         if (param.formula or "").strip():
             try:
                 ast = formula_ast_json(parse_formula_text(
-                    param.formula, catalog_rooms, catalog_parameters
+                    param.formula, catalog_rooms, catalog_parameters, catalog_groups
                 ))
             except FormulaError:
                 ast = None
@@ -294,6 +297,10 @@ def monitor(request):
             "parameters": payload_parameters,
             "topics": payload_topics,
             "palette": list(PALETTE),
+            "groups": [
+                {"id": index, "name": name, "roomIds": list(room_ids)}
+                for index, (name, room_ids) in enumerate(catalog_groups)
+            ],
         },
         "pane": pane,
     }
@@ -1090,13 +1097,13 @@ def _formula_window(start, end, all_data):
     return (None, None) if all_data else (start, end)
 
 
-def _bound_room_ids(parameter, start, end, all_data, catalog_rooms, catalog_parameters, formulas):
+def _bound_room_ids(parameter, start, end, all_data, catalog_rooms, catalog_parameters, formulas, groups=None):
     """Rooms that have the measured series an ``x`` leaf reads in this window."""
     from dashboard.parameter_formula import x_measured_parameter_ids
 
     catalog_ids = [room_id for room_id, _name in catalog_rooms]
     wanted = x_measured_parameter_ids(
-        parameter.id, formulas, catalog_rooms, catalog_parameters
+        parameter.id, formulas, catalog_rooms, catalog_parameters, groups=groups
     )
     if not wanted:
         return catalog_ids
@@ -1115,7 +1122,7 @@ def _load_formula_frame(pairs, calculated_ids, start, end, all_data, interval_mi
 
     rooms = list(Room.objects.all())
     parameters = list(Parameter.objects.all())
-    catalog_rooms, catalog_parameters, formulas = formula_catalog(rooms, parameters)
+    catalog_rooms, catalog_parameters, formulas, groups = formula_catalog(rooms, parameters)
     window_start, window_end = _formula_window(start, end, all_data)
     try:
         keyed, _means, calculated = load_keyed_with_calculations(
@@ -1130,6 +1137,7 @@ def _load_formula_frame(pairs, calculated_ids, start, end, all_data, interval_mi
             rooms=catalog_rooms,
             parameters=catalog_parameters,
             formulas=formulas,
+            groups=groups,
             tolerance="2min" if is_raw_interval(interval_minutes) else None,
         )
     except FormulaError:
@@ -1152,10 +1160,10 @@ def _chart_resampled(room, parameter, start, end, all_data, interval_minutes, fi
             with clock.time("formula"):
                 rooms = list(Room.objects.all())
                 parameters = list(Parameter.objects.all())
-                catalog_rooms, catalog_parameters, formulas = formula_catalog(rooms, parameters)
+                catalog_rooms, catalog_parameters, formulas, groups = formula_catalog(rooms, parameters)
                 try:
                     room_ids = _bound_room_ids(
-                        parameter, start, end, all_data, catalog_rooms, catalog_parameters, formulas
+                        parameter, start, end, all_data, catalog_rooms, catalog_parameters, formulas, groups
                     )
                 except FormulaError:
                     return frame
@@ -1266,7 +1274,7 @@ def _pattern_source(room, parameter, rooms, parameters, start, end, all_data, in
     window_end = None if all_data else end
     if parameter.is_room_bound:
         try:
-            catalog_rooms, catalog_parameters, formulas = formula_catalog(rooms, parameters)
+            catalog_rooms, catalog_parameters, formulas, groups = formula_catalog(rooms, parameters)
             keyed, _means, _calculated = load_keyed_with_calculations(
                 [(room.id, parameter.id)],
                 [],
@@ -1279,6 +1287,7 @@ def _pattern_source(room, parameter, rooms, parameters, start, end, all_data, in
                 rooms=catalog_rooms,
                 parameters=catalog_parameters,
                 formulas=formulas,
+                groups=groups,
                 tolerance="2min" if is_raw_interval(interval_minutes) else None,
             )
         except FormulaError:
@@ -1287,7 +1296,7 @@ def _pattern_source(room, parameter, rooms, parameters, start, end, all_data, in
         series = keyed[key] if keyed is not None and key in getattr(keyed, "columns", []) else None
     elif parameter.is_calculated:
         try:
-            catalog_rooms, catalog_parameters, formulas = formula_catalog(rooms, parameters)
+            catalog_rooms, catalog_parameters, formulas, groups = formula_catalog(rooms, parameters)
             _keyed, _means, calculated = load_keyed_with_calculations(
                 [],
                 [parameter.id],
@@ -1300,6 +1309,7 @@ def _pattern_source(room, parameter, rooms, parameters, start, end, all_data, in
                 rooms=catalog_rooms,
                 parameters=catalog_parameters,
                 formulas=formulas,
+                groups=groups,
                 tolerance="2min" if is_raw_interval(interval_minutes) else None,
             )
         except FormulaError:
@@ -1737,14 +1747,15 @@ def parameter_detail(request, parameter_id):
         from dashboard.parameter_formula import FormulaError, validate_parameter_formula, _django_catalog
 
         try:
-            rooms, parameters, formulas = _django_catalog()
-            validate_parameter_formula(parameter.formula, rooms, parameters, formulas, parameter.id)
+            rooms, parameters, formulas, groups = _django_catalog()
+            validate_parameter_formula(parameter.formula, rooms, parameters, formulas, parameter.id, groups)
         except FormulaError as exc:
             formula_error = str(exc)
 
     context["formula_error"] = formula_error
     context["formula_value"] = request.POST.get("formula", parameter.formula) if formula_error else parameter.formula
     context["formula_rooms"] = Room.objects.all().order_by("order", "name")
+    context["formula_groups"] = RoomGroup.objects.prefetch_related("rooms").order_by("name")
     context["formula_parameters"] = Parameter.objects.all()
 
     if parameter.is_calculated:
@@ -2150,7 +2161,7 @@ def correlations_view(request):
             load_keyed_with_calculations,
         )
 
-        catalog_rooms, catalog_parameters, formulas = formula_catalog(rooms, parameters)
+        catalog_rooms, catalog_parameters, formulas, formula_groups = formula_catalog(rooms, parameters)
         try:
             keyed, _raw_means, calculated = load_keyed_with_calculations(
                 series_pairs,
@@ -2164,6 +2175,7 @@ def correlations_view(request):
                 rooms=catalog_rooms,
                 parameters=catalog_parameters,
                 formulas=formulas,
+                groups=formula_groups,
                 tolerance="2min" if is_raw_interval(interval_minutes) else None,
             )
         except FormulaError as exc:
@@ -2853,6 +2865,7 @@ def event_create(request):
 
     rooms = list(Room.objects.all().order_by('order', 'name'))
     parameters = list(Parameter.objects.all().order_by('-view_count', 'order', 'name'))
+    groups = list(RoomGroup.objects.prefetch_related('rooms').order_by('name'))
     recent_events = Event.objects.prefetch_related('rooms', 'parameters').order_by('-timestamp')[:15]
 
     # Default timestamp: now in local timezone, formatted for datetime-local input
@@ -2932,6 +2945,15 @@ def event_create(request):
     context = {
         'rooms': rooms,
         'parameters': parameters,
+        'groups': groups,
+        'groups_json': json.dumps([
+            {
+                'id': group.id,
+                'name': group.name,
+                'room_ids': [room.id for room in sorted(group.rooms.all(), key=lambda room: (room.order, room.name))],
+            }
+            for group in groups
+        ]),
         'recent_events': recent_events,
         'default_timestamp': default_timestamp,
         'detect_catalog': json.dumps({

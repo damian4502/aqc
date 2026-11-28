@@ -17,6 +17,7 @@ from dashboard.series_selection import (
     iter_series,
     pair_key,
     parse_formula_text,
+    normalize_group_rows,
 )
 
 __all__ = [
@@ -62,7 +63,7 @@ def partition_parameters(parameter_ids, explicit_pairs, calculated_ids):
     return measured_ids, measured_explicit, calculated_series
 
 
-def collect_measured_pairs(parameter_id, formulas, rooms, parameters, stack=None, room_id=None):
+def collect_measured_pairs(parameter_id, formulas, rooms, parameters, stack=None, room_id=None, groups=None):
     """Measured leaves of a calculated parameter, following nested formulas.
 
     ``room_id`` binds ``x`` before the walk. An unbound ``x/Measured`` has no
@@ -80,7 +81,7 @@ def collect_measured_pairs(parameter_id, formulas, rooms, parameters, stack=None
     text = str((formulas or {}).get(parameter_id) or "").strip()
     if not text:
         return []
-    node = parse_formula_text(text, rooms, parameters)
+    node = parse_formula_text(text, rooms, parameters, groups)
     if room_id is not None and formula_is_room_bound(text):
         node = bind_room(node, room_id)
     found = []
@@ -95,7 +96,7 @@ def collect_measured_pairs(parameter_id, formulas, rooms, parameters, stack=None
                     pairs = []
                 else:
                     pairs = collect_measured_pairs(
-                        param_id, formulas, rooms, parameters, stack, room_id=None
+                        param_id, formulas, rooms, parameters, stack, room_id=None, groups=groups
                     )
             else:
                 leaf_room, param_id = int(leaf[0]), int(leaf[1])
@@ -103,7 +104,7 @@ def collect_measured_pairs(parameter_id, formulas, rooms, parameters, stack=None
                 if child:
                     bound_room = leaf_room if formula_is_room_bound(child) else None
                     pairs = collect_measured_pairs(
-                        param_id, formulas, rooms, parameters, stack, room_id=bound_room
+                        param_id, formulas, rooms, parameters, stack, room_id=bound_room, groups=groups
                     )
                 else:
                     pairs = [(leaf_room, param_id)]
@@ -117,7 +118,7 @@ def collect_measured_pairs(parameter_id, formulas, rooms, parameters, stack=None
     return found
 
 
-def x_measured_parameter_ids(parameter_id, formulas, rooms, parameters, stack=None):
+def x_measured_parameter_ids(parameter_id, formulas, rooms, parameters, stack=None, groups=None):
     """Measured parameter ids reached through an unbound ``x``.
 
     Those decide which rooms a per-room formula covers. Fixed rooms, and a
@@ -131,7 +132,7 @@ def x_measured_parameter_ids(parameter_id, formulas, rooms, parameters, stack=No
     text = str((formulas or {}).get(parameter_id) or "").strip()
     if not text:
         return []
-    node = parse_formula_text(text, rooms, parameters)
+    node = parse_formula_text(text, rooms, parameters, groups)
     found = []
     seen = set()
     stack.add(parameter_id)
@@ -144,16 +145,16 @@ def x_measured_parameter_ids(parameter_id, formulas, rooms, parameters, stack=No
                     ids = [param_id]
                 elif formula_is_room_bound(child):
                     ids = x_measured_parameter_ids(
-                        param_id, formulas, rooms, parameters, stack
+                        param_id, formulas, rooms, parameters, stack, groups=groups
                     )
                 else:
-                    collect_measured_pairs(param_id, formulas, rooms, parameters, stack)
+                    collect_measured_pairs(param_id, formulas, rooms, parameters, stack, groups=groups)
                     ids = []
             elif child:
                 if formula_is_room_bound(child):
-                    x_measured_parameter_ids(param_id, formulas, rooms, parameters, stack)
+                    x_measured_parameter_ids(param_id, formulas, rooms, parameters, stack, groups=groups)
                 else:
-                    collect_measured_pairs(param_id, formulas, rooms, parameters, stack)
+                    collect_measured_pairs(param_id, formulas, rooms, parameters, stack, groups=groups)
                 ids = []
             else:
                 ids = []
@@ -167,7 +168,7 @@ def x_measured_parameter_ids(parameter_id, formulas, rooms, parameters, stack=No
     return found
 
 
-def validate_parameter_formula(text, rooms, parameters, formulas, parameter_id):
+def validate_parameter_formula(text, rooms, parameters, formulas, parameter_id, groups=None):
     """Parse ``text`` and reject a cycle. Empty text is a measured parameter."""
     text = str(text or "").strip()
     if not text:
@@ -175,12 +176,12 @@ def validate_parameter_formula(text, rooms, parameters, formulas, parameter_id):
     parameter_id = int(parameter_id)
     stored = dict(formulas or {})
     stored[parameter_id] = text
-    parse_formula_text(text, rooms, parameters)
-    collect_measured_pairs(parameter_id, stored, rooms, parameters)
+    parse_formula_text(text, rooms, parameters, groups)
+    collect_measured_pairs(parameter_id, stored, rooms, parameters, groups=groups)
     return text
 
 
-def _make_evaluator(keyed, formulas, rooms, parameters, tolerance=None):
+def _make_evaluator(keyed, formulas, rooms, parameters, tolerance=None, groups=None):
     """``ensure(parameter_id, room_id)`` for one request.
 
     A global formula is cached by parameter id and ignores the room.
@@ -200,6 +201,7 @@ def _make_evaluator(keyed, formulas, rooms, parameters, tolerance=None):
                 str(formulas.get(param_id) or "").strip(),
                 rooms,
                 parameters,
+                groups,
             )
         return parsed[param_id]
 
@@ -269,6 +271,7 @@ def apply_calculations(
     rooms,
     parameters,
     tolerance=None,
+    groups=None,
 ):
     """Evaluate global formulas and write per-room formulas onto ``keyed``.
 
@@ -280,7 +283,7 @@ def apply_calculations(
     if keyed is None:
         keyed = pd.DataFrame()
     formulas = formulas or {}
-    ensure = _make_evaluator(keyed, formulas, rooms, parameters, tolerance=tolerance)
+    ensure = _make_evaluator(keyed, formulas, rooms, parameters, tolerance=tolerance, groups=groups)
     calculated = {}
     for parameter_id in calculated_ids or []:
         parameter_id = int(parameter_id)
@@ -301,6 +304,7 @@ def evaluate_calculated_series(
     rooms,
     parameters,
     tolerance=None,
+    groups=None,
 ):
     """Evaluate global calculated parameters against pair-key columns.
 
@@ -317,6 +321,7 @@ def evaluate_calculated_series(
         rooms,
         parameters,
         tolerance=tolerance,
+        groups=groups,
     )
     return calculated
 
@@ -333,6 +338,7 @@ def load_keyed_with_calculations(
     rooms=None,
     parameters=None,
     formulas=None,
+    groups=None,
     tolerance=None,
     now=None,
 ):
@@ -370,14 +376,14 @@ def load_keyed_with_calculations(
         text = str(formulas.get(parameter_id) or "").strip()
         if not text or formula_is_room_bound(text):
             continue
-        for pair in collect_measured_pairs(parameter_id, formulas, rooms, parameters):
+        for pair in collect_measured_pairs(parameter_id, formulas, rooms, parameters, groups=groups):
             if pair in seen_load:
                 continue
             seen_load.add(pair)
             load_pairs.append(pair)
     for room_id, parameter_id in bound_pairs:
         for pair in collect_measured_pairs(
-            parameter_id, formulas, rooms, parameters, room_id=room_id
+            parameter_id, formulas, rooms, parameters, room_id=room_id, groups=groups
         ):
             if pair in seen_load:
                 continue
@@ -408,6 +414,7 @@ def load_keyed_with_calculations(
             formulas,
             rooms,
             parameters,
+            groups=groups,
             tolerance=tolerance,
         )
     clock.meta["series"] = 0 if not calculated else len(calculated)
@@ -415,12 +422,17 @@ def load_keyed_with_calculations(
     return keyed, raw_means, calculated
 
 
-def formula_catalog(rooms, parameters):
-    """``(rooms, parameters, formulas)`` for the parser, from model instances."""
+def formula_catalog(rooms, parameters, groups=None):
+    """``(rooms, parameters, formulas, groups)`` for the parser."""
+    if groups is None:
+        from rooms.models import RoomGroup
+
+        groups = RoomGroup.objects.prefetch_related("rooms").order_by("name")
     return (
         [(room.id, room.name) for room in rooms],
         [(param.id, param.name) for param in parameters],
         {param.id: param.formula or "" for param in parameters},
+        normalize_group_rows(groups),
     )
 
 
@@ -451,7 +463,7 @@ def add_calculated_columns(frame, calculated, parameter_by_id):
 
 def _django_catalog():
     from parameters.models import Parameter
-    from rooms.models import Room
+    from rooms.models import Room, RoomGroup
 
     rooms = list(Room.objects.values_list("id", "name"))
     parameters = list(Parameter.objects.values_list("id", "name"))
@@ -459,7 +471,10 @@ def _django_catalog():
         parameter_id: formula or ""
         for parameter_id, formula in Parameter.objects.values_list("id", "formula")
     }
-    return rooms, parameters, formulas
+    groups = normalize_group_rows(
+        RoomGroup.objects.prefetch_related("rooms").order_by("name")
+    )
+    return rooms, parameters, formulas, groups
 
 
 def evaluate_saved_formula(
@@ -476,7 +491,7 @@ def evaluate_saved_formula(
     """Series for one saved formula over the requested window."""
     import pandas as pd
 
-    rooms, parameters, formulas = _django_catalog()
+    rooms, parameters, formulas, groups = _django_catalog()
     formulas[parameter.id] = parameter.formula or ""
     if not str(parameter.formula or "").strip():
         return pd.Series(dtype="float64")
@@ -492,6 +507,7 @@ def evaluate_saved_formula(
         rooms=rooms,
         parameters=parameters,
         formulas=formulas,
+        groups=groups,
         tolerance=tolerance,
         now=now,
     )
@@ -503,7 +519,7 @@ def evaluate_saved_formula(
 
 def save_parameter_formula(parameter, text):
     """Validate and store a formula. Empty text makes the parameter measured."""
-    rooms, parameters, formulas = _django_catalog()
+    rooms, parameters, formulas, groups = _django_catalog()
     name = parameter.name
     parameters = [
         (parameter_id, name if parameter_id == parameter.id else param_name)
@@ -512,7 +528,7 @@ def save_parameter_formula(parameter, text):
     if parameter.id is None:
         parameters.append((0, name))
     parameter_id = parameter.id or 0
-    cleaned = validate_parameter_formula(text, rooms, parameters, formulas, parameter_id)
+    cleaned = validate_parameter_formula(text, rooms, parameters, formulas, parameter_id, groups)
     parameter.formula = cleaned or ""
     parameter.save(update_fields=["formula"])
     return parameter.formula

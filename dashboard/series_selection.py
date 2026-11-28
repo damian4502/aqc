@@ -83,6 +83,58 @@ def _is_leaf(node) -> bool:
     return is_constant(node) or _is_series(node) or _is_x_series(node)
 
 
+def _is_group_node(node) -> bool:
+    return (
+        isinstance(node, tuple)
+        and len(node) == 2
+        and node[0] == "group"
+        and isinstance(node[1], tuple)
+    )
+
+
+def _contains_group(node) -> bool:
+    if _is_group_node(node):
+        return True
+    if _is_op(node):
+        return _contains_group(node[2]) or _contains_group(node[3])
+    if _is_fn(node):
+        return any(_contains_group(arg) for arg in node[2])
+    return False
+
+
+def _variadic_fn(name) -> bool:
+    return FN_ARITY[name][1] is None
+
+
+def normalize_group_rows(groups):
+    """``[(name, (room_id, ...))]`` from tuples or RoomGroup instances.
+
+    Rooms stay in ``order``, then name. A repeated room is kept once.
+    """
+    rows = []
+    for group in groups or []:
+        if isinstance(group, (tuple, list)):
+            name = str(group[0] or "").strip()
+            raw_ids = group[1]
+        else:
+            name = str(getattr(group, "name", "") or "").strip()
+            rooms = list(group.rooms.all())
+            rooms.sort(key=lambda room: (getattr(room, "order", 0) or 0, getattr(room, "name", "") or ""))
+            raw_ids = [room.id for room in rooms]
+        if not name:
+            continue
+        ids = []
+        seen = set()
+        for room_id in raw_ids:
+            room_id = int(room_id)
+            if room_id in seen:
+                continue
+            seen.add(room_id)
+            ids.append(room_id)
+        rows.append((name, tuple(ids)))
+    return rows
+
+
 def _is_fn(node) -> bool:
     return (
         isinstance(node, tuple)
@@ -589,7 +641,7 @@ def _name_boundary(text, index) -> bool:
     return char.isspace() or char in "+-*/(),×÷−"
 
 
-def parse_formula_text(text, rooms, parameters):
+def parse_formula_text(text, rooms, parameters, groups=None):
     """Parse ``avg(Kuhinja/CO2, Kopalnica/CO2)`` into an expression tree.
 
     ``/`` between a known room and parameter is the series, and ``/`` between
@@ -597,7 +649,9 @@ def parse_formula_text(text, rooms, parameters):
     room and wins over a room that is actually named ``x``. ``*`` and ``/``
     bind tighter than ``+`` and ``-``. Parentheses group. ``min``, ``max``,
     and ``avg`` take two or more values. ``range`` takes one or more and is
-    the highest minus the lowest. Arguments are separated by commas and are
+    the highest minus the lowest. Inside those four, ``Group/Parameter``
+    stands for every room in that room group, in room order. A group name
+    does not work anywhere else. Arguments are separated by commas and are
     computed at each timestamp. At least one series is required.
     """
     raw = str(text or "")
@@ -605,6 +659,7 @@ def parse_formula_text(text, rooms, parameters):
         raise FormulaError("Enter a formula.")
     room_list = sorted((rooms or []), key=lambda item: len(item[1] or ""), reverse=True)
     param_list = sorted((parameters or []), key=lambda item: len(item[1] or ""), reverse=True)
+    group_rows = normalize_group_rows(groups)
     tokens = []
     index = 0
     length = len(raw)
@@ -640,12 +695,17 @@ def parse_formula_text(text, rooms, parameters):
                     matched = (("x", int(param_id)), param_end)
                     break
         if matched is None:
+            names = []
             for room_id, room_name in room_list:
                 room_name = str(room_name or "")
-                if not room_name:
-                    continue
-                end = index + len(room_name)
-                if raw[index:end].casefold() != room_name.casefold():
+                if room_name:
+                    names.append((len(room_name), 0, "room", int(room_id), room_name))
+            for group_name, room_ids in group_rows:
+                names.append((len(group_name), 1, "group", room_ids, group_name))
+            names.sort(key=lambda item: (-item[0], item[1]))
+            for _length, _rank, kind, identity, label in names:
+                end = index + len(label)
+                if raw[index:end].casefold() != label.casefold():
                     continue
                 slash = skip_space(end)
                 if slash >= length or raw[slash] != "/":
@@ -660,7 +720,13 @@ def parse_formula_text(text, rooms, parameters):
                         continue
                     if not _name_boundary(raw, param_end):
                         continue
-                    matched = ((int(room_id), int(param_id)), param_end)
+                    if kind == "room":
+                        matched = ((int(identity), int(param_id)), param_end)
+                    else:
+                        if not identity:
+                            raise FormulaError(f'Room group "{label}" has no rooms.')
+                        series = tuple((int(room_id), int(param_id)) for room_id in identity)
+                        matched = (("group", series), param_end)
                     break
                 if matched:
                     break
@@ -689,6 +755,8 @@ def parse_formula_text(text, rooms, parameters):
         raise FormulaError(f"Can't read the formula near “{snippet}”.")
 
     node = _parse_expression_tokens(tokens)
+    if _contains_group(node):
+        raise FormulaError("A room group only works inside min, max, avg, or range.")
     count = _series_count(node)
     if count < 1:
         raise FormulaError("Use at least one series, written as Room/Parameter.")
@@ -784,20 +852,40 @@ def _parse_expression_tokens(tokens):
                 raise FormulaError(f"Expected '(' after {name}.")
             nonlocal_advance()
             low, high = _fn_arity(name)
+
+            def take_argument():
+                node = parse_expr()
+                if _is_group_node(node):
+                    if not _variadic_fn(name):
+                        raise FormulaError(
+                            f"{name} does not take a room group. Use min, max, avg, or range."
+                        )
+                    if not node[1]:
+                        raise FormulaError("That room group has no rooms.")
+                    return list(node[1])
+                if _contains_group(node):
+                    raise FormulaError(
+                        "Write a room group as its own argument, for example avg(Upstairs/CO2)."
+                    )
+                return [node]
+
             if peek() in (None, ",", ")"):
                 raise FormulaError(_fn_count_message(name, low, high))
-            args = [parse_expr()]
+            args = take_argument()
             while peek() == ",":
                 nonlocal_advance()
                 if peek() in (None, ",", ")"):
                     raise FormulaError(f"{name} has an empty argument.")
-                args.append(parse_expr())
+                args.extend(take_argument())
             if peek() != ")":
                 raise FormulaError("Close the parenthesis.")
             nonlocal_advance()
             if len(args) < low or len(args) > high:
                 raise FormulaError(_fn_count_message(name, low, high))
             return ("fn", name, tuple(args))
+        if _is_group_node(current):
+            nonlocal_advance()
+            return current
         if is_constant(current) or _is_series(current) or _is_x_series(current):
             nonlocal_advance()
             return current

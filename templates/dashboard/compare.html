@@ -174,6 +174,9 @@
                     {% for room in rooms %}
                     <option value="{{ room.name }}">{{ room.name }}</option>
                     {% endfor %}
+                    {% for group in groups %}
+                    <option value="{{ group.name }}">{{ group.name }} (group)</option>
+                    {% endfor %}
                 </select>
                 <select id="formula-insert-param" aria-label="Insert parameter"
                         class="bg-slate-900 border border-slate-700 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:border-blue-500 min-w-[160px]">
@@ -215,7 +218,7 @@
                 {% endfor %}
             </div>
             <p id="diff-empty" class="text-[11px] text-slate-500 mt-3 {% if selected_diffs %}hidden{% endif %}">No calculations yet. The series do not have to be checked above. Click a calculation to load it into the field. Uncheck to leave it off the next chart.</p>
-            <p class="text-[11px] text-slate-500 mt-1">Write Room/Parameter, numbers, + − * /, and min(), max(), avg(), range(), ah(), avp(), hdp(), dew(), mr(), lt(). min, max, and avg take two or more values. range takes one or more and is the highest minus the lowest. ah, avp, dew, and mr take temperature in °C and relative humidity in %. mr also takes pressure in Pa or hPa. hdp takes both rooms and a height in meters. lt(a, b) is 1 when b is greater than a, otherwise 0. Values are separated by commas and computed at each time. Parentheses group. * and / happen before + and −, so A − B * C is A − (B * C). The dropdowns insert at the cursor: a room inserts its name and a slash. Up to 24 series. Raw values show the result. With all recorded values, other series are paired to the first within 2 minutes. x/Parameter is for a saved parameter, not this box: it means the current room.</p>
+            <p class="text-[11px] text-slate-500 mt-1">Write Room/Parameter, numbers, + − * /, and min(), max(), avg(), range(), ah(), avp(), hdp(), dew(), mr(), lt(). min, max, and avg take two or more values. range takes one or more and is the highest minus the lowest. Those four also accept a room group: avg(Upstairs/CO2) uses every room in Upstairs. ah, avp, dew, and mr take temperature in °C and relative humidity in %. mr also takes pressure in Pa or hPa. hdp takes both rooms and a height in meters. lt(a, b) is 1 when b is greater than a, otherwise 0. Values are separated by commas and computed at each time. Parentheses group. * and / happen before + and −, so A − B * C is A − (B * C). The dropdowns insert at the cursor: a room or group inserts its name and a slash. Up to 24 series. Raw values show the result. With all recorded values, other series are paired to the first within 2 minutes. x/Parameter is for a saved parameter, not this box: it means the current room.</p>
         </div>
 
         <div class="glass rounded-3xl p-6">
@@ -647,6 +650,14 @@ function addDifference() {
     updateCounts();
 }
 
+function formulaContainsGroup(node) {
+    if (!Array.isArray(node)) return false;
+    if (node[0] === 'group') return true;
+    if (node[0] === 'op') return formulaContainsGroup(node[2]) || formulaContainsGroup(node[3]);
+    if (node[0] === 'fn') return (node[2] || []).some(formulaContainsGroup);
+    return false;
+}
+
 const FORMULA_MAX_SERIES = 24;
 const FORMULA_CATALOG = JSON.parse(document.getElementById('formula-catalog').textContent);
 const OP_TOKEN = { '+': 'add', '-': 'sub', '*': 'mul', '/': 'div' };
@@ -701,7 +712,6 @@ function formatConstant(value) {
 function parseFormulaText(raw) {
     const text = String(raw || '');
     if (!text.trim()) return { ok: false, error: 'Enter a formula.' };
-    const rooms = formulaNames('rooms');
     const params = formulaNames('parameters');
     const tokens = [];
     let i = 0;
@@ -716,9 +726,20 @@ function parseFormulaText(raw) {
             continue;
         }
         let matched = null;
-        for (const room of rooms) {
-            const end = i + room.name.length;
-            if (text.slice(i, end).toLocaleLowerCase() !== room.name.toLocaleLowerCase()) continue;
+        const seriesNames = formulaNames('rooms').map((room) => ({
+            kind: 'room', id: room.id, name: room.name,
+        })).concat((FORMULA_CATALOG.groups || []).map((group) => ({
+            kind: 'group',
+            name: String(group.name || ''),
+            roomIds: (group.room_ids || []).map(Number).filter((id, index, all) => id && all.indexOf(id) === index),
+        })).filter((group) => group.name)).sort((a, b) => {
+            if (b.name.length !== a.name.length) return b.name.length - a.name.length;
+            if (a.kind === b.kind) return 0;
+            return a.kind === 'room' ? -1 : 1;
+        });
+        for (const item of seriesNames) {
+            const end = i + item.name.length;
+            if (text.slice(i, end).toLocaleLowerCase() !== item.name.toLocaleLowerCase()) continue;
             let slash = end;
             while (slash < text.length && /\s/.test(text[slash])) slash += 1;
             if (text[slash] !== '/') continue;
@@ -728,7 +749,15 @@ function parseFormulaText(raw) {
                 const pend = nameAt + param.name.length;
                 if (text.slice(nameAt, pend).toLocaleLowerCase() !== param.name.toLocaleLowerCase()) continue;
                 if (!nameBoundary(text, pend)) continue;
-                matched = { node: [room.id, param.id], next: pend };
+                if (item.kind === 'room') {
+                    matched = { node: [item.id, param.id], next: pend };
+                } else {
+                    if (!item.roomIds.length) return { ok: false, error: 'Room group "' + item.name + '" has no rooms.' };
+                    matched = {
+                        node: ['group', item.roomIds.map((roomId) => [roomId, param.id])],
+                        next: pend,
+                    };
+                }
                 break;
             }
             if (matched) break;
@@ -804,16 +833,29 @@ function parseFormulaText(raw) {
             take();
             if (peek() !== '(') throw new Error("Expected '(' after " + name + ".");
             take();
+            const variadic = bounds[1] == null;
+            function takeArgument() {
+                const node = parseExpr();
+                if (Array.isArray(node) && node[0] === 'group') {
+                    if (!variadic) throw new Error(name + ' does not take a room group. Use min, max, avg, or range.');
+                    if (!node[1].length) throw new Error('That room group has no rooms.');
+                    return node[1];
+                }
+                if (formulaContainsGroup(node)) {
+                    throw new Error('Write a room group as its own argument, for example avg(Upstairs/CO2).');
+                }
+                return [node];
+            }
             if (peek() == null || peek() === ',' || peek() === ')') {
                 throw new Error(name + (low === 1 ? ' needs at least one value.' : ' needs ' + (low === high ? 'exactly ' + low : 'at least ' + low) + ' values.'));
             }
-            const args = [parseExpr()];
+            const args = takeArgument();
             while (peek() === ',') {
                 take();
                 if (peek() == null || peek() === ',' || peek() === ')') {
                     throw new Error(name + ' has an empty argument.');
                 }
-                args.push(parseExpr());
+                takeArgument().forEach((arg) => args.push(arg));
             }
             if (peek() !== ')') throw new Error('Close the parenthesis.');
             take();
@@ -823,6 +865,10 @@ function parseFormulaText(raw) {
                     : (low === 1 ? ' needs at least one value.' : ' needs at least ' + low + ' values.')));
             }
             return ['fn', name, args];
+        }
+        if (Array.isArray(current) && current[0] === 'group') {
+            take();
+            return current;
         }
         if (Array.isArray(current) && (current[0] === 'n' || typeof current[0] === 'number')) {
             take();
@@ -834,6 +880,7 @@ function parseFormulaText(raw) {
     try {
         node = parseExpr();
         if (pos !== tokens.length) throw new Error("Can't read the rest of the formula.");
+        if (formulaContainsGroup(node)) throw new Error('A room group only works inside min, max, avg, or range.');
     } catch (err) {
         return { ok: false, error: err.message || "Can't read the formula." };
     }

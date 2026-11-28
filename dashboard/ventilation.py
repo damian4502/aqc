@@ -1031,7 +1031,7 @@ def ventilation_view(request):
             load_keyed_with_calculations,
         )
 
-        catalog_rooms, catalog_parameters, formulas = formula_catalog(rooms, parameters)
+        catalog_rooms, catalog_parameters, formulas, formula_groups = formula_catalog(rooms, parameters)
         try:
             keyed, _raw_means, calculated = load_keyed_with_calculations(
                 series_pairs,
@@ -1045,6 +1045,7 @@ def ventilation_view(request):
                 rooms=catalog_rooms,
                 parameters=catalog_parameters,
                 formulas=formulas,
+                groups=formula_groups,
                 tolerance="2min" if is_raw_interval(interval_minutes) else None,
             )
         except FormulaError as exc:

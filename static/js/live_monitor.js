@@ -423,6 +423,20 @@
         commit();
     }
 
+    function addGroupRooms(roomIds) {
+        const param = paramById.get(state.activeParamId);
+        if (!param || !isRoomScoped(param)) return;
+        const allowed = {};
+        const source = param.roomBound
+            ? (catalog.rooms || []).map(function (room) { return room.id; })
+            : (param.liveRooms || []);
+        source.forEach(function (roomId) { allowed[Number(roomId)] = true; });
+        (roomIds || []).forEach(function (roomId) {
+            if (allowed[Number(roomId)]) addEntry(Number(roomId), param.id);
+        });
+        commit();
+    }
+
     function removeEntry(key) {
         const before = state.entries.length;
         state.entries = state.entries.filter(function (entry) { return entryKey(entry) !== key; });
@@ -828,6 +842,17 @@
         }
         const addAll = document.getElementById("add-all-rooms");
         if (addAll) addAll.addEventListener("click", addAllRooms);
+        const groupHost = document.getElementById("room-group-chips");
+        if (groupHost) {
+            (catalog.groups || []).forEach(function (group) {
+                const button = document.createElement("button");
+                button.type = "button";
+                button.className = "px-3 py-1.5 rounded-xl text-[11px] bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700";
+                button.textContent = group.name;
+                button.addEventListener("click", function () { addGroupRooms(group.roomIds || group.room_ids || []); });
+                groupHost.appendChild(button);
+            });
+        }
         const removeAll = document.getElementById("remove-all-rooms");
         if (removeAll) removeAll.addEventListener("click", removeAllRooms);
         const clear = document.getElementById("clear-chart");

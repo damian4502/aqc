@@ -482,3 +482,26 @@ class FormulaTextTests(SimpleTestCase):
         self.assertEqual([float(v) if pd.notna(v) else None for v in values], [1.0, 0.0, 0.0, None])
         with self.assertRaises(FormulaError):
             parse_formula_text("lt(Kuhinja/CO2)", rooms, params)
+
+    def test_variadic_function_expands_a_room_group(self):
+        groups = [("Nadstropje", (1, 3, 1))]
+        node = parse_formula_text("avg(Nadstropje/CO2)", ROOMS, PARAMS, groups)
+        self.assertEqual(node, ("fn", "avg", ((1, 5), (3, 5))))
+        mixed = parse_formula_text("min(Nadstropje/CO2, Kopalnica/CO2)", ROOMS, PARAMS, groups)
+        self.assertEqual(mixed, ("fn", "min", ((1, 5), (3, 5), (2, 5))))
+        span = parse_formula_text("range(Nadstropje / CO2)", ROOMS, PARAMS, groups)
+        self.assertEqual(span[0], "fn")
+        self.assertEqual(span[2], ((1, 5), (3, 5)))
+        same_name = parse_formula_text(
+            "avg(Kuhinja/CO2, Kopalnica/CO2)",
+            ROOMS,
+            PARAMS,
+            [("Kuhinja", (2, 3))],
+        )
+        self.assertEqual(same_name, ("fn", "avg", ((1, 5), (2, 5))))
+        with self.assertRaises(FormulaError):
+            parse_formula_text("Nadstropje/CO2 + 1", ROOMS, PARAMS, groups)
+        with self.assertRaises(FormulaError):
+            parse_formula_text("dew(Nadstropje/CO2, 40)", ROOMS, PARAMS, groups)
+        with self.assertRaises(FormulaError):
+            parse_formula_text("avg(Prazno/CO2)", ROOMS, PARAMS, [("Prazno", ())])

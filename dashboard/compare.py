@@ -675,7 +675,7 @@ def compare_view(request):
             load_keyed_with_calculations,
         )
 
-        catalog_rooms, catalog_parameters, formulas = formula_catalog(rooms, parameters)
+        catalog_rooms, catalog_parameters, formulas, formula_groups = formula_catalog(rooms, parameters)
         needed_calculated = list(calculated_series_ids)
         for node in difference_specs:
             for term in iter_series(node):
@@ -699,6 +699,7 @@ def compare_view(request):
                 rooms=catalog_rooms,
                 parameters=catalog_parameters,
                 formulas=formulas,
+                groups=formula_groups,
                 tolerance="2min" if raw_mode else None,
             )
         except FormulaError as exc:
@@ -976,7 +977,7 @@ def compare_view(request):
         {
             "id": group.id,
             "name": group.name,
-            "room_ids": [room.id for room in group.rooms.all()],
+            "room_ids": [room.id for room in sorted(group.rooms.all(), key=lambda room: (room.order, room.name))],
         }
         for group in groups
     ]
@@ -1019,6 +1020,16 @@ def compare_view(request):
         "formula_catalog": {
             "rooms": [{"id": room.id, "name": room.name} for room in rooms],
             "parameters": [{"id": param.id, "name": param.name} for param in parameters],
+            "groups": [
+                {
+                    "name": group.name,
+                    "room_ids": [
+                        room.id
+                        for room in sorted(group.rooms.all(), key=lambda room: (room.order, room.name))
+                    ],
+                }
+                for group in groups
+            ],
         },
         "active_quick": active_quick_key(
             start_date, end_date, all_data, live=load_chart_range_mode(request) == "live"

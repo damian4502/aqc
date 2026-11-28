@@ -146,6 +146,16 @@
                         <button type="button" onclick="toggleAll('rooms', false)" class="text-slate-400 hover:underline">None</button>
                     </div>
                 </div>
+                {% if groups %}
+                <div class="flex flex-wrap gap-2 mb-2">
+                    {% for group in groups %}
+                    <button type="button" onclick="toggleRoomGroup({{ group.id }})"
+                            class="px-3 py-1.5 rounded-xl text-[11px] bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700">
+                        {{ group.name }}
+                    </button>
+                    {% endfor %}
+                </div>
+                {% endif %}
                 <div class="bg-slate-900/70 border border-slate-700 rounded-2xl p-3 max-h-48 overflow-y-auto space-y-1">
                     {% for room in rooms %}
                     <label class="flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-slate-800/80 cursor-pointer active:bg-slate-800 transition-colors">
@@ -370,6 +380,20 @@
             if (name === 'parameters') autoChecked.parameters.delete(el.value);
         });
         if (name === 'parameters') saveParameterSelection();
+    };
+
+    const ROOM_GROUPS = {{ groups_json|safe }};
+    window.toggleRoomGroup = function (groupId) {
+        const group = ROOM_GROUPS.find(function (item) { return item.id === groupId; });
+        if (!group) return;
+        const boxes = (group.room_ids || []).map(function (id) {
+            return document.querySelector('input[name="rooms"][value="' + id + '"]');
+        }).filter(Boolean);
+        const allOn = boxes.length > 0 && boxes.every(function (box) { return box.checked; });
+        boxes.forEach(function (box) {
+            box.checked = !allOn;
+            autoChecked.rooms.delete(box.value);
+        });
     };
 
     function normalize(s) {
